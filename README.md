@@ -22,19 +22,18 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 You'll need an **active Qobuz subscription**.
 
 ```sh
-pip3 install --upgrade qobuz-dl
+uv tool install qobuz-dl
 qobuz-dl
 ```
 
-Windows users need one extra dependency before installing:
+On Windows, use the same tool install command and run the `.exe` entry point:
 
 ```sh
-pip3 install windows-curses
-pip3 install --upgrade qobuz-dl
+uv tool install qobuz-dl
 qobuz-dl.exe
 ```
 
-See [Installation](docs/installation.md) for requirements, first-run setup, and reset instructions.
+Use `uv` for installation and local project commands. See [Installation](docs/installation.md) for requirements, first-run setup, and reset instructions.
 
 ## Examples
 
@@ -61,7 +60,7 @@ See [Examples](docs/examples.md) for download mode, Last.fm playlists, interacti
 ## Usage
 
 ```text
-qobuz-dl [-h] [-r] [-p] {fun,dl,lucky} ...
+qobuz-dl [-h] [-r] [-p] [-sc] {fun,dl,lucky} ...
 ```
 
 Commands:
@@ -76,7 +75,7 @@ Run command-level help for detailed options:
 qobuz-dl <command> --help
 ```
 
-See the [CLI reference](docs/cli.md) for the full top-level usage output.
+See the [CLI reference](docs/cli.md) for global options and command descriptions.
 
 ## Documentation
 
@@ -85,11 +84,13 @@ See the [CLI reference](docs/cli.md) for the full top-level usage output.
 * [CLI reference](docs/cli.md)
 * [Module usage](docs/module-usage.md)
 * [Dependencies](docs/dependencies.md)
+* [Development](docs/development.md)
 * [Packaging](docs/packaging.md)
+* [Testing](docs/testing.md)
 
 ## Module usage
 
-`qobuz-dl` can also be used from Python. See [Module usage](docs/module-usage.md).
+`qobuz-dl` can also be imported as a library. See [Module usage](docs/module-usage.md).
 
 ## Credits
 

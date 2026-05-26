@@ -1,9 +1,10 @@
 import configparser
+import glob
 import hashlib
 import logging
-import glob
 import os
 import sys
+from io import StringIO
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
@@ -24,6 +25,28 @@ else:
 CONFIG_PATH = os.path.join(OS_CONFIG, "qobuz-dl")
 CONFIG_FILE = os.path.join(CONFIG_PATH, "config.ini")
 QOBUZ_DB = os.path.join(CONFIG_PATH, "qobuz_dl.db")
+SENSITIVE_CONFIG_KEYS = {
+    "app_id",
+    "email",
+    "password",
+    "private_key",
+    "secrets",
+    "user_auth_token",
+}
+
+
+def _redacted_config_text(config_file):
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    for section in [config.default_section, *config.sections()]:
+        values = config[section]
+        for key in SENSITIVE_CONFIG_KEYS:
+            if key in values:
+                values[key] = "<redacted>"
+
+    buffer = StringIO()
+    config.write(buffer)
+    return buffer.getvalue()
 
 
 def _reset_config(config_file):
@@ -151,9 +174,8 @@ def main():
         sys.exit(_reset_config(CONFIG_FILE))
 
     if arguments.show_config:
-        print(f"Configuation: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
-        with open(CONFIG_FILE, "r") as f:
-            print(f.read())
+        print(f"Configuration: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
+        print(_redacted_config_text(CONFIG_FILE))
         sys.exit()
 
     if arguments.purge:

@@ -1,5 +1,7 @@
 # Examples
 
+These examples assume `qobuz-dl` was installed with `uv tool install qobuz-dl`. From a local checkout, prefix commands with `uv run`, for example `uv run qobuz-dl --help`.
+
 ## Download mode
 
 Download an album URL in 24-bit, sub-96 kHz quality:
@@ -79,12 +81,17 @@ Logging...
 Logged: OK
 Membership: Studio
 
-
+1. Albums
+2. Tracks
+3. Artists
+4. Playlists
+I'll search for [number]: 2
+Ok, we'll search for tracks
 Enter your search: [Ctrl + c to quit]
 - fka twigs magdalene
 ```
 
-`qobuz-dl` displays a list of releases. Choose the releases you want to download.
+`qobuz-dl` displays numbered results. Choose releases with comma-separated numbers and ranges such as `1,3-5`, confirm whether to keep searching, then choose a numbered quality option.
 
 Run this command for all interactive-mode options:
 

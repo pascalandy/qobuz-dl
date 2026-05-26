@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+# Keep the backend range compatible with the current license metadata table
+# while package metadata remains centralized in pyproject.toml.
+requires = ["setuptools>=61,<77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,8 +9,8 @@ name = "qobuz-dl"
 version = "0.9.9.10"
 description = "The complete Lossless and Hi-Res music downloader for Qobuz"
 readme = "README.md"
-requires-python = ">=3.8"
-license = "GPL-3.0-only"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-only" }
 authors = [
   { name = "Vitiko", email = "vhnz98@gmail.com" },
 ]
@@ -17,13 +19,7 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
-  "beautifulsoup4",
-  "colorama",
-  "mutagen",
-  "pathvalidate",
-  "pick==1.6.0",
-  "requests",
-  "tqdm",
+  "mutagen>=1.47,<2",
 ]
 
 [project.urls]
@@ -33,6 +29,26 @@ Repository = "https://github.com/vitiko98/Qobuz-DL"
 [project.scripts]
 qobuz-dl = "qobuz_dl:main"
 qdl = "qobuz_dl:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5",
+  "ruff>=0.12.0",
+]
+
+[tool.ruff]
+cache-dir = ".cache/ruff"
+line-length = 88
+target-version = "py310"
+# Keep the vendored qopy wrapper's legacy CRLF file stable until it is modernized deliberately.
+extend-exclude = ["qobuz_dl/qopy.py"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
 
 [tool.setuptools.packages.find]
 include = ["qobuz_dl*"]

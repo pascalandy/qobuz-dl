@@ -3,7 +3,7 @@ import logging
 import re
 from collections import OrderedDict
 
-from requests import Session
+from qobuz_dl.http import HttpClient
 
 # Modified code based on DashLt's spoofbuz
 
@@ -22,14 +22,11 @@ _BUNDLE_URL_REGEX = re.compile(
 )
 
 _BASE_URL = "https://play.qobuz.com"
-_BUNDLE_URL_REGEX = re.compile(
-    r'<script src="(/resources/\d+\.\d+\.\d+-[a-z]\d{3}/bundle\.js)"></script>'
-)
 
 
 class Bundle:
     def __init__(self):
-        self._session = Session()
+        self._session = HttpClient()
 
         logger.debug("Getting logging page")
         response = self._session.get(f"{_BASE_URL}/login")

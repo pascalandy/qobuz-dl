@@ -1,9 +1,9 @@
-import re
-import os
 import logging
+import os
+import re
 
-from mutagen.flac import FLAC, Picture
 import mutagen.id3 as id3
+from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3NoHeaderError
 
 logger = logging.getLogger(__name__)
@@ -214,7 +214,7 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
 
     tags["year"] = tags["date"][:4]
 
-    audio["TRCK"] = id3.TRCK(encoding=3, text=f'{d["track_number"]}/{tracktotal}')
+    audio["TRCK"] = id3.TRCK(encoding=3, text=f"{d['track_number']}/{tracktotal}")
     audio["TPOS"] = id3.TPOS(encoding=3, text=str(d["media_number"]))
 
     # write metadata in `tags` to file

@@ -1,6 +1,8 @@
 # Module usage
 
-`qobuz-dl` can be used from Python by importing `QobuzDL` from `qobuz_dl.core`.
+`qobuz-dl` can be imported as a library by using `QobuzDL` from `qobuz_dl.core`.
+
+For local development, run scripts through `uv run` so the project environment supplies the dependencies.
 
 ```python
 import logging

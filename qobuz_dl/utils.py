@@ -1,11 +1,11 @@
+import logging
+import os
 import re
 import string
-import os
-import logging
 import time
 
-from mutagen.mp3 import EasyMP3
 from mutagen.flac import FLAC
+from mutagen.mp3 import EasyMP3
 
 logger = logging.getLogger(__name__)
 

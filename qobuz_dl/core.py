@@ -1,28 +1,23 @@
 import logging
 import os
-import sys
+from html.parser import HTMLParser
 
-import requests
-from bs4 import BeautifulSoup as bso
-from pathvalidate import sanitize_filename
-
+from qobuz_dl import downloader, http, qopy
 from qobuz_dl.bundle import Bundle
-from qobuz_dl import downloader, qopy
-from qobuz_dl.color import CYAN, OFF, RED, YELLOW, DF, RESET
-from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.color import CYAN, OFF, RED, RESET, YELLOW
 from qobuz_dl.db import create_db, handle_download_id
+from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.sanitize import sanitize_filename
 from qobuz_dl.utils import (
+    PartialFormatter,
+    create_and_return_dir,
+    format_duration,
     get_url_info,
     make_m3u,
     smart_discography_filter,
-    format_duration,
-    create_and_return_dir,
-    PartialFormatter,
 )
 
 WEB_URL = "https://play.qobuz.com/"
-ARTISTS_SELECTOR = "td.chartlist-artist > a"
-TITLE_SELECTOR = "td.chartlist-name > a"
 QUALITIES = {
     5: "5 - MP3",
     6: "6 - 16 bit, 44.1kHz",
@@ -31,6 +26,111 @@ QUALITIES = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+class LastFmPlaylistParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.title = ""
+        self.artists = []
+        self.titles = []
+        self._capture = None
+        self._in_h1 = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
+        classes = attrs_dict.get("class", "").split()
+        if tag == "h1":
+            self._in_h1 = True
+            self._capture = "h1"
+        elif tag == "td" and "chartlist-artist" in classes:
+            self._capture = "artist-container"
+        elif tag == "td" and "chartlist-name" in classes:
+            self._capture = "title-container"
+        elif tag == "a" and self._capture == "artist-container":
+            self._capture = "artist"
+        elif tag == "a" and self._capture == "title-container":
+            self._capture = "track"
+
+    def handle_endtag(self, tag):
+        if tag == "h1" and self._in_h1:
+            self._in_h1 = False
+            self._capture = None
+        elif tag == "td" and self._capture in {"artist-container", "artist"}:
+            self._capture = None
+        elif tag == "td" and self._capture in {"title-container", "track"}:
+            self._capture = None
+        elif tag == "a" and self._capture in {"artist", "track"}:
+            self._capture = None
+
+    def handle_data(self, data):
+        text = data.strip()
+        if not text:
+            return
+        if self._capture == "h1" and not self.title:
+            self.title = text
+        elif self._capture == "artist":
+            self.artists.append(text)
+        elif self._capture == "track":
+            self.titles.append(text)
+
+
+def _select_one(options, prompt, *, label=str, default_index=None):
+    for index, option in enumerate(options, start=1):
+        default_marker = " [default]" if default_index == index - 1 else ""
+        print(f"{index}. {label(option)}{default_marker}")
+    while True:
+        choice = input(prompt).strip()
+        if not choice and default_index is not None:
+            return options[default_index]
+        try:
+            index = int(choice)
+        except ValueError:
+            print("Enter a number from the list.")
+            continue
+        if 1 <= index <= len(options):
+            return options[index - 1]
+        print("Enter a number from the list.")
+
+
+def _select_many(options, prompt, *, label=str):
+    for index, option in enumerate(options, start=1):
+        print(f"{index}. {label(option)}")
+    while True:
+        raw = input(prompt).strip()
+        if not raw:
+            return []
+        selected = []
+        try:
+            for part in raw.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                if "-" in part:
+                    start, end = [int(value.strip()) for value in part.split("-", 1)]
+                    selected.extend(range(start, end + 1))
+                else:
+                    selected.append(int(part))
+        except ValueError:
+            print("Enter comma-separated numbers or ranges like 1,3-5.")
+            continue
+        if all(1 <= index <= len(options) for index in selected):
+            deduped = []
+            for index in selected:
+                if index not in deduped:
+                    deduped.append(index)
+            return [options[index - 1] for index in deduped]
+        print("Enter numbers from the list.")
+
+
+def _confirm(prompt):
+    while True:
+        answer = input(f"{prompt} [y/N] ").strip().lower()
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"", "n", "no"}:
+            return False
+        print("Enter yes or no.")
 
 
 class QobuzDL:
@@ -48,8 +148,7 @@ class QobuzDL:
         cover_og_quality=False,
         no_cover=False,
         downloads_db=None,
-        folder_format="{artist} - {album} ({year}) [{bit_depth}B-"
-        "{sampling_rate}kHz]",
+        folder_format="{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]",
         track_format="{tracknumber}. {tracktitle}",
         smart_discography=False,
     ):
@@ -104,7 +203,7 @@ class QobuzDL:
             )
             dloader.download_id_by_type(not album)
             handle_download_id(self.downloads_db, item_id, add_id=True)
-        except (requests.exceptions.RequestException, NonStreamable) as e:
+        except (http.HttpError, ConnectionError, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
 
     def handle_url(self, url):
@@ -129,15 +228,14 @@ class QobuzDL:
             type_dict = possibles[url_type]
         except (KeyError, IndexError):
             logger.info(
-                f'{RED}Invalid url: "{url}". Use urls from ' "https://play.qobuz.com!"
+                f'{RED}Invalid url: "{url}". Use urls from https://play.qobuz.com!'
             )
             return
         if type_dict["func"]:
             content = [item for item in type_dict["func"](item_id)]
             content_name = content[0]["name"]
             logger.info(
-                f"{YELLOW}Downloading all the music from {content_name} "
-                f"({url_type})!"
+                f"{YELLOW}Downloading all the music from {content_name} ({url_type})!"
             )
             new_path = create_and_return_dir(
                 os.path.join(self.directory, sanitize_filename(content_name))
@@ -191,8 +289,7 @@ class QobuzDL:
                 logger.error(f"{RED}Invalid text file: {e}")
                 return
             logger.info(
-                f"{YELLOW}qobuz-dl will download {len(urls)}"
-                f" urls from file: {txt_file}"
+                f"{YELLOW}qobuz-dl will download {len(urls)} urls from file: {txt_file}"
             )
             self.download_list_of_urls(urls)
 
@@ -258,7 +355,6 @@ class QobuzDL:
                 fmt = PartialFormatter()
                 text = fmt.format(mode_dict["format"], **i)
                 if mode_dict["requires_extra"]:
-
                     text = "{} - {} [{}]".format(
                         text,
                         format_duration(i["duration"]),
@@ -273,16 +369,6 @@ class QobuzDL:
             return
 
     def interactive(self, download=True):
-        try:
-            from pick import pick
-        except (ImportError, ModuleNotFoundError):
-            if os.name == "nt":
-                sys.exit(
-                    "Please install curses with "
-                    '"pip3 install windows-curses" to continue'
-                )
-            raise
-
         qualities = [
             {"q_string": "320", "q": 5},
             {"q_string": "Lossless", "q": 6},
@@ -290,23 +376,16 @@ class QobuzDL:
             {"q_string": "Hi-Res > 96 kHz", "q": 27},
         ]
 
-        def get_title_text(option):
-            return option.get("text")
-
-        def get_quality_text(option):
-            return option.get("q_string")
-
         try:
             item_types = ["Albums", "Tracks", "Artists", "Playlists"]
-            selected_type = pick(item_types, "I'll search for:\n[press Intro]")[0][
-                :-1
-            ].lower()
-            logger.info(f"{YELLOW}Ok, we'll search for " f"{selected_type}s{RESET}")
+            selected_type = _select_one(
+                item_types,
+                "I'll search for [number]: ",
+            )[:-1].lower()
+            logger.info(f"{YELLOW}Ok, we'll search for {selected_type}s{RESET}")
             final_url_list = []
             while True:
-                query = input(
-                    f"{CYAN}Enter your search: [Ctrl + c to quit]\n" f"-{DF} "
-                )
+                query = input(f"{CYAN}Enter your search: [Ctrl + c to quit]{RESET}\n- ")
                 logger.info(f"{YELLOW}Searching...{RESET}")
                 options = self.search_by_type(
                     query, selected_type, self.interactive_limit
@@ -314,43 +393,37 @@ class QobuzDL:
                 if not options:
                     logger.info(f"{OFF}Nothing found{RESET}")
                     continue
-                title = (
-                    f'*** RESULTS FOR "{query.title()}" ***\n\n'
-                    "Select [space] the item(s) you want to download "
-                    "(one or more)\nPress Ctrl + c to quit\n"
-                    "Don't select anything to try another search"
+                print(
+                    f'*** RESULTS FOR "{query.title()}" ***\n'
+                    "Select item numbers to add to the queue. "
+                    "Use commas and ranges (example: 1,3-5).\n"
+                    "Press Enter without a selection to try another search."
                 )
-                selected_items = pick(
+                selected_items = _select_many(
                     options,
-                    title,
-                    multiselect=True,
-                    min_selection_count=0,
-                    options_map_func=get_title_text,
+                    "Items to download: ",
+                    label=lambda option: option.get("text"),
                 )
-                if len(selected_items) > 0:
-                    [final_url_list.append(i[0]["url"]) for i in selected_items]
-                    y_n = pick(
-                        ["Yes", "No"],
-                        "Items were added to queue to be downloaded. "
-                        "Keep searching?",
-                    )
-                    if y_n[0][0] == "N":
+                if selected_items:
+                    final_url_list.extend(item["url"] for item in selected_items)
+                    if not _confirm(
+                        "Items were added to queue to be downloaded. Keep searching?"
+                    ):
                         break
                 else:
                     logger.info(f"{YELLOW}Ok, try again...{RESET}")
                     continue
             if final_url_list:
-                desc = (
-                    "Select [intro] the quality (the quality will "
-                    "be automatically\ndowngraded if the selected "
-                    "is not found)"
+                print(
+                    "Select the quality (the quality will be automatically "
+                    "downgraded if the selected is not found)."
                 )
-                self.quality = pick(
+                self.quality = _select_one(
                     qualities,
-                    desc,
+                    "Quality [default 2]: ",
                     default_index=1,
-                    options_map_func=get_quality_text,
-                )[0]["q"]
+                    label=lambda option: option.get("q_string"),
+                )["q"]
 
                 if download:
                     self.download_list_of_urls(final_url_list)
@@ -364,13 +437,14 @@ class QobuzDL:
         # Apparently, last fm API doesn't have a playlist endpoint. If you
         # find out that it has, please fix this!
         try:
-            r = requests.get(playlist_url, timeout=10)
-        except requests.exceptions.RequestException as e:
+            html = http.get_text(playlist_url, timeout=10)
+        except http.HttpError as e:
             logger.error(f"{RED}Playlist download failed: {e}")
             return
-        soup = bso(r.content, "html.parser")
-        artists = [artist.text for artist in soup.select(ARTISTS_SELECTOR)]
-        titles = [title.text for title in soup.select(TITLE_SELECTOR)]
+        parser = LastFmPlaylistParser()
+        parser.feed(html)
+        artists = parser.artists
+        titles = parser.titles
 
         track_list = []
         if len(artists) == len(titles) and artists:
@@ -382,10 +456,10 @@ class QobuzDL:
             logger.info(f"{OFF}Nothing found")
             return
 
-        pl_title = sanitize_filename(soup.select_one("h1").text)
+        pl_title = sanitize_filename(parser.title)
         pl_directory = os.path.join(self.directory, pl_title)
         logger.info(
-            f"{YELLOW}Downloading playlist: {pl_title} " f"({len(track_list)} tracks)"
+            f"{YELLOW}Downloading playlist: {pl_title} ({len(track_list)} tracks)"
         )
 
         for i in track_list:

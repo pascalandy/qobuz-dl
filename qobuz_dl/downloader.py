@@ -2,13 +2,11 @@ import logging
 import os
 from typing import Tuple
 
-import requests
-from pathvalidate import sanitize_filename, sanitize_filepath
-from tqdm import tqdm
-
+import qobuz_dl.http as http
 import qobuz_dl.metadata as metadata
-from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN
+from qobuz_dl.color import CYAN, GREEN, OFF, RED, YELLOW
 from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.sanitize import sanitize_filename, sanitize_filepath
 
 QL_DOWNGRADE = "FormatRestrictedByFormatAvailability"
 # used in case of error
@@ -73,7 +71,7 @@ class Download:
             meta.get("release_type") != "album"
             or meta.get("artist").get("name") == "Various Artists"
         ):
-            logger.info(f'{OFF}Ignoring Single/EP/VA: {meta.get("title", "n/a")}')
+            logger.info(f"{OFF}Ignoring Single/EP/VA: {meta.get('title', 'n/a')}")
             return
 
         album_title = _get_title(meta)
@@ -301,35 +299,20 @@ class Download:
                 new_track_dict["bit_depth"],
                 new_track_dict["sampling_rate"],
             )
-        except (KeyError, requests.exceptions.HTTPError):
+        except (KeyError, http.HttpError):
             return ("Unknown", quality_met, None, None)
 
 
 def tqdm_download(url, fname, desc):
-    r = requests.get(url, allow_redirects=True, stream=True)
-    total = int(r.headers.get("content-length", 0))
-    download_size = 0
-    with open(fname, "wb") as file, tqdm(
-        total=total,
-        unit="iB",
-        unit_scale=True,
-        unit_divisor=1024,
-        desc=desc,
-        bar_format=CYAN + "{n_fmt}/{total_fmt} /// {desc}",
-    ) as bar:
-        for data in r.iter_content(chunk_size=1024):
-            size = file.write(data)
-            bar.update(size)
-            download_size += size
+    def show_progress(size, downloaded, total):
+        if total:
+            logger.info(f"{CYAN}{downloaded}/{total} /// {desc}")
 
-    if total != download_size:
-        # https://stackoverflow.com/questions/69919912/requests-iter-content-thinks-file-is-complete-but-its-not
-        raise ConnectionError("File download was interrupted for " + fname)
+    http.stream_download(url, fname, progress=show_progress)
 
 
 def _get_description(item: dict, track_title, multiple=None):
-    downloading_title = f"{track_title} "
-    f'[{item["bit_depth"]}/{item["sampling_rate"]}]'
+    downloading_title = f"{track_title} [{item['bit_depth']}/{item['sampling_rate']}]"
     if multiple:
         downloading_title = f"[Disc {multiple}] {downloading_title}"
     return downloading_title

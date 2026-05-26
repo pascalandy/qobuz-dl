@@ -6,8 +6,7 @@ import hashlib
 import logging
 import time
 
-import requests
-
+from qobuz_dl.http import HttpClient
 from qobuz_dl.exceptions import (
     AuthenticationError,
     IneligibleError,
@@ -27,7 +26,7 @@ class Client:
         logger.info(f"{YELLOW}Logging...")
         self.secrets = secrets
         self.id = str(app_id)
-        self.session = requests.Session()
+        self.session = HttpClient()
         self.session.headers.update(
             {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0",
