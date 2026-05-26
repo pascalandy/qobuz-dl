@@ -1,4 +1,6 @@
-from qobuz_dl.cli import _redacted_config_text
+import pytest
+
+from qobuz_dl.cli import _quality_fallback_enabled, _redacted_config_text
 from qobuz_dl.commands import qobuz_dl_args
 
 
@@ -30,7 +32,7 @@ def test_parser_accepts_download_command_with_common_options():
 
     assert args.command == "dl"
     assert args.SOURCE == ["https://play.qobuz.com/album/example"]
-    assert args.quality == "27"
+    assert args.quality == 27
     assert args.directory == "Music"
     assert args.no_db is True
 
@@ -41,7 +43,7 @@ def test_parser_accepts_interactive_command_limit():
     args = parser.parse_args(["fun", "--limit", "5"])
 
     assert args.command == "fun"
-    assert args.limit == "5"
+    assert args.limit == 5
 
 
 def test_parser_accepts_lucky_command_query_and_type():
@@ -54,7 +56,58 @@ def test_parser_accepts_lucky_command_query_and_type():
     assert args.command == "lucky"
     assert args.QUERY == ["joy", "division"]
     assert args.type == "artist"
-    assert args.number == "2"
+    assert args.number == 2
+
+
+def test_top_level_help_is_complete_and_agent_readable(capsys):
+    parser = qobuz_dl_args()
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--help"])
+
+    output = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert "Download and organize Qobuz music" in output
+    assert "qobuz-dl dl https://play.qobuz.com/album" in output
+    assert "download Qobuz/Last.fm URLs or URLs from a text file" in output
+    assert "interactively search Qobuz and queue downloads" in output
+    assert "search Qobuz and download the first matching results" in output
+    assert "--version" in output
+    assert "--show-config" in output
+
+
+def test_subcommand_help_documents_supported_inputs_and_flags(capsys):
+    parser = qobuz_dl_args()
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["dl", "--help"])
+
+    output = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert "Qobuz album/track/artist/label/playlist URLs" in output
+    assert "Last.fm playlist URLs" in output
+    assert "local text files containing one URL per line" in output
+    assert "audio quality: 5=MP3 320" in output
+    assert "disable duplicate tracking for this run" in output
+    assert "folder naming pattern" in output
+
+
+def test_version_flag_exits_successfully(capsys):
+    parser = qobuz_dl_args()
+
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--version"])
+
+    output = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert output.startswith("qobuz-dl ")
+
+
+def test_quality_fallback_is_disabled_by_flag_or_config():
+    assert _quality_fallback_enabled(False, False) is True
+    assert _quality_fallback_enabled(True, False) is False
+    assert _quality_fallback_enabled(False, True) is False
+    assert _quality_fallback_enabled(True, True) is False
 
 
 def test_show_config_redacts_sensitive_values(tmp_path):

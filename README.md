@@ -16,6 +16,7 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 * Support for M3U playlists
 * Download URLs from a text file
 * Extended tags
+* Hardened dependency footprint: this fork removed the original runtime dependencies on `beautifulsoup4`, `colorama`, `pathvalidate`, `pick`, `requests`, and `tqdm`; only `mutagen` remains for audio metadata. See [Dependencies](docs/dependencies.md) for details.
 
 ## Quick start
 
@@ -60,14 +61,14 @@ See [Examples](docs/examples.md) for download mode, Last.fm playlists, interacti
 ## Usage
 
 ```text
-qobuz-dl [-h] [-r] [-p] [-sc] {fun,dl,lucky} ...
+qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
 ```
 
 Commands:
 
-* `fun` — interactive mode
-* `dl` — input/download mode
-* `lucky` — lucky mode
+* `fun` — interactively search Qobuz and queue downloads
+* `dl` — download Qobuz/Last.fm URLs or URLs from a text file
+* `lucky` — search Qobuz and download the first matching results
 
 Run command-level help for detailed options:
 

@@ -77,6 +77,34 @@ def test_interactive_builtin_prompts_return_selected_urls_without_download(
     assert "Items to download" in prompts[2]
 
 
+def test_interactive_quality_prompt_defaults_to_current_quality(tmp_path, monkeypatch):
+    answers = iter(
+        [
+            "1",  # Albums
+            "alpha beta",
+            "1",
+            "n",
+            "",  # accept current quality default
+        ]
+    )
+    prompts = []
+
+    def fake_input(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    qdl = QobuzDL(directory=tmp_path, quality=27, interactive_limit=1)
+    qdl.search_by_type = lambda query, item_type, limit: [
+        {"text": f"{query} result", "url": "https://play.qobuz.com/album/123"}
+    ]
+
+    assert qdl.interactive(download=False) == ["https://play.qobuz.com/album/123"]
+    assert qdl.quality == 27
+    assert "Quality [default 4]" in prompts[-1]
+
+
 def test_interactive_multiselect_accepts_commas_and_ranges(tmp_path, monkeypatch):
     answers = iter(["2", "alpha beta", "1,3-4", "n", "2"])
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))

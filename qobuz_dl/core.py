@@ -418,10 +418,19 @@ class QobuzDL:
                     "Select the quality (the quality will be automatically "
                     "downgraded if the selected is not found)."
                 )
+                current_quality = int(self.quality)
+                default_quality_index = next(
+                    (
+                        index
+                        for index, quality in enumerate(qualities)
+                        if quality["q"] == current_quality
+                    ),
+                    1,
+                )
                 self.quality = _select_one(
                     qualities,
-                    "Quality [default 2]: ",
-                    default_index=1,
+                    f"Quality [default {default_quality_index + 1}]: ",
+                    default_index=default_quality_index,
                     label=lambda option: option.get("q_string"),
                 )["q"]
 

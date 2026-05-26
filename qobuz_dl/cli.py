@@ -91,6 +91,10 @@ def _reset_config(config_file):
     )
 
 
+def _quality_fallback_enabled(cli_no_fallback, config_no_fallback):
+    return not (cli_no_fallback or config_no_fallback)
+
+
 def _remove_leftovers(directory):
     directory = os.path.join(directory, "**", ".*.tmp")
     for i in glob.glob(directory, recursive=True):
@@ -124,6 +128,10 @@ def _handle_commands(qobuz, arguments):
 
 
 def _initial_checks():
+    # Help and version must be available without prompting for config setup.
+    if any(arg in {"-h", "--help", "--version"} for arg in sys.argv[1:]):
+        return
+
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
         os.makedirs(CONFIG_PATH, exist_ok=True)
         _reset_config(CONFIG_FILE)
@@ -191,7 +199,7 @@ def main():
         arguments.embed_art or embed_art,
         ignore_singles_eps=arguments.albums_only or albums_only,
         no_m3u_for_playlists=arguments.no_m3u or no_m3u,
-        quality_fallback=not arguments.no_fallback or not no_fallback,
+        quality_fallback=_quality_fallback_enabled(arguments.no_fallback, no_fallback),
         cover_og_quality=arguments.og_cover or og_cover,
         no_cover=arguments.no_cover or no_cover,
         downloads_db=None if no_database or arguments.no_db else QOBUZ_DB,

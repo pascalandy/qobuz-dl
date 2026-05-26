@@ -19,20 +19,42 @@ Later dependency removals require characterization tests first. Default tests mu
 
 ## Dependency inventory
 
+The dependency-hardening work reduced the fork from the original runtime set of seven direct dependencies to one retained runtime dependency. The current minimal runtime install only requires `mutagen`; the removed dependencies have project-owned replacements covered by tests.
+
 | Dependency | Declared version | Current path | Used for | Main import sites |
 |---|---:|---|---|---|
 | `mutagen` | `>=1.47,<2` | Pin and audit; retained intentionally | Read and write FLAC and MP3 metadata | `qobuz_dl/metadata.py`, `qobuz_dl/utils.py` |
 
-## Removed dependency replacements
+Current runtime tree:
 
-| Removed dependency | Replacement |
-|---|---|
-| `colorama` | Project-owned ANSI string constants in `qobuz_dl/color.py` |
-| `pathvalidate` | Project-owned generated-name sanitizer in `qobuz_dl/sanitize.py` |
-| `tqdm` | Narrow project-owned progress logging around streamed downloads |
-| `pick` | Built-in numbered prompts, comma/range multiselect, yes/no confirmation, and quality choice in `qobuz_dl/core.py` |
-| `beautifulsoup4` | Small `html.parser`-based Last.fm playlist extractor in `qobuz_dl/core.py`, covered by fixtures |
-| `requests` | Project-owned stdlib `urllib` HTTP boundary in `qobuz_dl/http.py` for JSON API calls, text fetches, and streamed downloads |
+```text
+qobuz-dl
+└── mutagen 1.47.0
+```
+
+## Dependency hardening versus the original fork
+
+Earlier project versions declared these direct runtime dependencies:
+
+- `beautifulsoup4`
+- `colorama`
+- `mutagen`
+- `pathvalidate`
+- `pick==1.6.0`
+- `requests`
+- `tqdm`
+
+This fork now removes every item in that list except `mutagen`. The net effect is a smaller install, fewer transitive packages, less exposure to abandoned-upstream dependency drift, and clearer ownership of behavior that is small enough for this project to maintain directly.
+
+| Original dependency | Current status | Replacement / rationale |
+|---|---|---|
+| `beautifulsoup4` | Removed | Small `html.parser`-based Last.fm playlist extractor in `qobuz_dl/core.py`, covered by fixtures |
+| `colorama` | Removed | Project-owned ANSI string constants in `qobuz_dl/color.py` |
+| `pathvalidate` | Removed | Project-owned generated-name sanitizer in `qobuz_dl/sanitize.py` |
+| `pick==1.6.0` | Removed | Built-in numbered prompts, comma/range multiselect, yes/no confirmation, and quality choice in `qobuz_dl/core.py` |
+| `requests` | Removed | Project-owned stdlib `urllib` HTTP boundary in `qobuz_dl/http.py` for JSON API calls, text fetches, and streamed downloads |
+| `tqdm` | Removed | Narrow project-owned progress logging around streamed downloads |
+| `mutagen` | Retained | Specialized audio metadata dependency, pinned and audited as `mutagen>=1.47,<2` |
 
 ## Active dependency role
 
@@ -44,6 +66,25 @@ Later dependency removals require characterization tests first. Default tests mu
 - `qobuz_dl/utils.py` reads metadata from MP3 and FLAC files
 
 `mutagen` remains external by design. Keep the bounded range `mutagen>=1.47,<2`, keep it visible in dependency audits, and avoid replacing, forking, or vendoring it without a dedicated metadata architecture review.
+
+### Upstream release watch
+
+The latest published Mutagen release on PyPI and GitHub Releases is `1.47.0`, published on 2023-09-03. That is why the current lockfile resolves `mutagen 1.47.0`.
+
+Mutagen's upstream `main` branch has continued receiving maintenance after `1.47.0`. As of the last review, upstream `main` includes post-release work for packaging, CI, Python-version support, documentation, and audio-format fixes such as ID3, MP3, Ogg, and Ogg Opus changes. Its `NEWS` file starts an unreleased `1.48.0` section, while `pyproject.toml` currently reports `version = "1.47.1"`; verify the final release number from GitHub Releases and PyPI when upstream publishes the next package.
+
+The next Mutagen release should be treated as an intentional audit point, not an automatic background update:
+
+1. Check PyPI and GitHub Releases for the published version and changelog.
+2. Confirm upstream Python support still matches this project. Upstream `main` currently declares `requires-python = ">=3.10, <4"`, which aligns with this project's `requires-python = ">=3.10"` baseline.
+3. Review metadata-adjacent changes for FLAC, MP3, ID3, embedded artwork, and tag saving behavior.
+4. Refresh `uv.lock` only after the audit, then run `just ci`.
+
+Until that review happens, keep the current bounded dependency declaration:
+
+```text
+mutagen>=1.47,<2
+```
 
 ## Project-owned replacement roles
 
