@@ -1,81 +1,63 @@
-We are working in my fork of `qobuz-dl` at:
+# AGENTS.md — qobuz-dl fork
 
+We are working in the local fork at:
+
+```text
 /Users/andy16/Documents/github_local/qobuz-dl
+```
 
-Important repo context:
+## Agent operating contract
+
 - This is a Python CLI project for downloading/searching Qobuz music.
-- Use `uv` by default for all Python/project commands.
-- Do NOT use `pip`, `pip3`, direct `python`, or `python3` as the documented/default workflow.
-- Local dev commands should use `uv run ...`.
-- Global/prod CLI may exist at `/Users/andy16/.local/bin/qobuz-dl`; avoid confusing it with the local checkout.
-- For the local fork, use:
-  - `uv run qobuz-dl ...`
-  - or shell alias `qdl-dev`, defined in chezmoi managed zsh config
+- Use `uv` by default for Python/project commands.
+- Do not document or default to `pip`, `pip3`, or bare `python`/`python3` workflows outside `uv`.
+- Run local project entry points through `uv run ...`, especially `uv run qobuz-dl ...`.
+- A global/prod CLI may exist at `/Users/andy16/.local/bin/qobuz-dl`; do not confuse it with this checkout.
+- Before finishing implementation, tooling, packaging, or docs changes, run `just ci` unless explicitly blocked.
 
-Chezmoi/dotfiles context:
-- My shell config is managed with Chezmoi.
-- Do not edit `~/.zshrc` directly.
-- Source of truth is:
-  `/Users/andy16/.local/share/chezmoi/dot_zshrc`
-- The dev alias is:
-  `alias qdl-dev='cd "$HOME/Documents/github_local/qobuz-dl" && uv run qobuz-dl'`
+## Local development pointers
 
-Current tooling foundation:
-- `pyproject.toml` contains project metadata, dev dependencies, Ruff config, and Pytest config.
-- `uv.lock` is committed and should stay in sync.
-- `justfile` provides local commands:
-  - `just sync`
-  - `just fmt`
-  - `just fmt-check`
-  - `just lint`
-  - `just lint-fix`
-  - `just test`
-  - `just smoke`
-  - `just build`
-  - `just ci`
-- CI is in `.github/workflows/ci.yml`.
-- CI runs on `master` and `main`, Python `3.10` and `3.13`.
-- CI uses `uv`, Ruff, Pytest, CLI smoke test, and `uv build`.
+Canonical details live in [`docs/development.md`](docs/development.md).
 
-Quality rules:
-- Before finishing implementation, run `just ci`.
-- Do not add tests that require Qobuz credentials, active subscription, live Qobuz API, live Last.fm pages, or real media downloads by default.
-- Network behavior should be mocked.
-- Live API/download checks should be opt-in integration tests only.
+- Local fork command: `uv run qobuz-dl ...`
+- Optional shell alias: `qdl-dev`
+- The `qdl-dev` alias and shell config are Chezmoi-managed.
+- Do not edit `~/.zshrc` directly; edit `/Users/andy16/.local/share/chezmoi/dot_zshrc` if shell config changes are needed.
 
-Docs structure:
+## Testing and quality rules
+
+Canonical details live in [`docs/testing.md`](docs/testing.md).
+
+- Main proof gate: `just ci`
+- Common commands are exposed by the `justfile` (`just test`, `just lint`, `just fmt-check`, `just smoke`, `just build`, etc.).
+- Default tests must not require Qobuz credentials, an active subscription, live Qobuz API calls, live Last.fm pages, or real media downloads.
+- Mock network behavior by default.
+- Live API/download checks must be opt-in integration tests only.
+
+## Packaging and dependency rules
+
+Canonical packaging details live in [`docs/packaging.md`](docs/packaging.md).
+Canonical dependency policy and inventory live in [`docs/dependencies.md`](docs/dependencies.md).
+
+- Package metadata, dependencies, entry points, and package discovery belong in `pyproject.toml`.
+- `setup.py` is intentionally minimal; do not reintroduce duplicate metadata there.
+- `uv.lock` is committed and should stay in sync with dependency/metadata changes.
+- Keep `requirements.txt` synchronized while it exists.
+- Current runtime dependency policy intentionally keeps `mutagen>=1.47,<2` as the retained pinned/audited dependency.
+- `qobuz_dl/http.py` is the production HTTP boundary; do not bypass it for new network behavior.
+
+## Documentation rules
+
+Documentation map: [`docs/INDEX.md`](docs/INDEX.md).
+
 - `README.md` is the concise front door.
-- Detailed docs live under `/docs`:
-  - `docs/INDEX.md`
-  - `docs/installation.md`
-  - `docs/examples.md`
-  - `docs/cli.md`
-  - `docs/module-usage.md`
-  - `docs/dependencies.md`
-  - `docs/development.md`
-  - `docs/packaging.md`
-  - `docs/testing.md`
-- Keep docs updated when behavior/tooling changes.
-- Use `pa-doc-update` if docs are impacted by a change.
+- Detailed docs live under `docs/`.
+- Keep docs updated when behavior, tooling, packaging, or dependency policy changes.
+- Use `pa-doc-update` when docs are impacted by an implementation change.
 
-Packaging notes:
-- `setup.py` is intentionally minimal:
-  `from setuptools import setup`
-  `setup()`
-- Package metadata lives in `pyproject.toml`.
-- Build backend is setuptools with `setuptools>=61,<77` for accepted license metadata.
-- `uv build` must pass.
+## Start checklist
 
-Recent important decisions:
-- README was decoupled into focused docs.
-- Installation docs now use `uv tool install qobuz-dl`.
-- Development docs explain global/prod CLI vs local fork workflow.
-- Testing foundation was added with Ruff, Pytest, Just, CI, and smoke/build checks.
-- `.gitignore` ignores local downloads, macOS files, Python caches, `.venv`, `.cache`, `.pytest_cache`, coverage, `build`, and `dist`.
-
-Start by checking:
-1. `git status --short`
-2. relevant files for the task
-3. run `just ci` before finalizing code/tooling changes
-
-Please continue from this context and keep the work clean, minimal, and production-quality.
+1. Run `git status --short`.
+2. Read the relevant files and docs for the task.
+3. Keep changes minimal and production-quality.
+4. Run `just ci` before finalizing code/tooling changes, unless blocked and reported.
