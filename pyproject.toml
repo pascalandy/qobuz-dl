@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qobuz-dl"
+version = "0.9.9.10"
+description = "The complete Lossless and Hi-Res music downloader for Qobuz"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "GPL-3.0-only"
+authors = [
+  { name = "Vitiko", email = "vhnz98@gmail.com" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "beautifulsoup4",
+  "colorama",
+  "mutagen",
+  "pathvalidate",
+  "pick==1.6.0",
+  "requests",
+  "tqdm",
+]
+
+[project.urls]
+Homepage = "https://github.com/vitiko98/Qobuz-DL"
+Repository = "https://github.com/vitiko98/Qobuz-DL"
+
+[project.scripts]
+qobuz-dl = "qobuz_dl:main"
+qdl = "qobuz_dl:main"
+
+[tool.setuptools.packages.find]
+include = ["qobuz_dl*"]
