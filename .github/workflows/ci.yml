@@ -5,6 +5,10 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,11 +33,16 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: uv sync --dev --frozen --python ${{ matrix.python-version }}
+
+      - name: Show tool versions
+        run: |
+          uv --version
+          uv run python --version
 
       - name: Check formatting
         run: uv run ruff format --check .
@@ -49,3 +58,11 @@ jobs:
 
       - name: Build package
         run: uv build
+
+      - name: Upload package artifacts
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qobuz-dl-dist
+          path: dist/*
+          if-no-files-found: error

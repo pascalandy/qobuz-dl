@@ -1,6 +1,6 @@
 # AGENTS.md — qobuz-dl fork
 
-We are working in the local fork at:
+Local fork:
 
 ```text
 /Users/andy16/Documents/github_local/qobuz-dl
@@ -8,56 +8,56 @@ We are working in the local fork at:
 
 ## Agent operating contract
 
-- This is a Python CLI project for downloading/searching Qobuz music.
-- Use `uv` by default for Python/project commands.
-- Do not document or default to `pip`, `pip3`, or bare `python`/`python3` workflows outside `uv`.
-- Run local project entry points through `uv run ...`, especially `uv run qobuz-dl ...`.
-- A global/prod CLI may exist at `/Users/andy16/.local/bin/qobuz-dl`; do not confuse it with this checkout.
-- Before finishing implementation, tooling, packaging, or docs changes, run `just ci` unless explicitly blocked.
+- Python CLI for Qobuz download/search
+- Use `uv` by default for Python/project cmds
+- Do not doc/default to `pip`, `pip3`, bare `python`/`python3` outside `uv`
+- Run local entry pts via `uv run ...`, esp. `uv run qobuz-dl ...`
+- Global/prod CLI may exist at `/Users/andy16/.local/bin/qobuz-dl`; do not confuse w/ checkout
+- Before finishing impl/tooling/packaging/docs changes, run `just ci` unless blocked
 
 ## Local development pointers
 
-Canonical details live in [`docs/development.md`](docs/development.md).
+Canonical details: [`docs/development.md`](docs/development.md)
 
-- Local fork command: `uv run qobuz-dl ...`
+- Local fork cmd: `uv run qobuz-dl ...`
 - Optional shell alias: `qdl-dev`
-- The `qdl-dev` alias and shell config are Chezmoi-managed.
-- Do not edit `~/.zshrc` directly; edit `/Users/andy16/.local/share/chezmoi/dot_zshrc` if shell config changes are needed.
+- `qdl-dev` alias + shell config are Chezmoi-managed
+- Do not edit `~/.zshrc` directly; edit `/Users/andy16/.local/share/chezmoi/dot_zshrc` if shell config changes needed
 
 ## Testing and quality rules
 
-Canonical details live in [`docs/testing.md`](docs/testing.md).
+Canonical details: [`docs/testing.md`](docs/testing.md)
 
 - Main proof gate: `just ci`
-- Common commands are exposed by the `justfile` (`just test`, `just lint`, `just fmt-check`, `just smoke`, `just build`, etc.).
-- Default tests must not require Qobuz credentials, an active subscription, live Qobuz API calls, live Last.fm pages, or real media downloads.
-- Mock network behavior by default.
-- Live API/download checks must be opt-in integration tests only.
+- Common cmds in `justfile` (`just test`, `just lint`, `just fmt-check`, `just smoke`, `just build`, etc.)
+- Default tests must not need Qobuz creds, active subscription, live Qobuz API, live Last.fm pages, or real media downloads
+- Mock network by default
+- Live API/download checks = opt-in integration tests only
 
 ## Packaging and dependency rules
 
-Canonical packaging details live in [`docs/packaging.md`](docs/packaging.md).
-Canonical dependency policy and inventory live in [`docs/dependencies.md`](docs/dependencies.md).
+Canonical packaging: [`docs/packaging.md`](docs/packaging.md)
+Canonical dependency policy/inventory: [`docs/dependencies.md`](docs/dependencies.md)
 
-- Package metadata, dependencies, entry points, and package discovery belong in `pyproject.toml`.
-- `setup.py` is intentionally minimal; do not reintroduce duplicate metadata there.
-- `uv.lock` is committed and should stay in sync with dependency/metadata changes.
-- Keep `requirements.txt` synchronized while it exists.
-- Current runtime dependency policy intentionally keeps `mutagen>=1.47,<2` as the retained pinned/audited dependency.
-- `qobuz_dl/http.py` is the production HTTP boundary; do not bypass it for new network behavior.
+- Package metadata, deps, entry pts, package discovery belong in `pyproject.toml`
+- `setup.py` intentionally minimal; do not re-add duplicate metadata
+- `uv.lock` committed; keep synced w/ dep/metadata changes
+- Keep `requirements.txt` synced while it exists
+- Runtime dep policy keeps `mutagen>=1.47,<2` as retained pinned/audited dep
+- `qobuz_dl/http.py` is prod HTTP boundary; do not bypass for new network behavior
 
 ## Documentation rules
 
-Documentation map: [`docs/INDEX.md`](docs/INDEX.md).
+Doc map: [`docs/INDEX.md`](docs/INDEX.md)
 
-- `README.md` is the concise front door.
-- Detailed docs live under `docs/`.
-- Keep docs updated when behavior, tooling, packaging, or dependency policy changes.
-- Use `pa-doc-update` when docs are impacted by an implementation change.
+- `README.md` = concise front door
+- Detailed docs under `docs/`
+- Update docs when behavior/tooling/packaging/dep policy changes
+- Use `pa-doc-update` when docs impacted by impl change
 
 ## Start checklist
 
-1. Run `git status --short`.
-2. Read the relevant files and docs for the task.
-3. Keep changes minimal and production-quality.
-4. Run `just ci` before finalizing code/tooling changes, unless blocked and reported.
+1. Run `git status --short`
+2. Read relevant files/docs for task
+3. Keep changes minimal + production-quality
+4. Run `just ci` before finalizing code/tooling changes, unless blocked + reported

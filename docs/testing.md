@@ -45,6 +45,14 @@ just smoke
 just build
 ```
 
+## GitHub Actions CI/CD
+
+GitHub Actions runs the CI gate on pushes and pull requests to `master`/`main`. Maintainers can also start the workflow manually with `workflow_dispatch`.
+
+The CI matrix runs on Python 3.10, the minimum supported runtime, and Python 3.13, the latest target currently used by the project. Each matrix job installs dependencies with `uv sync --dev --frozen`, then runs formatting, linting, tests, CLI smoke checks, and the package build.
+
+The workflow uses read-only repository permissions. The Python 3.13 job uploads the built `dist/` files as the `qobuz-dl-dist` artifact for release/download inspection.
+
 Apply formatting:
 
 ```sh
@@ -99,8 +107,6 @@ Network behavior should be tested with mocks. Live API or download tests should 
 Small readable static fixtures live under `tests/fixtures/`. Characterization tests should pair those fixtures with local fakes or `monkeypatch` so references to Last.fm, Qobuz, or media URLs never perform live network calls in the default suite.
 
 HTTP-adjacent tests should prefer local fake response/session classes that implement only the behavior under test, such as `json()`, `raise_for_status()`, `headers`, `read()`, or context-manager entry and exit. Interactive tests should use built-in prompt/input fakes instead of requiring a real terminal or manual input.
-
-The CI matrix runs on Python 3.10, the minimum supported runtime, and Python 3.13, the latest target currently used by the project.
 
 The CI and local `just ci` gate also build the package. This catches packaging metadata errors that import and CLI tests can miss.
 
