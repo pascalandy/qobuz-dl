@@ -104,6 +104,11 @@ def test_get_maps_url_error_to_http_request_error(monkeypatch):
         http.get("https://api.example.test/unavailable")
 
 
+def test_get_maps_malformed_url_to_http_request_error():
+    with pytest.raises(http.HttpRequestError, match="unknown url type"):
+        http.get("www.last.fm/user/example/library/playlists/1")
+
+
 def test_stream_download_writes_chunks_calls_progress_and_returns_byte_count(
     tmp_path, monkeypatch
 ):
@@ -141,6 +146,15 @@ def test_stream_download_writes_chunks_calls_progress_and_returns_byte_count(
     assert target.read_bytes() == b"abcdef"
     assert progress_calls == [(2, 2, 6), (2, 4, 6), (2, 6, 6)]
     assert byte_count == 6
+
+
+def test_stream_download_maps_malformed_url_to_http_request_error(tmp_path):
+    target = tmp_path / "track.flac"
+
+    with pytest.raises(http.HttpRequestError, match="unknown url type"):
+        http.stream_download("media.example.test/track.flac", target)
+
+    assert not target.exists()
 
 
 def test_stream_download_succeeds_when_content_length_is_missing(tmp_path, monkeypatch):

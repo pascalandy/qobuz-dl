@@ -94,6 +94,35 @@ def test_tqdm_download_writes_streamed_content(tmp_path, monkeypatch):
     assert target.read_bytes() == b"abcdef"
 
 
+def test_tqdm_download_throttles_progress_logging(tmp_path, monkeypatch, caplog):
+    target = tmp_path / "track.flac.tmp"
+
+    def fake_stream_download(url, target_path, *, progress=None):
+        target_path.write_bytes(b"x" * 2048)
+        if progress is not None:
+            progress(1024, 1024, 2 * 1024 * 1024)
+            progress(1024, 2048, 2 * 1024 * 1024)
+            progress(1024 * 1024 - 2048, 1024 * 1024, 2 * 1024 * 1024)
+            progress(1024 * 1024, 2 * 1024 * 1024, 2 * 1024 * 1024)
+        return 2048
+
+    monkeypatch.setattr(
+        "qobuz_dl.downloader.http.stream_download", fake_stream_download
+    )
+    caplog.set_level("INFO", logger="qobuz_dl.downloader")
+
+    tqdm_download("https://media.example.test/file", target, "track")
+
+    assert [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "qobuz_dl.downloader"
+    ] == [
+        "\x1b[36m1048576/2097152 /// track\x1b[0m",
+        "\x1b[36m2097152/2097152 /// track\x1b[0m",
+    ]
+
+
 def test_tqdm_download_raises_connection_error_when_stream_is_short(
     tmp_path, monkeypatch
 ):

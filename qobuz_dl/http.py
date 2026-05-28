@@ -65,8 +65,8 @@ def get(
     headers: Mapping[str, str] | None = None,
     timeout=DEFAULT_TIMEOUT,
 ) -> HttpResponse:
-    request = Request(_url_with_params(url, params), headers=dict(headers or {}))
     try:
+        request = Request(_url_with_params(url, params), headers=dict(headers or {}))
         with urlopen(request, timeout=timeout) as response:
             return HttpResponse(
                 status_code=getattr(response, "status", response.getcode()),
@@ -82,6 +82,8 @@ def get(
     except URLError as exc:
         raise HttpRequestError(str(exc.reason)) from exc
     except OSError as exc:
+        raise HttpRequestError(str(exc)) from exc
+    except ValueError as exc:
         raise HttpRequestError(str(exc)) from exc
 
 
@@ -106,8 +108,8 @@ def stream_download(
     chunk_size=1024,
     progress=None,
 ) -> int:
-    request = Request(url, headers=dict(headers or {}))
     try:
+        request = Request(url, headers=dict(headers or {}))
         with urlopen(request, timeout=timeout) as response, open(target, "wb") as file:
             status = getattr(response, "status", response.getcode())
             if status >= 400:
@@ -131,6 +133,8 @@ def stream_download(
     except URLError as exc:
         raise HttpRequestError(str(exc.reason)) from exc
     except OSError as exc:
+        raise HttpRequestError(str(exc)) from exc
+    except ValueError as exc:
         raise HttpRequestError(str(exc)) from exc
 
     if total is not None and total != downloaded:

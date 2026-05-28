@@ -23,6 +23,7 @@ DEFAULT_FORMATS = {
 
 DEFAULT_FOLDER = "{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
 DEFAULT_TRACK = "{tracknumber}. {tracktitle}"
+PROGRESS_MIN_INTERVAL_BYTES = 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -304,9 +305,18 @@ class Download:
 
 
 def tqdm_download(url, fname, desc):
+    next_report = PROGRESS_MIN_INTERVAL_BYTES
+
     def show_progress(size, downloaded, total):
-        if total:
+        nonlocal next_report
+        if not total:
+            return
+        report_interval = PROGRESS_MIN_INTERVAL_BYTES
+        report_interval = max(total // 100, PROGRESS_MIN_INTERVAL_BYTES)
+        if downloaded >= next_report or downloaded >= total:
             logger.info(f"{CYAN}{downloaded}/{total} /// {desc}")
+            while next_report <= downloaded:
+                next_report += report_interval
 
     http.stream_download(url, fname, progress=show_progress)
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from qobuz_dl import http
 from qobuz_dl.core import QobuzDL
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -68,3 +69,19 @@ def test_lastfm_playlist_with_no_usable_track_list_does_not_search_or_download(
     assert search_calls == []
     assert downloads == []
     assert m3u_paths == []
+
+
+def test_lastfm_playlist_request_errors_do_not_escape(tmp_path, monkeypatch):
+    search_calls = []
+
+    def fake_get_text(url, timeout):
+        raise http.HttpRequestError("unknown url type")
+
+    monkeypatch.setattr("qobuz_dl.core.http.get_text", fake_get_text)
+
+    qdl = QobuzDL(directory=tmp_path)
+    qdl.search_by_type = lambda *args, **kwargs: search_calls.append((args, kwargs))
+
+    qdl.download_lastfm_pl("www.last.fm/user/example/library/playlists/1")
+
+    assert search_calls == []
