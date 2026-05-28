@@ -23,8 +23,9 @@ def fun_args(subparsers, default_limit):
         help="interactively search Qobuz and queue downloads",
         epilog=(
             "Examples:\n"
-            "  qobuz-dl fun\n"
-            "  qobuz-dl fun --limit 10\n\n"
+            "  uvx qobuz-dl fun\n"
+            "  uvx qobuz-dl fun --limit 10\n\n"
+            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'.\n"
             "Interactive selection accepts comma-separated numbers and ranges, "
             "for example: 1,3-5."
         ),
@@ -51,9 +52,10 @@ def lucky_args(subparsers):
         help="search Qobuz and download the first matching results",
         epilog=(
             "Examples:\n"
-            '  qobuz-dl lucky "playboi carti die lit"\n'
-            '  qobuz-dl lucky --type track --number 3 "artist song"\n'
-            '  qobuz-dl lucky --type playlist --number 1 "jazz classics"'
+            '  uvx qobuz-dl lucky "playboi carti die lit"\n'
+            '  uvx qobuz-dl lucky --type track --number 3 "artist song"\n'
+            '  uvx qobuz-dl lucky --type playlist --number 1 "jazz classics"\n\n'
+            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -92,9 +94,10 @@ def dl_args(subparsers):
             "  - local text files containing one URL per line; lines starting "
             "with # are ignored\n\n"
             "Examples:\n"
-            "  qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb\n"
-            "  qobuz-dl dl urls.txt --no-cover\n"
-            "  qobuz-dl dl https://www.last.fm/user/example/playlists/123 --quality 6"
+            "  uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb\n"
+            "  uvx qobuz-dl dl urls.txt --no-cover\n"
+            "  uvx qobuz-dl dl https://www.last.fm/user/example/playlists/123 --quality 6\n\n"
+            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -198,11 +201,12 @@ def qobuz_dl_args(
         ),
         epilog=(
             "Examples:\n"
-            "  qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7\n"
-            "  qobuz-dl dl urls.txt --directory Music --no-cover\n"
-            "  qobuz-dl fun --limit 10\n"
-            '  qobuz-dl lucky --type track --number 3 "artist song"\n\n'
-            "Use 'qobuz-dl <command> --help' for command-specific options.\n"
+            "  uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7\n"
+            "  uvx qobuz-dl dl urls.txt --directory Music --no-cover\n"
+            "  uvx qobuz-dl fun --limit 10\n"
+            '  uvx qobuz-dl lucky --type track --number 3 "artist song"\n\n'
+            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'.\n"
+            "Use 'uvx qobuz-dl <command> --help' for command-specific options.\n"
             "Docs: https://github.com/vitiko98/qobuz-dl"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -234,7 +238,7 @@ def qobuz_dl_args(
 
     subparsers = parser.add_subparsers(
         title="commands",
-        description="choose one command; use qobuz-dl <command> --help for details",
+        description="choose one command; use uvx qobuz-dl <command> --help for details",
         dest="command",
     )
 

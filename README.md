@@ -20,40 +20,39 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 
 ## Quick start
 
-You'll need an **active Qobuz subscription**.
+You'll need an **active Qobuz subscription**. Run with `uvx`; no app install is required:
+
+```sh
+uvx qobuz-dl
+```
+
+For a persistent CLI, optionally install the tool and run `qobuz-dl` directly:
 
 ```sh
 uv tool install qobuz-dl
 qobuz-dl
 ```
 
-On Windows, use the same tool install command and run the `.exe` entry point:
-
-```sh
-uv tool install qobuz-dl
-qobuz-dl.exe
-```
-
-Use `uv` for installation and local project commands. See [Installation](docs/installation.md) for requirements, first-run setup, and reset instructions.
+Use `uv` for user-facing and local project commands. See [Installation](docs/installation.md) for requirements, first-run setup, optional persistent install, and reset instructions.
 
 ## Examples
 
 Download an album URL in 24-bit, sub-96 kHz quality:
 
 ```sh
-qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb -q 7
+uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb -q 7
 ```
 
 Run interactive mode with a limit of 10 results:
 
 ```sh
-qobuz-dl fun -l 10
+uvx qobuz-dl fun -l 10
 ```
 
 Download the first album result for a search:
 
 ```sh
-qobuz-dl lucky playboi carti die lit
+uvx qobuz-dl lucky playboi carti die lit
 ```
 
 See [Examples](docs/examples.md) for download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate-tracking behavior.
@@ -61,7 +60,7 @@ See [Examples](docs/examples.md) for download mode, Last.fm playlists, interacti
 ## Usage
 
 ```text
-qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
+uvx qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
 ```
 
 Commands:
@@ -73,7 +72,7 @@ Commands:
 Run command-level help for detailed options:
 
 ```sh
-qobuz-dl <command> --help
+uvx qobuz-dl <command> --help
 ```
 
 See the [CLI reference](docs/cli.md) for global options and command descriptions.

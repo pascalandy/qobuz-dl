@@ -175,7 +175,8 @@ def main():
         if not arguments.reset:
             sys.exit(
                 f"{RED}Your config file is corrupted: {error}! "
-                "Run 'qobuz-dl -r' to fix this."
+                "Run 'uvx qobuz-dl -r' to fix this "
+                "(or 'qobuz-dl -r' if installed)."
             )
 
     if arguments.reset:

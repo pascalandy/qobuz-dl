@@ -6,14 +6,33 @@
 - Python 3.10 or newer, managed through `uv`
 - An active Qobuz subscription
 
-Use `uv` for installs and local project commands. Do not use `pip` or direct `python` commands as the default workflow.
+Use `uv` for user-facing, install, and local project commands. Do not use `pip` or direct `python` commands as the default workflow.
 
-## Install with uv
+## Recommended: run without installing the app
+
+Use `uvx` to run `qobuz-dl` without a persistent app install:
+
+```sh
+uvx qobuz-dl
+```
+
+`uvx` downloads and runs the published CLI in an isolated environment. The first run still creates the same persistent qobuz-dl config under your user config directory (`~/.config/qobuz-dl` on Linux/macOS, `%APPDATA%\qobuz-dl` on Windows). Your Qobuz auth/config and downloaded-IDs database are reused across later `uvx qobuz-dl ...` runs and are also reused if you later choose a persistent tool install.
+
+If configuration fails or you need to start over, reset the config file:
+
+```sh
+uvx qobuz-dl -r
+```
+
+## Optional: persistent tool install
+
+Install persistently only if you want a permanent `qobuz-dl` command on your PATH.
 
 ### Linux and macOS
 
 ```sh
 uv tool install qobuz-dl
+qobuz-dl
 ```
 
 To upgrade an existing tool install:
@@ -22,12 +41,19 @@ To upgrade an existing tool install:
 uv tool upgrade qobuz-dl
 ```
 
+To uninstall a persistent tool install:
+
+```sh
+uv tool uninstall qobuz-dl
+```
+
 ### Windows
 
 Install `qobuz-dl` with the same `uv` tool workflow:
 
 ```sh
 uv tool install qobuz-dl
+qobuz-dl.exe
 ```
 
 To upgrade an existing Windows tool install:
@@ -36,23 +62,13 @@ To upgrade an existing Windows tool install:
 uv tool upgrade qobuz-dl
 ```
 
-## First run
-
-Start the CLI and enter your Qobuz credentials when prompted:
-
-### Linux and macOS
+To uninstall a persistent Windows tool install:
 
 ```sh
-qobuz-dl
+uv tool uninstall qobuz-dl
 ```
 
-### Windows
-
-```sh
-qobuz-dl.exe
-```
-
-If configuration fails or you need to start over, reset the config file:
+Installed users can use the installed reset command instead:
 
 ```sh
 qobuz-dl -r

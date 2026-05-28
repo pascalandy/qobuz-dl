@@ -4,7 +4,7 @@ Project documentation lives here when it is too detailed for the README.
 
 ## User documentation
 
-- [Installation](installation.md) — requirements, uv installation, first run, and reset instructions.
+- [Installation](installation.md) — requirements, uvx no-install usage, optional persistent install, first run, and reset instructions.
 - [Examples](examples.md) — download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate tracking.
 - [CLI reference](cli.md) — top-level CLI usage and command overview.
 - [Module usage](module-usage.md) — importing `qobuz-dl` as a library.
