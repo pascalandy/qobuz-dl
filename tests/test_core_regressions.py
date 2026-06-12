@@ -1,0 +1,181 @@
+"""Regression tests for bugs fixed while hardening the fork for production."""
+
+import pytest
+
+from qobuz_dl.core import QobuzDL
+from qobuz_dl.utils import get_url_info, smart_discography_filter
+
+
+def _album(title, artist, bit_depth=16, sampling_rate=44.1, album_id="a-1"):
+    return {
+        "title": title,
+        "artist": {"name": artist},
+        "maximum_bit_depth": bit_depth,
+        "maximum_sampling_rate": sampling_rate,
+        "id": album_id,
+    }
+
+
+class TestGetUrlInfo:
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://play.qobuz.com/album/abc123", ("album", "abc123")),
+            ("https://open.qobuz.com/track/12345", ("track", "12345")),
+            (
+                "https://www.qobuz.com/us-en/album/some-name/xyz789",
+                ("album", "xyz789"),
+            ),
+            ("/us-en/artist/-/55555", ("artist", "55555")),
+            ("https://play.qobuz.com/label/98765", ("label", "98765")),
+            ("https://play.qobuz.com/playlist/424242", ("playlist", "424242")),
+        ],
+    )
+    def test_parses_supported_url_forms(self, url, expected):
+        assert get_url_info(url) == expected
+
+    def test_accepts_bare_paths_with_a_known_type_segment(self):
+        # Documented lenient behavior: the domain part is optional, so any
+        # input containing /{type}/{id} parses.
+        assert get_url_info("/album/abc123") == ("album", "abc123")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "not a url at all",
+            "",
+            "https://play.qobuz.com/",
+            "https://example.com/not-qobuz",
+        ],
+    )
+    def test_raises_value_error_for_unrecognized_urls(self, url):
+        with pytest.raises(ValueError, match="Invalid Qobuz URL"):
+            get_url_info(url)
+
+
+def test_handle_url_logs_invalid_url_without_crashing(tmp_path, caplog):
+    qdl = QobuzDL(directory=tmp_path)
+    caplog.set_level("INFO", logger="qobuz_dl.core")
+
+    qdl.handle_url("https://example.com/not-qobuz")
+
+    assert any("Invalid url" in record.getMessage() for record in caplog.records)
+
+
+def test_handle_url_downloads_items_from_every_page(tmp_path, monkeypatch):
+    """Artist/label/playlist downloads must not be truncated to the first page."""
+    qdl = QobuzDL(directory=tmp_path, no_m3u_for_playlists=True)
+    downloaded = []
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloaded.append(
+        item_id
+    )
+    qdl.client = type(
+        "Client",
+        (),
+        {
+            "get_artist_meta": lambda self, item_id: iter(
+                [
+                    {
+                        "name": "Paged Artist",
+                        "albums": {"items": [{"id": "album-1"}, {"id": "album-2"}]},
+                    },
+                    {
+                        "name": "Paged Artist",
+                        "albums": {"items": [{"id": "album-3"}]},
+                    },
+                ]
+            ),
+        },
+    )()
+
+    qdl.handle_url("https://play.qobuz.com/artist/123")
+
+    assert downloaded == ["album-1", "album-2", "album-3"]
+
+
+def test_smart_discography_filter_sees_albums_from_every_page():
+    contents = [
+        {
+            "name": "Artist",
+            "albums": {"items": [_album("First Album", "Artist", album_id="a-1")]},
+        },
+        {
+            "name": "Artist",
+            "albums": {"items": [_album("Second Album", "Artist", album_id="a-2")]},
+        },
+    ]
+
+    filtered = smart_discography_filter(contents)
+
+    assert sorted(album["id"] for album in filtered) == ["a-1", "a-2"]
+
+
+def test_smart_discography_filter_drops_other_artists_and_duplicates():
+    contents = [
+        {
+            "name": "Artist",
+            "albums": {
+                "items": [
+                    _album("Great Album", "Artist", 24, 96, "hi-res"),
+                    _album("Great Album", "Artist", 16, 44.1, "cd-quality"),
+                    _album("Feature Album", "Someone Else", album_id="other"),
+                ]
+            },
+        },
+    ]
+
+    filtered = smart_discography_filter(contents)
+
+    assert [album["id"] for album in filtered] == ["hi-res"]
+
+
+def test_smart_discography_filter_ignores_other_artists_before_quality_choice():
+    contents = [
+        {
+            "name": "Artist",
+            "albums": {
+                "items": [
+                    _album("Shared Title", "Artist", 16, 44.1, "requested-artist")
+                ]
+            },
+        },
+        {
+            "name": "Artist",
+            "albums": {
+                "items": [
+                    _album("Shared Title", "Someone Else", 24, 96, "other-artist")
+                ]
+            },
+        },
+    ]
+
+    filtered = smart_discography_filter(contents)
+
+    assert [album["id"] for album in filtered] == ["requested-artist"]
+
+
+def test_lastfm_playlist_skips_tracks_without_qobuz_matches(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    html = (Path(__file__).parent / "fixtures" / "lastfm_playlist.html").read_text()
+    downloads = []
+
+    monkeypatch.setattr("qobuz_dl.core.http.get_text", lambda url, timeout: html)
+    monkeypatch.setattr("qobuz_dl.core.make_m3u", lambda path: None)
+
+    qdl = QobuzDL(directory=tmp_path)
+
+    searches = iter(
+        [
+            [],  # first track: no Qobuz match -> must be skipped, not crash
+            ["https://play.qobuz.com/track/id2"],
+        ]
+    )
+    qdl.search_by_type = lambda *args, **kwargs: next(searches)
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloads.append(
+        item_id
+    )
+
+    qdl.download_lastfm_pl("https://www.last.fm/user/example/library/playlists/1")
+
+    assert downloads == ["id2"]

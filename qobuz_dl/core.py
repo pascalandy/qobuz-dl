@@ -208,31 +208,23 @@ class QobuzDL:
 
     def handle_url(self, url):
         possibles = {
-            "playlist": {
-                "func": self.client.get_plist_meta,
-                "iterable_key": "tracks",
-            },
-            "artist": {
-                "func": self.client.get_artist_meta,
-                "iterable_key": "albums",
-            },
-            "label": {
-                "func": self.client.get_label_meta,
-                "iterable_key": "albums",
-            },
+            "playlist": {"func": "get_plist_meta", "iterable_key": "tracks"},
+            "artist": {"func": "get_artist_meta", "iterable_key": "albums"},
+            "label": {"func": "get_label_meta", "iterable_key": "albums"},
             "album": {"album": True, "func": None, "iterable_key": None},
             "track": {"album": False, "func": None, "iterable_key": None},
         }
         try:
             url_type, item_id = get_url_info(url)
             type_dict = possibles[url_type]
-        except (KeyError, IndexError):
+        except (KeyError, ValueError):
             logger.info(
                 f'{RED}Invalid url: "{url}". Use urls from https://play.qobuz.com!'
             )
             return
         if type_dict["func"]:
-            content = [item for item in type_dict["func"](item_id)]
+            meta_func = getattr(self.client, type_dict["func"])
+            content = list(meta_func(item_id))
             content_name = content[0]["name"]
             logger.info(
                 f"{YELLOW}Downloading all the music from {content_name} ({url_type})!"
@@ -249,15 +241,17 @@ class QobuzDL:
                     skip_extras=True,
                 )
             else:
-                items = [item[type_dict["iterable_key"]]["items"] for item in content][
-                    0
+                items = [
+                    item
+                    for page in content
+                    for item in page[type_dict["iterable_key"]]["items"]
                 ]
 
             logger.info(f"{YELLOW}{len(items)} downloads in queue")
             for item in items:
                 self.download_from_id(
                     item["id"],
-                    True if type_dict["iterable_key"] == "albums" else False,
+                    type_dict["iterable_key"] == "albums",
                     new_path,
                 )
             if url_type == "playlist" and not self.no_m3u_for_playlists:
@@ -278,20 +272,20 @@ class QobuzDL:
                 self.handle_url(url)
 
     def download_from_txt_file(self, txt_file):
-        with open(txt_file, "r") as txt:
-            try:
+        try:
+            with open(txt_file, encoding="utf-8") as txt:
                 urls = [
-                    line.replace("\n", "")
-                    for line in txt.readlines()
-                    if not line.strip().startswith("#")
+                    stripped
+                    for line in txt
+                    if (stripped := line.strip()) and not stripped.startswith("#")
                 ]
-            except Exception as e:
-                logger.error(f"{RED}Invalid text file: {e}")
-                return
-            logger.info(
-                f"{YELLOW}qobuz-dl will download {len(urls)} urls from file: {txt_file}"
-            )
-            self.download_list_of_urls(urls)
+        except (OSError, UnicodeDecodeError) as e:
+            logger.error(f"{RED}Invalid text file: {e}")
+            return
+        logger.info(
+            f"{YELLOW}qobuz-dl will download {len(urls)} urls from file: {txt_file}"
+        )
+        self.download_list_of_urls(urls)
 
     def lucky_mode(self, query, download=True):
         if len(query) < 3:
@@ -312,7 +306,7 @@ class QobuzDL:
 
     def search_by_type(self, query, item_type, limit=10, lucky=False):
         if len(query) < 3:
-            logger.info("{RED}Your search query is too short or invalid")
+            logger.info(f"{RED}Your search query is too short or invalid")
             return
 
         possibles = {
@@ -471,10 +465,12 @@ class QobuzDL:
             f"{YELLOW}Downloading playlist: {pl_title} ({len(track_list)} tracks)"
         )
 
-        for i in track_list:
-            track_id = get_url_info(self.search_by_type(i, "track", 1, lucky=True)[0])[
-                1
-            ]
+        for query in track_list:
+            results = self.search_by_type(query, "track", 1, lucky=True)
+            if not results:
+                logger.info(f'{OFF}No Qobuz match for "{query}". Skipping')
+                continue
+            track_id = get_url_info(results[0])[1]
             if track_id:
                 self.download_from_id(track_id, False, pl_directory)
 

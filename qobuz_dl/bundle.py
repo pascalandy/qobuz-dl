@@ -3,6 +3,7 @@ import logging
 import re
 from collections import OrderedDict
 
+from qobuz_dl.exceptions import BundleError
 from qobuz_dl.http import HttpClient
 
 # Modified code based on DashLt's spoofbuz
@@ -34,7 +35,7 @@ class Bundle:
 
         bundle_url_match = _BUNDLE_URL_REGEX.search(response.text)
         if not bundle_url_match:
-            raise NotImplementedError("Bundle URL found")
+            raise BundleError("Could not find the bundle URL on the Qobuz login page")
 
         bundle_url = bundle_url_match.group(1)
 
@@ -47,7 +48,7 @@ class Bundle:
     def get_app_id(self):
         match = _APP_ID_REGEX.search(self._bundle)
         if not match:
-            raise NotImplementedError("Failed to match APP ID")
+            raise BundleError("Could not find the app ID in the Qobuz web bundle")
 
         return match.group("app_id")
 
@@ -59,6 +60,9 @@ class Bundle:
         for match in seed_matches:
             seed, timezone = match.group("seed", "timezone")
             secrets[timezone] = [seed]
+
+        if len(secrets) < 2:
+            raise BundleError("Could not find the secrets in the Qobuz web bundle")
 
         keypairs = list(secrets.items())
         secrets.move_to_end(keypairs[1][0], last=False)

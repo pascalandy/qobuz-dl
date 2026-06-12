@@ -112,7 +112,7 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
     downloaded = []
     tagged = []
 
-    def fake_tqdm_download(url, fname, desc):
+    def fake_download_with_progress(url, fname, desc):
         downloaded.append((url, fname, desc))
 
     def fake_tag_flac(
@@ -136,7 +136,9 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
             )
         )
 
-    monkeypatch.setattr(downloader, "tqdm_download", fake_tqdm_download)
+    monkeypatch.setattr(
+        downloader, "download_with_progress", fake_download_with_progress
+    )
     monkeypatch.setattr(downloader.metadata, "tag_flac", fake_tag_flac)
 
     download = Download(

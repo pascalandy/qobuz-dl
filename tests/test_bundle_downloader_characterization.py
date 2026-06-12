@@ -3,7 +3,8 @@ import base64
 import pytest
 
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.downloader import tqdm_download
+from qobuz_dl.downloader import download_with_progress
+from qobuz_dl.exceptions import BundleError
 
 
 class FakeHTTPResponse:
@@ -72,7 +73,18 @@ def test_bundle_extracts_app_id_and_compact_fake_secrets(monkeypatch):
     }
 
 
-def test_tqdm_download_writes_streamed_content(tmp_path, monkeypatch):
+def test_bundle_raises_bundle_error_when_login_page_has_no_bundle_url(monkeypatch):
+    class EmptyPageSession:
+        def get(self, url):
+            return FakeHTTPResponse(text="<html><body>no scripts here</body></html>")
+
+    monkeypatch.setattr("qobuz_dl.bundle.HttpClient", EmptyPageSession)
+
+    with pytest.raises(BundleError, match="bundle URL"):
+        Bundle()
+
+
+def test_download_with_progress_writes_streamed_content(tmp_path, monkeypatch):
     target = tmp_path / "track.flac.tmp"
     requested = []
 
@@ -88,13 +100,15 @@ def test_tqdm_download_writes_streamed_content(tmp_path, monkeypatch):
         "qobuz_dl.downloader.http.stream_download", fake_stream_download
     )
 
-    tqdm_download("https://media.example.test/file", target, "track")
+    download_with_progress("https://media.example.test/file", target, "track")
 
     assert requested == [("https://media.example.test/file", target)]
     assert target.read_bytes() == b"abcdef"
 
 
-def test_tqdm_download_throttles_progress_logging(tmp_path, monkeypatch, caplog):
+def test_download_with_progress_throttles_progress_logging(
+    tmp_path, monkeypatch, caplog
+):
     target = tmp_path / "track.flac.tmp"
 
     def fake_stream_download(url, target_path, *, progress=None):
@@ -111,7 +125,7 @@ def test_tqdm_download_throttles_progress_logging(tmp_path, monkeypatch, caplog)
     )
     caplog.set_level("INFO", logger="qobuz_dl.downloader")
 
-    tqdm_download("https://media.example.test/file", target, "track")
+    download_with_progress("https://media.example.test/file", target, "track")
 
     assert [
         record.getMessage()
@@ -123,7 +137,7 @@ def test_tqdm_download_throttles_progress_logging(tmp_path, monkeypatch, caplog)
     ]
 
 
-def test_tqdm_download_raises_connection_error_when_stream_is_short(
+def test_download_with_progress_raises_connection_error_when_stream_is_short(
     tmp_path, monkeypatch
 ):
     target = tmp_path / "track.flac.tmp"
@@ -137,6 +151,6 @@ def test_tqdm_download_raises_connection_error_when_stream_is_short(
     )
 
     with pytest.raises(ConnectionError, match="File download was interrupted"):
-        tqdm_download("https://media.example.test/file", target, "track")
+        download_with_progress("https://media.example.test/file", target, "track")
 
     assert target.read_bytes() == b"abc"

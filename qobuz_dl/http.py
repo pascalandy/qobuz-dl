@@ -99,13 +99,16 @@ def get_text(url: str, **kwargs) -> str:
     return response.text
 
 
+DEFAULT_CHUNK_SIZE = 64 * 1024
+
+
 def stream_download(
     url: str,
     target,
     *,
     headers: Mapping[str, str] | None = None,
     timeout=DEFAULT_TIMEOUT,
-    chunk_size=1024,
+    chunk_size=DEFAULT_CHUNK_SIZE,
     progress=None,
 ) -> int:
     try:

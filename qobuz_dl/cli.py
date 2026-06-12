@@ -1,4 +1,5 @@
 import configparser
+import getpass
 import glob
 import hashlib
 import logging
@@ -20,7 +21,7 @@ logging.basicConfig(
 if os.name == "nt":
     OS_CONFIG = os.environ.get("APPDATA")
 else:
-    OS_CONFIG = os.path.join(os.environ["HOME"], ".config")
+    OS_CONFIG = os.path.join(os.path.expanduser("~"), ".config")
 
 CONFIG_PATH = os.path.join(OS_CONFIG, "qobuz-dl")
 CONFIG_FILE = os.path.join(CONFIG_PATH, "config.ini")
@@ -53,7 +54,7 @@ def _reset_config(config_file):
     logging.info(f"{YELLOW}Creating config file: {config_file}")
     config = configparser.ConfigParser()
     config["DEFAULT"]["email"] = input("Enter your email:\n- ")
-    password = input("Enter your password\n- ")
+    password = getpass.getpass("Enter your password (input is hidden): ")
     config["DEFAULT"]["password"] = hashlib.md5(password.encode("utf-8")).hexdigest()
     config["DEFAULT"]["default_folder"] = (
         input("Folder for downloads (leave empty for default 'Qobuz Downloads')\n- ")
@@ -100,7 +101,7 @@ def _remove_leftovers(directory):
     for i in glob.glob(directory, recursive=True):
         try:
             os.remove(i)
-        except:  # noqa
+        except OSError:
             pass
 
 
@@ -137,7 +138,8 @@ def _initial_checks():
         _reset_config(CONFIG_FILE)
 
     if len(sys.argv) < 2:
-        sys.exit(qobuz_dl_args().print_help())
+        qobuz_dl_args().print_help()
+        sys.exit(0)
 
 
 def main():

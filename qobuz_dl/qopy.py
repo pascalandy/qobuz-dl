@@ -1,4 +1,4 @@
-# Wrapper for Qo-DL Reborn. This is a sligthly modified version
+# Wrapper for Qo-DL Reborn. This is a slightly modified version
 # of qopy, originally written by Sorrow446. All credits to the
 # original author.
 
@@ -6,7 +6,7 @@ import hashlib
 import logging
 import time
 
-from qobuz_dl.http import HttpClient
+from qobuz_dl.color import GREEN, YELLOW
 from qobuz_dl.exceptions import (
     AuthenticationError,
     IneligibleError,
@@ -14,7 +14,7 @@ from qobuz_dl.exceptions import (
     InvalidAppSecretError,
     InvalidQuality,
 )
-from qobuz_dl.color import GREEN, YELLOW
+from qobuz_dl.http import HttpClient
 
 RESET = "Reset your credentials with 'uvx qobuz-dl -r' (or 'qobuz-dl -r' if installed)"
 
@@ -23,16 +23,18 @@ logger = logging.getLogger(__name__)
 
 class Client:
     def __init__(self, email, pwd, app_id, secrets):
-        logger.info(f"{YELLOW}Logging...")
+        logger.info(f"{YELLOW}Logging in...")
         self.secrets = secrets
         self.id = str(app_id)
         self.session = HttpClient()
         self.session.headers.update(
             {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) "
+                    "Gecko/20100101 Firefox/83.0"
+                ),
                 "X-App-Id": self.id,
-                "Content-Type": "application/json;charset=UTF-8"
-
+                "Content-Type": "application/json;charset=UTF-8",
             }
         )
         self.base = "https://www.qobuz.com/api.json/0.2/"
@@ -75,13 +77,14 @@ class Client:
             }
         elif epoint == "favorite/getUserFavorites":
             unix = time.time()
-            # r_sig = "userLibrarygetAlbumsList" + str(unix) + kwargs["sec"]
-            r_sig = "favoritegetUserFavorites" + str(unix) + kwargs["sec"]
+            r_sig = "favoritegetUserFavorites" + str(unix) + kwargs.get("sec", self.sec)
             r_sig_hashed = hashlib.md5(r_sig.encode("utf-8")).hexdigest()
             params = {
                 "app_id": self.id,
                 "user_auth_token": self.uat,
-                "type": "albums",
+                "type": kwargs["type"],
+                "offset": kwargs["offset"],
+                "limit": kwargs["limit"],
                 "request_ts": unix,
                 "request_sig": r_sig_hashed,
             }
@@ -130,19 +133,17 @@ class Client:
         self.label = usr_info["user"]["credential"]["parameters"]["short_label"]
         logger.info(f"{GREEN}Membership: {self.label}")
 
-    def multi_meta(self, epoint, key, id, type):
+    def multi_meta(self, epoint, key, item_id, content_type):
         total = 1
         offset = 0
         while total > 0:
-            if type in ["tracks", "albums"]:
-                j = self.api_call(epoint, id=id, offset=offset, type=type)[type]
-            else:
-                j = self.api_call(epoint, id=id, offset=offset, type=type)
+            chunk = self.api_call(epoint, id=item_id, offset=offset, type=content_type)
+            if content_type in ("tracks", "albums"):
+                chunk = chunk[content_type]
+            yield chunk
             if offset == 0:
-                yield j
-                total = j[key] - 500
+                total = chunk[key] - 500
             else:
-                yield j
                 total -= 500
             offset += 500
 

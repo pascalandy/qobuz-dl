@@ -24,6 +24,8 @@ DEFAULT_FORMATS = {
 DEFAULT_FOLDER = "{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
 DEFAULT_TRACK = "{tracknumber}. {tracktitle}"
 PROGRESS_MIN_INTERVAL_BYTES = 1024 * 1024
+# Keep generated basenames comfortably below common filesystem limits (255).
+MAX_FILENAME_LENGTH = 250
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ class Download:
 
         if self.albums_only and (
             meta.get("release_type") != "album"
-            or meta.get("artist").get("name") == "Various Artists"
+            or meta.get("artist", {}).get("name") == "Various Artists"
         ):
             logger.info(f"{OFF}Ignoring Single/EP/VA: {meta.get('title', 'n/a')}")
             return
@@ -108,14 +110,14 @@ class Download:
         if "goodies" in meta:
             try:
                 _get_extra(meta["goodies"][0]["url"], dirn, "booklet.pdf")
-            except:  # noqa
-                pass
+            except Exception as error:
+                logger.debug("Skipping booklet download: %s", error)
         media_numbers = [track["media_number"] for track in meta["tracks"]["items"]]
-        is_multiple = True if len([*{*media_numbers}]) > 1 else False
+        is_multiple = len(set(media_numbers)) > 1
         for i in meta["tracks"]["items"]:
             parse = self.client.get_track_url(i["id"], fmt_id=self.quality)
-            if "sample" not in parse and parse["sampling_rate"]:
-                is_mp3 = True if int(self.quality) == 5 else False
+            if "sample" not in parse and parse.get("sampling_rate"):
+                is_mp3 = int(self.quality) == 5
                 self._download_and_tag(
                     dirn,
                     count,
@@ -134,7 +136,7 @@ class Download:
     def download_track(self):
         parse = self.client.get_track_url(self.item_id, self.quality)
 
-        if "sample" not in parse and parse["sampling_rate"]:
+        if "sample" not in parse and parse.get("sampling_rate"):
             meta = self.client.get_track_meta(self.item_id)
             track_title = _get_title(meta)
             artist = _safe_get(meta, "performer", "name")
@@ -167,7 +169,7 @@ class Download:
                     dirn,
                     og_quality=self.cover_og_quality,
                 )
-            is_mp3 = True if int(self.quality) == 5 else False
+            is_mp3 = int(self.quality) == 5
             self._download_and_tag(
                 dirn,
                 1,
@@ -176,7 +178,7 @@ class Download:
                 meta,
                 True,
                 is_mp3,
-                False,
+                None,
             )
         else:
             logger.info(f"{OFF}Demo. Skipping")
@@ -215,13 +217,16 @@ class Download:
         # track_format is a format string
         # e.g. '{tracknumber}. {artist} - {tracktitle}'
         formatted_path = sanitize_filename(self.track_format.format(**filename_attr))
-        final_file = os.path.join(root_dir, formatted_path)[:250] + extension
+        max_basename_length = MAX_FILENAME_LENGTH - len(extension)
+        final_file = os.path.join(
+            root_dir, formatted_path[:max_basename_length] + extension
+        )
 
         if os.path.isfile(final_file):
             logger.info(f"{OFF}{track_title} was already downloaded")
             return
 
-        tqdm_download(url, filename, filename)
+        download_with_progress(url, filename, filename)
         tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
         try:
             tag_function(
@@ -304,14 +309,14 @@ class Download:
             return ("Unknown", quality_met, None, None)
 
 
-def tqdm_download(url, fname, desc):
+def download_with_progress(url, fname, desc):
+    """Stream ``url`` to ``fname``, logging throttled progress updates."""
     next_report = PROGRESS_MIN_INTERVAL_BYTES
 
     def show_progress(size, downloaded, total):
         nonlocal next_report
         if not total:
             return
-        report_interval = PROGRESS_MIN_INTERVAL_BYTES
         report_interval = max(total // 100, PROGRESS_MIN_INTERVAL_BYTES)
         if downloaded >= next_report or downloaded >= total:
             logger.info(f"{CYAN}{downloaded}/{total} /// {desc}")
@@ -319,13 +324,6 @@ def tqdm_download(url, fname, desc):
                 next_report += report_interval
 
     http.stream_download(url, fname, progress=show_progress)
-
-
-def _get_description(item: dict, track_title, multiple=None):
-    downloading_title = f"{track_title} [{item['bit_depth']}/{item['sampling_rate']}]"
-    if multiple:
-        downloading_title = f"[Disc {multiple}] {downloading_title}"
-    return downloading_title
 
 
 def _get_title(item_dict):
@@ -345,7 +343,7 @@ def _get_extra(item, dirn, extra="cover.jpg", og_quality=False):
     if os.path.isfile(extra_file):
         logger.info(f"{OFF}{extra} was already downloaded")
         return
-    tqdm_download(
+    download_with_progress(
         item.replace("_600.", "_org.") if og_quality else item,
         extra_file,
         extra,

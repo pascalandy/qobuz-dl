@@ -18,7 +18,7 @@ class PartialFormatter(string.Formatter):
 
     def get_field(self, field_name, args, kwargs):
         try:
-            val = super(PartialFormatter, self).get_field(field_name, args, kwargs)
+            val = super().get_field(field_name, args, kwargs)
         except (KeyError, AttributeError):
             val = None, field_name
         return val
@@ -27,7 +27,7 @@ class PartialFormatter(string.Formatter):
         if not value:
             return self.missing
         try:
-            return super(PartialFormatter, self).format_field(value, spec)
+            return super().format_field(value, spec)
         except ValueError:
             if self.bad_fmt:
                 return self.bad_fmt
@@ -64,7 +64,8 @@ def make_m3u(pl_directory):
                 index = "#EXTINF:{}, {} - {}\n{}".format(
                     length, artist, title, audio_rel_file
                 )
-            except:  # noqa
+            except Exception as error:
+                logger.debug("Skipping %s in m3u: %s", audio_rel_file, error)
                 continue
             track_list.append(index)
 
@@ -90,14 +91,6 @@ def smart_discography_filter(
     :returns: filtered items list
     """
 
-    # for debugging
-    def print_album(album: dict) -> None:
-        logger.debug(
-            f"{album['title']} - {album.get('version', '~~')} "
-            "({album['maximum_bit_depth']}/{album['maximum_sampling_rate']}"
-            " by {album['artist']['name']}) {album['id']}"
-        )
-
     TYPE_REGEXES = {
         "remaster": r"(?i)(re)?master(ed)?",
         "extra": r"(?i)(anniversary|deluxe|live|collector|demo|expanded)",
@@ -119,16 +112,17 @@ def smart_discography_filter(
         return r.group(1).strip().lower()
 
     requested_artist = contents[0]["name"]
-    items = [item["albums"]["items"] for item in contents][0]
+    items = [
+        item
+        for page in contents
+        for item in page["albums"]["items"]
+        if item.get("artist", {}).get("name") == requested_artist
+    ]
 
     # use dicts to group duplicate albums together by title
-    title_grouped = dict()
+    title_grouped = {}
     for item in items:
-        title_ = essence(item["title"])
-        if title_ not in title_grouped:  # ?
-            #            if (t := essence(item["title"])) not in title_grouped:
-            title_grouped[title_] = []
-        title_grouped[title_].append(item)
+        title_grouped.setdefault(essence(item["title"]), []).append(item)
 
     items = []
     for albums in title_grouped.values():
@@ -145,7 +139,6 @@ def smart_discography_filter(
             return (
                 album["maximum_bit_depth"] == best_bit_depth
                 and album["maximum_sampling_rate"] == best_sampling_rate
-                and album["artist"]["name"] == requested_artist
                 and not (  # states that are not allowed
                     (remaster_exists and not is_type("remaster", album))
                     or (skip_extras and is_type("extra", album))
@@ -173,13 +166,15 @@ def create_and_return_dir(directory):
 
 
 def get_url_info(url):
-    """Returns the type of the url and the id.
+    """Return the type and id parsed from a Qobuz URL.
 
     Compatible with urls of the form:
         https://www.qobuz.com/us-en/{type}/{name}/{id}
         https://open.qobuz.com/{type}/{id}
         https://play.qobuz.com/{type}/{id}
         /us-en/{type}/-/{id}
+
+    :raises ValueError: when the URL is not a recognizable Qobuz URL.
     """
 
     r = re.search(
@@ -187,4 +182,6 @@ def get_url_info(url):
         r"?\/(album|artist|track|playlist|label)(?:\/[-\w\d]+)?\/([\w\d]+)",
         url,
     )
+    if r is None:
+        raise ValueError(f"Invalid Qobuz URL: {url!r}")
     return r.groups()

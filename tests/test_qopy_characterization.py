@@ -107,6 +107,42 @@ def test_track_file_url_invalid_quality_rejected_before_http_call():
     assert session.calls == []
 
 
+@pytest.mark.parametrize(
+    ("method_name", "favorite_type"),
+    [
+        ("get_favorite_albums", "albums"),
+        ("get_favorite_tracks", "tracks"),
+        ("get_favorite_artists", "artists"),
+    ],
+)
+def test_favorite_wrappers_preserve_type_offset_and_limit(
+    method_name, favorite_type, monkeypatch
+):
+    session = FakeSession(FakeResponse(payload={"items": []}))
+    client = make_client(session)
+    fixed_time = 1712345678.25
+    monkeypatch.setattr("qobuz_dl.qopy.time.time", lambda: fixed_time)
+
+    assert getattr(client, method_name)(offset=50, limit=25) == {"items": []}
+
+    expected_sig_payload = f"favoritegetUserFavorites{fixed_time}secret"
+    expected_sig = hashlib.md5(expected_sig_payload.encode("utf-8")).hexdigest()
+    assert session.calls == [
+        (
+            "https://www.qobuz.com/api.json/0.2/favorite/getUserFavorites",
+            {
+                "app_id": "123456789",
+                "user_auth_token": "user-token",
+                "type": favorite_type,
+                "offset": 50,
+                "limit": 25,
+                "request_ts": fixed_time,
+                "request_sig": expected_sig,
+            },
+        )
+    ]
+
+
 def test_client_init_updates_required_headers_when_auth_and_secret_tests_are_faked(
     monkeypatch,
 ):
