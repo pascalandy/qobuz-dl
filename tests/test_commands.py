@@ -70,6 +70,8 @@ def test_top_level_help_is_complete_and_agent_readable(capsys):
     assert "Download and organize Qobuz music" in output
     assert "uvx qobuz-dl dl https://play.qobuz.com/album" in output
     assert "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'" in output
+    assert "Docs: https://github.com/pascalandy/qobuz-dl" in output
+    assert "Docs: https://github.com/vitiko98/qobuz-dl" not in output
     assert "download Qobuz/Last.fm URLs or URLs from a text file" in output
     assert "interactively search Qobuz and queue downloads" in output
     assert "search Qobuz and download the first matching results" in output

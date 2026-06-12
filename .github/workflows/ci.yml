@@ -54,7 +54,12 @@ jobs:
         run: uv run pytest
 
       - name: Smoke test CLI
-        run: uv run qobuz-dl --help
+        run: |
+          uv run qobuz-dl --help
+          uv run qobuz-dl --version
+          uv run qobuz-dl dl --help
+          uv run qobuz-dl fun --help
+          uv run qobuz-dl lucky --help
 
       - name: Build package
         run: uv build

@@ -50,3 +50,16 @@ The supported runtime baseline is Python 3.10 or newer. Keep `requires-python`, 
 - `.venv/`
 - `.cache/` and `.pytest_cache/`
 - `.coverage` and `htmlcov/`
+
+## Releases
+
+Releases are tag-triggered through GitHub Actions (`.github/workflows/release.yml`).
+
+Release steps:
+
+1. Update `version` in `pyproject.toml` and refresh the lock file with `uv lock`.
+2. Document the changes in `CHANGELOG.md`.
+3. Run `just ci` locally and commit.
+4. Tag the commit `vX.Y.Z` (the tag must match the package version) and push the tag.
+
+The workflow re-runs the quality gates (format check, lint, tests), verifies the tag matches the package version, builds the source and wheel distributions with `uv build`, and publishes a GitHub release with the artifacts attached and generated release notes.

@@ -1,0 +1,415 @@
+# Use cases
+
+This guide organizes `qobuz-dl` by user goal. Examples use `uvx qobuz-dl`, the recommended no-install workflow. If you installed the optional persistent tool with `uv tool install qobuz-dl`, you may replace `uvx qobuz-dl` with `qobuz-dl`. From a local checkout, use `uv run qobuz-dl ...`.
+
+## 1. Account and authentication
+
+You need an active Qobuz subscription. `qobuz-dl` creates a local config on first use and stores the account details needed for later commands.
+
+### Log in / create the first config
+
+Run any command that requires config, or explicitly reset/create config:
+
+```sh
+uvx qobuz-dl -r
+```
+
+The prompt asks for:
+
+- Qobuz email
+- Qobuz password
+- default download folder
+- default quality
+
+If you want max available resolution as your normal default, enter `27` for the default quality. If you leave the first-run quality prompt empty, the current config creator uses `6` / CD quality.
+
+### Check whether config already exists
+
+Show the config path, database path, and redacted config values:
+
+```sh
+uvx qobuz-dl --show-config
+```
+
+Short form:
+
+```sh
+uvx qobuz-dl -sc
+```
+
+Note: this confirms local configuration exists. It is not a dedicated login-validation command. Account access is validated when a Qobuz command initializes and talks to Qobuz.
+
+### Reset authentication/config
+
+Use this when credentials changed, the config is broken, or you want a fresh setup:
+
+```sh
+uvx qobuz-dl --reset
+```
+
+Short form:
+
+```sh
+uvx qobuz-dl -r
+```
+
+## 2. Primary downloads
+
+These are the main content-oriented use cases.
+
+### Download a single track
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/track/TRACK_ID
+```
+
+With explicit max available quality:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/track/TRACK_ID --quality 27
+```
+
+### Download an album
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID
+```
+
+With explicit max available quality:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27
+```
+
+### Download all albums from an artist
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID
+```
+
+### Download main artist albums only
+
+Skip singles, EPs, and Various Artists releases where applicable:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only
+```
+
+For a more practical artist-discography filter that tries to reduce likely spam/extras and prefer useful remaster/quality choices:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --smart-discography
+```
+
+You can combine both:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography
+```
+
+## 3. Other downloads
+
+### Download a Qobuz playlist
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID
+```
+
+### Download a label catalog
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/label/LABEL_ID
+```
+
+Only main albums from the label:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/label/LABEL_ID --albums-only
+```
+
+### Download many URLs from a text file
+
+Create a text file with one URL per line. Lines starting with `#` are ignored.
+
+```text
+https://play.qobuz.com/album/ALBUM_ID
+https://play.qobuz.com/track/TRACK_ID
+# https://play.qobuz.com/artist/SKIPPED_ARTIST_ID
+https://play.qobuz.com/playlist/PLAYLIST_ID
+```
+
+Then run:
+
+```sh
+uvx qobuz-dl dl urls.txt
+```
+
+### Download a Last.fm playlist
+
+```sh
+uvx qobuz-dl dl https://www.last.fm/user/USERNAME/playlists/PLAYLIST_ID
+```
+
+## 4. Discovery and selection
+
+Use discovery when you do not already have the exact Qobuz URL.
+
+### Search interactively, select results, and queue downloads
+
+```sh
+uvx qobuz-dl fun
+```
+
+Limit the number of search results shown per query:
+
+```sh
+uvx qobuz-dl fun --limit 10
+```
+
+Interactive mode lets you search for albums, tracks, artists, or playlists, select numbered results, and queue one or more downloads. Selection accepts comma-separated numbers and ranges such as `1,3-5`.
+
+### Lucky download: search and download the first match
+
+By default, `lucky` searches albums:
+
+```sh
+uvx qobuz-dl lucky "artist album name"
+```
+
+Download the first matching track:
+
+```sh
+uvx qobuz-dl lucky --type track "artist song title"
+```
+
+Download the first matching artist result:
+
+```sh
+uvx qobuz-dl lucky --type artist "artist name"
+```
+
+Download the first matching playlist:
+
+```sh
+uvx qobuz-dl lucky --type playlist "playlist name"
+```
+
+Download the first N matches:
+
+```sh
+uvx qobuz-dl lucky --type album --number 3 "search terms"
+```
+
+## 5. Download preferences and configuration
+
+Most download preferences can be supplied as command flags for one run. To make a preference permanent, edit the config file shown by `uvx qobuz-dl --show-config`.
+
+### Audio quality
+
+Recommended user-facing choices:
+
+| User choice | CLI quality | Meaning |
+|---|---:|---|
+| MP3 | `5` | MP3 320 kbps |
+| CD quality | `6` | FLAC lossless, 16-bit / 44.1 kHz |
+| Max available resolution | `27` | Requests the highest hi-res tier supported by the CLI; with fallback enabled, lower available quality may be used when needed |
+
+Use MP3:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 5
+```
+
+Use CD quality:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 6
+```
+
+Use max available resolution for one run:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27
+```
+
+Make max available resolution the persistent default by setting this in the config file shown by `uvx qobuz-dl --show-config`:
+
+```ini
+default_quality = 27
+```
+
+Advanced note: the CLI also supports `--quality 7` for 24-bit up to 96 kHz, but the simpler product model is MP3, CD quality, or max available resolution.
+
+### Quality fallback behavior
+
+By default, fallback is enabled: if the requested quality is unavailable, `qobuz-dl` can fall back to an available lower quality.
+
+Disable fallback and skip releases unavailable at the requested quality:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27 --no-fallback
+```
+
+### Download directory
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --directory "Music/Qobuz"
+```
+
+Short form:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID -d "Music/Qobuz"
+```
+
+### Folder and track naming
+
+Set folder naming for one run:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
+  --folder-format "{albumartist}/{album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
+```
+
+Set track filename naming for one run:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
+  --track-format "{tracknumber}. {artist} - {tracktitle}"
+```
+
+Short forms:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
+  -ff "{albumartist}/{album} ({year})" \
+  -tf "{tracknumber}. {tracktitle}"
+```
+
+Common pattern keys include:
+
+- `artist`
+- `albumartist`
+- `album`
+- `year`
+- `sampling_rate`
+- `bit_depth`
+- `tracktitle`
+- `tracknumber`
+- `version`
+
+### Cover art behavior
+
+Default behavior downloads `cover.jpg`.
+
+Embed cover art into audio files:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art
+```
+
+Download original-quality cover art when available:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --og-cover
+```
+
+Do not download `cover.jpg`:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-cover
+```
+
+Combine options:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art --og-cover
+```
+
+### Playlist file behavior
+
+By default, playlist downloads can create `.m3u` playlist files. Disable `.m3u` creation:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID --no-m3u
+```
+
+### Duplicate tracking
+
+By default, `qobuz-dl` tracks downloaded release IDs in a local database and skips already-downloaded releases.
+
+Bypass duplicate tracking for one run:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-db
+```
+
+Delete the downloaded-IDs database so previously tracked releases may download again:
+
+```sh
+uvx qobuz-dl --purge
+```
+
+Short form:
+
+```sh
+uvx qobuz-dl -p
+```
+
+### View or edit persistent defaults
+
+Show the config path and redacted settings:
+
+```sh
+uvx qobuz-dl --show-config
+```
+
+Then edit the displayed config file to make defaults persistent, for example:
+
+- `default_folder`
+- `default_quality`
+- `default_limit`
+- `no_m3u`
+- `albums_only`
+- `no_fallback`
+- `og_cover`
+- `embed_art`
+- `no_cover`
+- `no_database`
+- `folder_format`
+- `track_format`
+- `smart_discography`
+
+## 6. Troubleshooting and maintenance
+
+### Show help
+
+```sh
+uvx qobuz-dl --help
+```
+
+Command-specific help:
+
+```sh
+uvx qobuz-dl dl --help
+uvx qobuz-dl fun --help
+uvx qobuz-dl lucky --help
+```
+
+### Show version
+
+```sh
+uvx qobuz-dl --version
+```
+
+### Inspect config and database locations
+
+```sh
+uvx qobuz-dl --show-config
+```
+
+### Recover from a corrupted config
+
+```sh
+uvx qobuz-dl --reset
+```

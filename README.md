@@ -1,8 +1,11 @@
 # qobuz-dl
 
-Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www.qobuz.com/). It *just works*™ (2025).
+Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www.qobuz.com/). It *just works*™.
 
-[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=VZWSWVGZGJRMU&source=url)
+[![CI](https://github.com/pascalandy/qobuz-dl/actions/workflows/ci.yml/badge.svg)](https://github.com/pascalandy/qobuz-dl/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://github.com/pascalandy/qobuz-dl/blob/master/pyproject.toml)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
+[![Changelog](https://img.shields.io/badge/changelog-keep%20a%20changelog-orange.svg)](CHANGELOG.md)
 
 ## Features
 
@@ -81,18 +84,23 @@ See the [CLI reference](docs/cli.md) for global options and command descriptions
 
 * [Installation](docs/installation.md)
 * [Examples](docs/examples.md)
+* [Use cases](docs/use-cases.md)
 * [CLI reference](docs/cli.md)
 * [Module usage](docs/module-usage.md)
 * [Dependencies](docs/dependencies.md)
 * [Development](docs/development.md)
 * [Packaging](docs/packaging.md)
 * [Testing](docs/testing.md)
+* [Changelog](CHANGELOG.md)
+* [Contributing](CONTRIBUTING.md)
 
 ## Module usage
 
 `qobuz-dl` can also be imported as a library. See [Module usage](docs/module-usage.md).
 
 ## Credits
+
+This is a maintained fork of [vitiko98/Qobuz-DL](https://github.com/vitiko98/Qobuz-DL). You can support the original author via [PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=VZWSWVGZGJRMU&source=url).
 
 `qobuz-dl` is inspired by the discontinued Qo-DL-Reborn. This tool uses two modules from Qo-DL: `qopy` and `spoofer`, both written by Sorrow446 and DashLt.
 

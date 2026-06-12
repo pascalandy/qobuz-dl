@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qobuz-dl"
-version = "0.9.9.10"
+version = "1.0.0"
 description = "The complete Lossless and Hi-Res music downloader for Qobuz"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,17 +14,29 @@ license = { text = "GPL-3.0-only" }
 authors = [
   { name = "Vitiko", email = "vhnz98@gmail.com" },
 ]
+keywords = ["qobuz", "music", "downloader", "flac", "hi-res", "lossless"]
 classifiers = [
-  "Programming Language :: Python :: 3",
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
   "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Sound/Audio",
 ]
 dependencies = [
   "mutagen>=1.47,<2",
 ]
 
 [project.urls]
-Homepage = "https://github.com/vitiko98/Qobuz-DL"
-Repository = "https://github.com/vitiko98/Qobuz-DL"
+Homepage = "https://github.com/pascalandy/qobuz-dl"
+Repository = "https://github.com/pascalandy/qobuz-dl"
+Changelog = "https://github.com/pascalandy/qobuz-dl/blob/master/CHANGELOG.md"
+Upstream = "https://github.com/vitiko98/Qobuz-DL"
 
 [project.scripts]
 qobuz-dl = "qobuz_dl:main"
@@ -40,8 +52,6 @@ dev = [
 cache-dir = ".cache/ruff"
 line-length = 88
 target-version = "py310"
-# Keep the vendored qopy wrapper's legacy CRLF file stable until it is modernized deliberately.
-extend-exclude = ["qobuz_dl/qopy.py"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]

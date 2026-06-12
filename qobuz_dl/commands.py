@@ -207,7 +207,7 @@ def qobuz_dl_args(
             '  uvx qobuz-dl lucky --type track --number 3 "artist song"\n\n'
             "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'.\n"
             "Use 'uvx qobuz-dl <command> --help' for command-specific options.\n"
-            "Docs: https://github.com/vitiko98/qobuz-dl"
+            "Docs: https://github.com/pascalandy/qobuz-dl"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

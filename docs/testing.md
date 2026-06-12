@@ -49,9 +49,11 @@ just build
 
 GitHub Actions runs the CI gate on pushes and pull requests to `master`/`main`. Maintainers can also start the workflow manually with `workflow_dispatch`.
 
-The CI matrix runs on Python 3.10, the minimum supported runtime, and Python 3.13, the latest target currently used by the project. Each matrix job installs dependencies with `uv sync --dev --frozen`, then runs formatting, linting, tests, CLI smoke checks, and the package build.
+The CI matrix runs on Python 3.10, the minimum supported runtime, and Python 3.13, the latest target currently used by the project. Each matrix job installs dependencies with `uv sync --dev --frozen`, then runs formatting, linting, tests, CLI smoke checks (`--help` and `--version` for the top-level command and each subcommand), and the package build.
 
 The workflow uses read-only repository permissions. The Python 3.13 job uploads the built `dist/` files as the `qobuz-dl-dist` artifact for release/download inspection.
+
+A separate tag-triggered release workflow publishes GitHub releases; see [Packaging — Releases](packaging.md#releases).
 
 Apply formatting:
 
