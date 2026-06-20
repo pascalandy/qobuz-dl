@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S01 only.
+- Scope for this PR: S02 only; S01 evidence is retained from the merged S01 PR.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -25,7 +25,7 @@
 | ID | Capability area | Scenario summary | Status in this PR |
 | --- | --- | --- | --- |
 | S01 | CLI/config safety | Help/version do not initialize config; parser exposes commands/options; show-config redacts sensitive values; reset/purge behavior is safe. | Pass |
-| S02 | Direct source routing | Album/track/artist/label/playlist URLs route correctly, invalid URLs do not crash, collection pages are all consumed. | Not evaluated |
+| S02 | Direct source routing | Album/track/artist/label/playlist URLs route correctly, invalid URLs do not crash, collection pages are all consumed. | Pass |
 | S03 | Text-file source ingestion | Local URL files ignore blank/comment lines, dispatch remaining URLs, and bad files fail gracefully. | Not evaluated |
 | S04 | Lucky search mode | Query validation, type/limit mapping, result URLs, and download dispatch are correct. | Not evaluated |
 | S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Not evaluated |
@@ -61,3 +61,31 @@ S01 is covered in `tests/test_commands.py`.
 ## S01 status
 
 Pass. S01 behavior is covered by local automated tests using temporary config/database paths and monkeypatched boundaries. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
+
+## S02 evidence
+
+### Automated coverage
+
+S02 is covered in `tests/test_core_regressions.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| Album and track URLs route directly | `test_handle_url_routes_direct_album_and_track_downloads` parametrizes album and track URLs and verifies `handle_url` dispatches the parsed ID to `download_from_id` with the correct album/track flag and no alternate collection path. |
+| Artist, label, and playlist URLs route through collection metadata | `test_handle_url_downloads_collection_items_from_every_page` parametrizes artist, label, and playlist URLs against a fake client and verifies the correct client metadata method is used. |
+| Collection pages are all consumed | The same collection-routing test returns two fake metadata pages and verifies all three items across both pages are queued, rather than only the first page. |
+| Playlist M3U generation is controlled by the existing no-m3u flag | The collection-routing test parametrizes `no_m3u_for_playlists` and verifies playlist URLs call `make_m3u` only when the flag is false; artist and label URLs never call `make_m3u`. |
+| Invalid URLs do not crash | `test_handle_url_logs_invalid_url_without_crashing` calls `handle_url` with a non-Qobuz URL and verifies an invalid-url log record is emitted instead of an exception. |
+| URL parsing covers supported direct source forms | `TestGetUrlInfo` parametrizes album, track, artist, label, playlist, and www/open/play/bare-path URL forms, and verifies invalid inputs raise `ValueError`. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_core_regressions.py` | Pass: 24 tests passed. |
+| `just ci` | Pass: ruff format check, ruff lint, 86 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S02 status
+
+Pass. S02 behavior is covered by local automated tests using fake clients, monkeypatched M3U generation, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
