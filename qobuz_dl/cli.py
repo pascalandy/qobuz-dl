@@ -52,6 +52,9 @@ def _redacted_config_text(config_file):
 
 def _reset_config(config_file):
     logging.info(f"{YELLOW}Creating config file: {config_file}")
+    config_directory = os.path.dirname(config_file)
+    if config_directory:
+        os.makedirs(config_directory, exist_ok=True)
     config = configparser.ConfigParser()
     config["DEFAULT"]["email"] = input("Enter your email:\n- ")
     password = getpass.getpass("Enter your password (input is hidden): ")
@@ -129,8 +132,11 @@ def _handle_commands(qobuz, arguments):
 
 
 def _initial_checks():
-    # Help and version must be available without prompting for config setup.
-    if any(arg in {"-h", "--help", "--version"} for arg in sys.argv[1:]):
+    # Help, version, and maintenance flags must not prompt for config setup.
+    if any(
+        arg in {"-h", "--help", "--version", "-r", "--reset", "-p", "--purge"}
+        for arg in sys.argv[1:]
+    ):
         return
 
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
@@ -174,7 +180,7 @@ def main():
         ).parse_args()
     except (KeyError, UnicodeDecodeError, configparser.Error) as error:
         arguments = qobuz_dl_args().parse_args()
-        if not arguments.reset:
+        if not (arguments.reset or arguments.purge):
             sys.exit(
                 f"{RED}Your config file is corrupted: {error}! "
                 "Run 'uvx qobuz-dl -r' to fix this "
