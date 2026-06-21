@@ -1,5 +1,8 @@
 """Regression tests for bugs fixed while hardening the fork for production."""
 
+import builtins
+import os
+
 import pytest
 
 from qobuz_dl.core import QobuzDL
@@ -79,6 +82,90 @@ def test_handle_url_routes_direct_album_and_track_downloads(tmp_path, url, expec
     qdl.handle_url(url)
 
     assert downloaded == [expected]
+
+
+def test_download_list_of_urls_ingests_text_file_sources_in_order(tmp_path):
+    url_file = tmp_path / "urls.txt"
+    repeated_track = "https://play.qobuz.com/track/repeated"
+    url_file.write_text(
+        "\n".join(
+            [
+                "",
+                "   ",
+                "# skipped whole-line comment",
+                "   # skipped indented comment",
+                "https://play.qobuz.com/album/album1",
+                repeated_track,
+                "https://www.last.fm/user/example/playlists/playlist1",
+                repeated_track,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    qdl = QobuzDL(directory=tmp_path / "downloads")
+    dispatched = []
+    qdl.handle_url = lambda url: dispatched.append(("qobuz", url))
+    qdl.download_lastfm_pl = lambda url: dispatched.append(("lastfm", url))
+    qdl.download_from_id = lambda *args, **kwargs: pytest.fail(
+        "text-file ingestion should dispatch through URL handlers"
+    )
+
+    qdl.download_list_of_urls([str(url_file)])
+
+    assert dispatched == [
+        ("qobuz", "https://play.qobuz.com/album/album1"),
+        ("qobuz", repeated_track),
+        ("lastfm", "https://www.last.fm/user/example/playlists/playlist1"),
+        ("qobuz", repeated_track),
+    ]
+
+
+@pytest.mark.parametrize(
+    "path_name",
+    ["missing.txt", "invalid-utf8.txt"],
+)
+def test_download_from_txt_file_logs_bad_files_without_dispatching(
+    tmp_path, caplog, path_name
+):
+    txt_file = tmp_path / path_name
+    if path_name == "invalid-utf8.txt":
+        txt_file.write_bytes(b"\xff")
+    qdl = QobuzDL(directory=tmp_path / "downloads")
+    qdl.download_list_of_urls = lambda urls: pytest.fail(
+        f"bad text file unexpectedly dispatched {urls}"
+    )
+    caplog.set_level("ERROR", logger="qobuz_dl.core")
+
+    qdl.download_from_txt_file(txt_file)
+
+    assert any("Invalid text file" in record.getMessage() for record in caplog.records)
+    assert not hasattr(qdl, "client")
+
+
+def test_download_from_txt_file_logs_unreadable_file_without_dispatching(
+    tmp_path, monkeypatch, caplog
+):
+    txt_file = tmp_path / "unreadable.txt"
+    txt_file.write_text("https://play.qobuz.com/album/album1", encoding="utf-8")
+    qdl = QobuzDL(directory=tmp_path / "downloads")
+    qdl.download_list_of_urls = lambda urls: pytest.fail(
+        f"unreadable text file unexpectedly dispatched {urls}"
+    )
+    real_open = builtins.open
+
+    def fake_open(file, *args, **kwargs):
+        if os.fspath(file) == os.fspath(txt_file):
+            raise PermissionError("permission denied")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    caplog.set_level("ERROR", logger="qobuz_dl.core")
+
+    qdl.download_from_txt_file(txt_file)
+
+    assert any("Invalid text file" in record.getMessage() for record in caplog.records)
+    assert not hasattr(qdl, "client")
 
 
 @pytest.mark.parametrize(

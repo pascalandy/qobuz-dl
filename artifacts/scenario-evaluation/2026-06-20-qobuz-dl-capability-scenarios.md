@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S02 only; S01 evidence is retained from the merged S01 PR.
+- Scope for this PR: S03 only; S01 and S02 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -26,7 +26,7 @@
 | --- | --- | --- | --- |
 | S01 | CLI/config safety | Help/version do not initialize config; parser exposes commands/options; show-config redacts sensitive values; reset/purge behavior is safe. | Pass |
 | S02 | Direct source routing | Album/track/artist/label/playlist URLs route correctly, invalid URLs do not crash, collection pages are all consumed. | Pass |
-| S03 | Text-file source ingestion | Local URL files ignore blank/comment lines, dispatch remaining URLs, and bad files fail gracefully. | Not evaluated |
+| S03 | Text-file source ingestion | Local URL files ignore blank/comment lines, dispatch remaining URLs, and bad files fail gracefully. | Pass |
 | S04 | Lucky search mode | Query validation, type/limit mapping, result URLs, and download dispatch are correct. | Not evaluated |
 | S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Not evaluated |
 | S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Not evaluated |
@@ -89,3 +89,31 @@ S02 is covered in `tests/test_core_regressions.py`.
 ## S02 status
 
 Pass. S02 behavior is covered by local automated tests using fake clients, monkeypatched M3U generation, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
+
+## S03 evidence
+
+### Automated coverage
+
+S03 is covered in `tests/test_core_regressions.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| Local URL files ignore blank and comment lines | `test_download_list_of_urls_ingests_text_file_sources_in_order` writes a temporary URL file containing blank lines, whitespace-only lines, whole-line comments, and indented comments, then verifies only non-comment URL lines are dispatched. |
+| Remaining URLs dispatch through the normal URL handling path in order | The same test invokes `download_list_of_urls([str(url_file)])`, fakes the normal Qobuz and Last.fm handlers, and verifies the surviving URLs are dispatched in file order. |
+| Repeated valid URLs are preserved | The same test includes the same track URL twice and verifies both occurrences are dispatched. |
+| Bad and missing files fail gracefully | `test_download_from_txt_file_logs_bad_files_without_dispatching` covers a missing temporary path and an invalid UTF-8 text file, verifies an `Invalid text file` log entry, and fails the test if any URL dispatch happens. |
+| Unreadable files fail gracefully | `test_download_from_txt_file_logs_unreadable_file_without_dispatching` simulates `PermissionError`, verifies an `Invalid text file` log entry, and fails the test if any URL dispatch happens. |
+| Bad-file paths avoid live Qobuz/API/download behavior | The bad-file and unreadable-file tests construct `QobuzDL` without initializing a client, patch dispatch to fail if touched, and verify no `client` attribute is created. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_core_regressions.py -k "text_file or txt_file"` | Pass: 4 tests passed, 24 deselected. |
+| `just ci` | Pass: ruff format check, ruff lint, 90 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S03 status
+
+Pass. S03 behavior is covered by local automated tests using temporary URL files, fake URL handlers, monkeypatched file errors, and captured logs. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
