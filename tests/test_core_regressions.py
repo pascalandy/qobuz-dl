@@ -393,6 +393,77 @@ def test_handle_url_downloads_collection_items_from_every_page(
         assert m3u_paths == []
 
 
+def test_artist_download_plan_applies_smart_discography_across_every_page(tmp_path):
+    qdl = QobuzDL(directory=tmp_path, smart_discography=True)
+    metadata_item_ids = []
+
+    def artist_meta(self, item_id):
+        metadata_item_ids.append(item_id)
+        return iter(
+            [
+                {
+                    "name": "Artist",
+                    "albums": {
+                        "items": [
+                            _album("Same Album", "Artist", 16, 44.1, "cd-quality"),
+                            _album("Same Album", "Artist", 24, 96, "hi-res"),
+                        ]
+                    },
+                },
+                {
+                    "name": "Artist",
+                    "albums": {
+                        "items": [
+                            _album("Second Album", "Artist", album_id="second"),
+                        ]
+                    },
+                },
+            ]
+        )
+
+    qdl.client = type("Client", (), {"get_artist_meta": artist_meta})()
+
+    plan = qdl._resolve_url_download_plan("https://play.qobuz.com/artist/artist1")
+
+    assert metadata_item_ids == ["artist1"]
+    assert plan.url_type == "artist"
+    assert plan.collection_name == "Artist"
+    assert plan.album is True
+    assert plan.create_m3u is False
+    assert plan.item_ids == ("hi-res", "second")
+
+
+def test_label_download_plan_does_not_apply_smart_discography(tmp_path):
+    qdl = QobuzDL(directory=tmp_path, smart_discography=True)
+    metadata_item_ids = []
+
+    def label_meta(self, item_id):
+        metadata_item_ids.append(item_id)
+        return iter(
+            [
+                {
+                    "name": "Label",
+                    "albums": {"items": [{"id": "first"}, {"id": "second"}]},
+                },
+                {
+                    "name": "Label",
+                    "albums": {"items": [{"id": "third"}]},
+                },
+            ]
+        )
+
+    qdl.client = type("Client", (), {"get_label_meta": label_meta})()
+
+    plan = qdl._resolve_url_download_plan("https://play.qobuz.com/label/label1")
+
+    assert metadata_item_ids == ["label1"]
+    assert plan.url_type == "label"
+    assert plan.collection_name == "Label"
+    assert plan.album is True
+    assert plan.create_m3u is False
+    assert plan.item_ids == ("first", "second", "third")
+
+
 def test_smart_discography_filter_sees_albums_from_every_page():
     contents = [
         {

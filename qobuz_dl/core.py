@@ -1,5 +1,6 @@
 import logging
 import os
+from dataclasses import dataclass
 from html.parser import HTMLParser
 
 from qobuz_dl import downloader, http, qopy
@@ -26,6 +27,21 @@ QUALITIES = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _DirectDownloadPlan:
+    item_id: str
+    album: bool
+
+
+@dataclass(frozen=True)
+class _CollectionDownloadPlan:
+    url_type: str
+    collection_name: str
+    item_ids: tuple[str, ...]
+    album: bool
+    create_m3u: bool = False
 
 
 def _normalize_search_query(query):
@@ -212,58 +228,97 @@ class QobuzDL:
         except (http.HttpError, ConnectionError, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
 
-    def handle_url(self, url):
-        possibles = {
-            "playlist": {"func": "get_plist_meta", "iterable_key": "tracks"},
-            "artist": {"func": "get_artist_meta", "iterable_key": "albums"},
-            "label": {"func": "get_label_meta", "iterable_key": "albums"},
-            "album": {"album": True, "func": None, "iterable_key": None},
-            "track": {"album": False, "func": None, "iterable_key": None},
-        }
+    def _resolve_url_download_plan(self, url):
         try:
             url_type, item_id = get_url_info(url)
-            type_dict = possibles[url_type]
         except (KeyError, ValueError):
             logger.info(
                 f'{RED}Invalid url: "{url}". Use urls from https://play.qobuz.com!'
             )
             return
-        if type_dict["func"]:
-            meta_func = getattr(self.client, type_dict["func"])
-            content = list(meta_func(item_id))
-            content_name = content[0]["name"]
-            logger.info(
-                f"{YELLOW}Downloading all the music from {content_name} ({url_type})!"
-            )
-            new_path = create_and_return_dir(
-                os.path.join(self.directory, sanitize_filename(content_name))
-            )
 
-            if self.smart_discography and url_type == "artist":
-                # change `save_space` and `skip_extras` for customization
-                items = smart_discography_filter(
-                    content,
-                    save_space=True,
-                    skip_extras=True,
-                )
-            else:
-                items = [
-                    item
-                    for page in content
-                    for item in page[type_dict["iterable_key"]]["items"]
-                ]
+        if url_type == "album":
+            return _DirectDownloadPlan(item_id=item_id, album=True)
+        if url_type == "track":
+            return _DirectDownloadPlan(item_id=item_id, album=False)
+        if url_type == "artist":
+            return self._resolve_artist_download_plan(item_id)
+        if url_type == "label":
+            return self._resolve_label_download_plan(item_id)
+        if url_type == "playlist":
+            return self._resolve_playlist_download_plan(item_id)
 
-            logger.info(f"{YELLOW}{len(items)} downloads in queue")
-            for item in items:
-                self.download_from_id(
-                    item["id"],
-                    type_dict["iterable_key"] == "albums",
-                    new_path,
-                )
-            if url_type == "playlist" and not self.no_m3u_for_playlists:
-                make_m3u(new_path)
+        logger.info(f'{RED}Invalid url: "{url}". Use urls from https://play.qobuz.com!')
+        return
+
+    def _resolve_artist_download_plan(self, item_id):
+        content = list(self.client.get_artist_meta(item_id))
+        content_name = content[0]["name"]
+        if self.smart_discography:
+            # change `save_space` and `skip_extras` for customization
+            items = smart_discography_filter(
+                content,
+                save_space=True,
+                skip_extras=True,
+            )
         else:
-            self.download_from_id(item_id, type_dict["album"])
+            items = self._collection_items(content, "albums")
+        return _CollectionDownloadPlan(
+            url_type="artist",
+            collection_name=content_name,
+            item_ids=tuple(item["id"] for item in items),
+            album=True,
+        )
+
+    def _resolve_label_download_plan(self, item_id):
+        content = list(self.client.get_label_meta(item_id))
+        return _CollectionDownloadPlan(
+            url_type="label",
+            collection_name=content[0]["name"],
+            item_ids=tuple(
+                item["id"] for item in self._collection_items(content, "albums")
+            ),
+            album=True,
+        )
+
+    def _resolve_playlist_download_plan(self, item_id):
+        content = list(self.client.get_plist_meta(item_id))
+        return _CollectionDownloadPlan(
+            url_type="playlist",
+            collection_name=content[0]["name"],
+            item_ids=tuple(
+                item["id"] for item in self._collection_items(content, "tracks")
+            ),
+            album=False,
+            create_m3u=not self.no_m3u_for_playlists,
+        )
+
+    def _collection_items(self, content, item_key):
+        return [item for page in content for item in page[item_key]["items"]]
+
+    def _execute_url_download_plan(self, plan):
+        if isinstance(plan, _DirectDownloadPlan):
+            self.download_from_id(plan.item_id, plan.album)
+            return
+
+        logger.info(
+            f"{YELLOW}Downloading all the music from "
+            f"{plan.collection_name} ({plan.url_type})!"
+        )
+        new_path = create_and_return_dir(
+            os.path.join(self.directory, sanitize_filename(plan.collection_name))
+        )
+
+        logger.info(f"{YELLOW}{len(plan.item_ids)} downloads in queue")
+        for item_id in plan.item_ids:
+            self.download_from_id(item_id, plan.album, new_path)
+        if plan.create_m3u:
+            make_m3u(new_path)
+
+    def handle_url(self, url):
+        plan = self._resolve_url_download_plan(url)
+        if plan:
+            self._execute_url_download_plan(plan)
 
     def download_list_of_urls(self, urls):
         if not urls or not isinstance(urls, list):
