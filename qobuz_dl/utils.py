@@ -40,20 +40,16 @@ def make_m3u(pl_directory):
     pl_name = rel_folder + ".m3u"
     for local, dirs, files in os.walk(pl_directory):
         dirs.sort()
-        audio_rel_files = [
-            os.path.join(os.path.basename(os.path.normpath(local)), file_)
-            for file_ in files
-            if os.path.splitext(file_)[-1] in EXTENSIONS
-        ]
         audio_files = [
             os.path.abspath(os.path.join(local, file_))
-            for file_ in files
+            for file_ in sorted(files)
             if os.path.splitext(file_)[-1] in EXTENSIONS
         ]
-        if not audio_files or len(audio_files) != len(audio_rel_files):
+        if not audio_files:
             continue
 
-        for audio_rel_file, audio_file in zip(audio_rel_files, audio_files):
+        for audio_file in audio_files:
+            audio_rel_file = os.path.relpath(audio_file, pl_directory)
             try:
                 pl_item = (
                     EasyMP3(audio_file) if ".mp3" in audio_file else FLAC(audio_file)
@@ -70,7 +66,7 @@ def make_m3u(pl_directory):
             track_list.append(index)
 
     if len(track_list) > 1:
-        with open(os.path.join(pl_directory, pl_name), "w") as pl:
+        with open(os.path.join(pl_directory, pl_name), "w", encoding="utf-8") as pl:
             pl.write("\n\n".join(track_list))
 
 
