@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.db import handle_download_id
 
@@ -25,10 +27,18 @@ def _record_downloads(monkeypatch, calls, failures=None):
             self.item_id = item_id
             self.path = path
 
-        def download_id_by_type(self, track=True):
+        def download_release(self):
             if self.item_id in failures:
                 raise ConnectionError("fake download failed")
-            calls.append((self.item_id, track, self.path))
+            calls.append((self.item_id, False, self.path))
+
+        def download_track(self):
+            if self.item_id in failures:
+                raise ConnectionError("fake download failed")
+            calls.append((self.item_id, True, self.path))
+
+        def download_id_by_type(self, track=True):
+            pytest.fail("download_from_id should call explicit download methods")
 
     monkeypatch.setattr("qobuz_dl.core.downloader.Download", FakeDownload)
 

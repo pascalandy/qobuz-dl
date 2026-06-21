@@ -1,5 +1,6 @@
 import logging
 import os
+from dataclasses import dataclass
 from typing import Tuple
 
 import qobuz_dl.http as http
@@ -30,6 +31,12 @@ MAX_FILENAME_LENGTH = 250
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _DownloadPreparation:
+    directory: str
+    is_mp3: bool
+
+
 class Download:
     def __init__(
         self,
@@ -58,10 +65,10 @@ class Download:
         self.track_format = track_format or DEFAULT_TRACK
 
     def download_id_by_type(self, track=True):
-        if not track:
-            self.download_release()
-        else:
+        if track:
             self.download_track()
+        else:
+            self.download_release()
 
     def download_release(self):
         count = 0
@@ -79,37 +86,15 @@ class Download:
 
         album_title = _get_title(meta)
 
-        format_info = self._get_format(meta)
-        file_format, quality_met, bit_depth, sampling_rate = format_info
-
-        if not self.downgrade_quality and not quality_met:
-            logger.info(
-                f"{OFF}Skipping {album_title} as it doesn't meet quality requirement"
-            )
+        preparation = self._prepare_release_download(meta, album_title)
+        if not preparation:
             return
-
-        logger.info(
-            f"\n{YELLOW}Downloading: {album_title}\nQuality: {file_format}"
-            f" ({bit_depth}/{sampling_rate})\n"
-        )
-        album_attr = self._get_album_attr(
-            meta, album_title, file_format, bit_depth, sampling_rate
-        )
-        folder_format, track_format = _clean_format_str(
-            self.folder_format, self.track_format, file_format
-        )
-        sanitized_title = sanitize_filepath(folder_format.format(**album_attr))
-        dirn = os.path.join(self.path, sanitized_title)
-        os.makedirs(dirn, exist_ok=True)
-
-        if self.no_cover:
-            logger.info(f"{OFF}Skipping cover")
-        else:
-            _get_extra(meta["image"]["large"], dirn, og_quality=self.cover_og_quality)
 
         if "goodies" in meta:
             try:
-                _get_extra(meta["goodies"][0]["url"], dirn, "booklet.pdf")
+                _get_extra(
+                    meta["goodies"][0]["url"], preparation.directory, "booklet.pdf"
+                )
             except Exception as error:
                 logger.debug("Skipping booklet download: %s", error)
         media_numbers = [track["media_number"] for track in meta["tracks"]["items"]]
@@ -117,15 +102,13 @@ class Download:
         for i in meta["tracks"]["items"]:
             parse = self.client.get_track_url(i["id"], fmt_id=self.quality)
             if "sample" not in parse and parse.get("sampling_rate"):
-                is_mp3 = int(self.quality) == 5
-                self._download_and_tag(
-                    dirn,
+                self._download_prepared_track(
+                    preparation,
                     count,
                     parse,
                     i,
                     meta,
                     False,
-                    is_mp3,
                     i["media_number"] if is_multiple else None,
                 )
             else:
@@ -141,48 +124,98 @@ class Download:
             track_title = _get_title(meta)
             artist = _safe_get(meta, "performer", "name")
             logger.info(f"\n{YELLOW}Downloading: {artist} - {track_title}")
-            format_info = self._get_format(meta, is_track_id=True, track_url_dict=parse)
-            file_format, quality_met, bit_depth, sampling_rate = format_info
-
-            folder_format, track_format = _clean_format_str(
-                self.folder_format, self.track_format, str(bit_depth)
-            )
-
-            if not self.downgrade_quality and not quality_met:
-                logger.info(
-                    f"{OFF}Skipping {track_title} as it doesn't "
-                    "meet quality requirement"
-                )
+            preparation = self._prepare_track_download(meta, parse, track_title)
+            if not preparation:
                 return
-            track_attr = self._get_track_attr(
-                meta, track_title, bit_depth, sampling_rate
-            )
-            sanitized_title = sanitize_filepath(folder_format.format(**track_attr))
-
-            dirn = os.path.join(self.path, sanitized_title)
-            os.makedirs(dirn, exist_ok=True)
-            if self.no_cover:
-                logger.info(f"{OFF}Skipping cover")
-            else:
-                _get_extra(
-                    meta["album"]["image"]["large"],
-                    dirn,
-                    og_quality=self.cover_og_quality,
-                )
-            is_mp3 = int(self.quality) == 5
-            self._download_and_tag(
-                dirn,
+            self._download_prepared_track(
+                preparation,
                 1,
                 parse,
                 meta,
                 meta,
                 True,
-                is_mp3,
                 None,
             )
         else:
             logger.info(f"{OFF}Demo. Skipping")
         logger.info(f"{GREEN}Completed")
+
+    def _prepare_release_download(self, meta, album_title):
+        file_format, quality_met, bit_depth, sampling_rate = self._get_format(meta)
+
+        if not self._quality_allows_download(album_title, quality_met):
+            return None
+
+        logger.info(
+            f"\n{YELLOW}Downloading: {album_title}\nQuality: {file_format}"
+            f" ({bit_depth}/{sampling_rate})\n"
+        )
+        album_attr = self._get_album_attr(
+            meta, album_title, file_format, bit_depth, sampling_rate
+        )
+        directory = self._prepare_destination(album_attr, file_format)
+        self._download_cover(meta["image"]["large"], directory)
+        return _DownloadPreparation(directory=directory, is_mp3=self._is_mp3())
+
+    def _prepare_track_download(self, meta, track_url_dict, track_title):
+        _file_format, quality_met, bit_depth, sampling_rate = self._get_format(
+            meta, is_track_id=True, track_url_dict=track_url_dict
+        )
+
+        if not self._quality_allows_download(track_title, quality_met):
+            return None
+
+        track_attr = self._get_track_attr(meta, track_title, bit_depth, sampling_rate)
+        directory = self._prepare_destination(track_attr, str(bit_depth))
+        self._download_cover(meta["album"]["image"]["large"], directory)
+        return _DownloadPreparation(directory=directory, is_mp3=self._is_mp3())
+
+    def _quality_allows_download(self, item_title, quality_met):
+        if self.downgrade_quality or quality_met:
+            return True
+        logger.info(
+            f"{OFF}Skipping {item_title} as it doesn't meet quality requirement"
+        )
+        return False
+
+    def _prepare_destination(self, folder_attr, file_format):
+        folder_format, _ = _clean_format_str(
+            self.folder_format, self.track_format, file_format
+        )
+        sanitized_title = sanitize_filepath(folder_format.format(**folder_attr))
+        directory = os.path.join(self.path, sanitized_title)
+        os.makedirs(directory, exist_ok=True)
+        return directory
+
+    def _download_cover(self, cover_url, directory):
+        if self.no_cover:
+            logger.info(f"{OFF}Skipping cover")
+            return
+        _get_extra(cover_url, directory, og_quality=self.cover_og_quality)
+
+    def _download_prepared_track(
+        self,
+        preparation,
+        tmp_count,
+        track_url_dict,
+        track_metadata,
+        album_or_track_metadata,
+        is_track,
+        multiple=None,
+    ):
+        self._download_and_tag(
+            preparation.directory,
+            tmp_count,
+            track_url_dict,
+            track_metadata,
+            album_or_track_metadata,
+            is_track,
+            preparation.is_mp3,
+            multiple,
+        )
+
+    def _is_mp3(self):
+        return int(self.quality) == 5
 
     def _download_and_tag(
         self,

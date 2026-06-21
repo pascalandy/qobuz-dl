@@ -223,7 +223,10 @@ class QobuzDL:
                 self.folder_format,
                 self.track_format,
             )
-            dloader.download_id_by_type(not album)
+            if album:
+                dloader.download_release()
+            else:
+                dloader.download_track()
             handle_download_id(self.downloads_db, item_id, add_id=True)
         except (http.HttpError, ConnectionError, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
