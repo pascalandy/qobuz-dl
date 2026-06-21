@@ -1,6 +1,20 @@
 # Use cases
 
-This guide organizes `qobuz-dl` by user goal. Examples use `uvx qobuz-dl`, the recommended no-install workflow. If you installed the optional persistent tool with `uv tool install qobuz-dl`, you may replace `uvx qobuz-dl` with `qobuz-dl`. From a local checkout, use `uv run qobuz-dl ...`.
+This guide organizes `qobuz-dl` by local-library goal. Examples use `uvx qobuz-dl`, the recommended no-install workflow. If you installed the optional persistent tool with `uv tool install qobuz-dl`, you may replace `uvx qobuz-dl` with `qobuz-dl`. From a local checkout, use `uv run qobuz-dl ...`.
+
+## Library-building workflows for collectors
+
+`qobuz-dl` is most useful when you already think in albums, playlists, folders, tags, and repeatable intake runs. These workflows map common enthusiast jobs to the commands and options documented below.
+
+| Goal | Workflow | Start with |
+|---|---|---|
+| Add a hi-res album to a local library | Download the album URL with `--quality 27` to request the highest hi-res tier supported by the CLI. Leave fallback enabled to accept a lower available tier, or add `--no-fallback` when you only want the requested quality. | `uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27` |
+| Keep clean folder names | Use `--folder-format` and `--track-format` with metadata such as album artist, album, year, bit depth, sample rate, track number, and title. | `uvx qobuz-dl dl ALBUM_URL -ff "{albumartist} - {album} ({year})" -tf "{tracknumber}. {tracktitle}"` |
+| Intake an artist catalog | Download an artist URL. Add `--albums-only` to skip singles, EPs, and Various Artists releases where applicable; add `--smart-discography` to reduce likely spam/extras and prefer practical remaster/quality choices. | `uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography` |
+| Capture a label or playlist | Download label URLs, Qobuz playlist URLs, Last.fm playlist URLs, or a text file of saved URLs. Playlist downloads can create `.m3u` files unless you pass `--no-m3u`. | `uvx qobuz-dl dl urls.txt` |
+| Avoid duplicate downloads | Let the local downloaded-ID database skip IDs that were already downloaded. Use `--no-db` for a one-off bypass or `uvx qobuz-dl --purge` to reset the database. | `uvx qobuz-dl dl ALBUM_URL` |
+| Choose an artwork policy | Keep the default `cover.jpg`, embed artwork with `--embed-art`, request original-quality covers with `--og-cover`, or skip cover downloads with `--no-cover`. | `uvx qobuz-dl dl ALBUM_URL --embed-art --og-cover` |
+| Discover from the terminal | Use `fun` for interactive search with queueing, or `lucky` when a best-match album, track, artist, or playlist search is good enough. | `uvx qobuz-dl fun --limit 10` |
 
 ## 1. Account and authentication
 
@@ -268,7 +282,7 @@ Set folder naming for one run:
 
 ```sh
 uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
-  --folder-format "{albumartist}/{album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
+  --folder-format "{albumartist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
 ```
 
 Set track filename naming for one run:
@@ -282,7 +296,7 @@ Short forms:
 
 ```sh
 uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
-  -ff "{albumartist}/{album} ({year})" \
+  -ff "{albumartist} - {album} ({year})" \
   -tf "{tracknumber}. {tracktitle}"
 ```
 
