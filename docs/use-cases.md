@@ -37,6 +37,80 @@ The prompt asks for:
 
 If you want max available resolution as your normal default, enter `27` for the default quality. If you leave the first-run quality prompt empty, the current config creator uses `6` / CD quality.
 
+### Where auth/config and the database live
+
+The current implementation stores config and duplicate-tracking state under one per-user directory:
+
+| Platform/runtime | Config file | Downloaded-IDs database |
+|---|---|---|
+| Linux and macOS | `~/.config/qobuz-dl/config.ini` | `~/.config/qobuz-dl/qobuz_dl.db` |
+| Windows | `%APPDATA%\qobuz-dl\config.ini` | `%APPDATA%\qobuz-dl\qobuz_dl.db` |
+
+These paths come from the running process: non-Windows systems use the current user's home directory plus `.config`, and Windows uses the `APPDATA` environment variable. The CLI does not currently use `XDG_CONFIG_HOME` or macOS `~/Library/Application Support`.
+
+The config file stores:
+
+- `email`
+- `password`, as an MD5 hash of the Qobuz password
+- `app_id`
+- `secrets`
+- `default_folder`
+- `default_quality`
+- `default_limit`
+- `no_m3u`
+- `albums_only`
+- `no_fallback`
+- `og_cover`
+- `embed_art`
+- `no_cover`
+- `no_database`
+- `smart_discography`
+- `folder_format`
+- `track_format`
+
+Treat the config file as a secret. The saved password is hashed, not plaintext, but that hash is still used for the tool's login flow. `--show-config` redacts `email`, `password`, `app_id`, `secrets`, `private_key`, and `user_auth_token` if those keys are present, but the actual config file contains the saved values. The current config creator does not write `user_auth_token`; Qobuz login returns that token when a command initializes, and the process keeps it in memory for that run.
+
+The database is a local SQLite file used only for duplicate tracking. It stores downloaded item IDs so repeated runs can skip releases that were already downloaded. It is not required for authentication.
+
+### Move auth/config to another computer
+
+You can copy the config file to another computer to avoid re-entering the Qobuz email, password, default preferences, app ID, and app secrets. This does not bypass Qobuz: commands such as `dl`, `fun`, and `lucky` still log in online when they initialize, reject invalid credentials, and require an eligible active subscription.
+
+1. On the source computer, locate the files:
+
+   ```sh
+   uvx qobuz-dl --show-config
+   ```
+
+2. Transfer the displayed `Configuration` file to the destination computer as `config.ini`. Transfer the displayed `Database` file as `qobuz_dl.db` too only if you want to preserve duplicate-tracking history.
+
+3. On Linux or macOS, copy the transferred files into place and restrict them to your user:
+
+   ```sh
+   mkdir -p ~/.config/qobuz-dl
+   cp /secure-transfer/config.ini ~/.config/qobuz-dl/config.ini
+   [ -f /secure-transfer/qobuz_dl.db ] && cp /secure-transfer/qobuz_dl.db ~/.config/qobuz-dl/qobuz_dl.db
+   chmod 700 ~/.config/qobuz-dl
+   chmod 600 ~/.config/qobuz-dl/config.ini
+   [ -f ~/.config/qobuz-dl/qobuz_dl.db ] && chmod 600 ~/.config/qobuz-dl/qobuz_dl.db
+   ```
+
+   Replace `/secure-transfer` with the directory where you put the transferred files.
+
+   On Windows PowerShell, place the files under `%APPDATA%\qobuz-dl`:
+
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:APPDATA\qobuz-dl"
+   Copy-Item .\config.ini "$env:APPDATA\qobuz-dl\config.ini"
+   if (Test-Path .\qobuz_dl.db) { Copy-Item .\qobuz_dl.db "$env:APPDATA\qobuz-dl\qobuz_dl.db" }
+   ```
+
+   Keep the directory readable only by your Windows user account.
+
+4. If `default_folder` contains an old absolute path or a path from another operating system, edit it before the first download on the new computer.
+
+Use an encrypted transfer or trusted local copy method. Do not paste `config.ini` into issues, chat logs, shell history, public sync folders, or commits. If the copied app ID or app secrets stop working after Qobuz changes its web app, run `uvx qobuz-dl --reset` on the destination computer to refresh the config.
+
 ### Check whether config already exists
 
 Show the config path, database path, and redacted config values:
@@ -51,11 +125,11 @@ Short form:
 uvx qobuz-dl -sc
 ```
 
-Note: this confirms local configuration exists. It is not a dedicated login-validation command. Account access is validated when a Qobuz command initializes and talks to Qobuz.
+Note: this confirms local configuration exists. If no config exists yet, normal first-run config creation runs before the paths and redacted values are printed. `--show-config` exits before initializing the Qobuz client, so it is not a dedicated login-validation command. Account access is validated when a Qobuz command initializes and talks to Qobuz.
 
 ### Reset authentication/config
 
-Use this when credentials changed, the config is broken, or you want a fresh setup:
+Use this when credentials changed, the config is broken, app credentials need to be refreshed, or you want a fresh setup:
 
 ```sh
 uvx qobuz-dl --reset
@@ -66,6 +140,8 @@ Short form:
 ```sh
 uvx qobuz-dl -r
 ```
+
+`--reset` prompts for Qobuz email, Qobuz password, default download folder, and default quality, fetches the current Qobuz app ID and app secrets, rewrites `config.ini`, and exits before initializing the Qobuz client. It does not delete `qobuz_dl.db`; use `uvx qobuz-dl --purge` if you also want to remove duplicate-tracking history.
 
 ## 2. Primary downloads
 
