@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -47,6 +48,27 @@ def test_parser_accepts_top_level_flags():
 
 
 @pytest.mark.parametrize(
+    ("argv", "needs_config", "needs_auth"),
+    [
+        (["--reset"], False, False),
+        (["--purge"], False, False),
+        (["--show-config"], True, False),
+        (["--show-config", "--purge"], True, False),
+        (["dl", "https://play.qobuz.com/album/example"], True, True),
+        (["fun"], True, True),
+        (["lucky", "joy", "division"], True, True),
+    ],
+)
+def test_startup_classification_uses_parsed_arguments(argv, needs_config, needs_auth):
+    arguments = qobuz_dl_args().parse_args(argv)
+
+    startup = cli._classify_startup(arguments)
+
+    assert startup.needs_config is needs_config
+    assert startup.needs_auth is needs_auth
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ["qobuz-dl", "--help"],
@@ -57,16 +79,29 @@ def test_parser_accepts_top_level_flags():
     ],
 )
 def test_help_and_version_do_not_initialize_config(monkeypatch, tmp_path, argv):
+    config_path = tmp_path / "missing-config-dir"
+    config_file = tmp_path / "missing-config.ini"
+
     monkeypatch.setattr(sys, "argv", argv)
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(tmp_path / "missing-config-dir"))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(tmp_path / "missing-config.ini"))
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
 
     def fail_if_reset(config_file):
         pytest.fail(f"unexpected config reset for {config_file}")
 
-    monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("help/version must not initialize the Qobuz client")
 
-    cli._initial_checks()
+    monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
+    monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 0
+    assert not config_path.exists()
+    assert not config_file.exists()
 
 
 def test_parser_accepts_download_command_with_common_options():
@@ -317,6 +352,138 @@ def test_first_run_reset_only_resets_once(monkeypatch, tmp_path):
 
     assert exc.value.code == "reset-complete"
     assert reset_calls == [str(config_file)]
+
+
+def test_show_config_exits_before_client_initialization(monkeypatch, tmp_path, capsys):
+    config_path = tmp_path / "config"
+    config_file = config_path / "config.ini"
+    database_file = config_path / "qobuz_dl.db"
+    _write_valid_config(config_file)
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("show-config must not initialize the Qobuz client")
+
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--show-config"])
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    output = capsys.readouterr().out
+    assert exc.value.code is None
+    assert f"Configuration: {config_file}" in output
+    assert f"Database: {database_file}" in output
+    assert "user@example.com" not in output
+    assert "hashed-password" not in output
+    assert "secret-one" not in output
+    assert "email = <redacted>" in output
+    assert "password = <redacted>" in output
+    assert "secrets = <redacted>" in output
+
+
+def test_download_first_run_creates_config_once_then_initializes_client(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "config"
+    config_file = config_path / "config.ini"
+    database_file = config_path / "qobuz_dl.db"
+    reset_calls = []
+    initialized = []
+    downloaded = []
+
+    class FakeQobuzDL:
+        def __init__(self, *args, downloads_db, **kwargs):
+            self.directory = str(tmp_path / "downloads")
+            initialized.append((args, downloads_db, kwargs))
+
+        def initialize_client(self, email, password, app_id, secrets):
+            initialized.append((email, password, app_id, secrets))
+
+        def download_list_of_urls(self, urls):
+            downloaded.append(list(urls))
+
+    def fake_reset(target):
+        reset_calls.append(target)
+        _write_valid_config(Path(target))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "qobuz-dl",
+            "dl",
+            "https://play.qobuz.com/album/album-1",
+        ],
+    )
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    monkeypatch.setattr(cli, "_reset_config", fake_reset)
+    monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
+    monkeypatch.setattr(cli, "_remove_leftovers", lambda directory: None)
+
+    cli.main()
+
+    assert reset_calls == [str(config_file)]
+    assert initialized[0] == (
+        ("Qobuz Downloads", 6, False),
+        str(database_file),
+        {
+            "cover_og_quality": False,
+            "folder_format": "{albumartist} - {album}",
+            "ignore_singles_eps": False,
+            "no_cover": False,
+            "no_m3u_for_playlists": False,
+            "quality_fallback": True,
+            "smart_discography": False,
+            "track_format": "{tracknumber}. {tracktitle}",
+        },
+    )
+    assert initialized[1] == (
+        "user@example.com",
+        "hashed-password",
+        "123456",
+        ["secret-one", "secret-two"],
+    )
+    assert downloaded == [["https://play.qobuz.com/album/album-1"]]
+
+
+def test_download_corrupted_config_reports_recovery_without_client(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "config"
+    config_file = config_path / "config.ini"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("[DEFAULT]\nemail = user@example.com\n")
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("corrupted config must not initialize the Qobuz client")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "qobuz-dl",
+            "dl",
+            "https://play.qobuz.com/album/album-1",
+        ],
+    )
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    message = str(exc.value)
+    assert "Your config file is corrupted:" in message
+    assert "Run 'uvx qobuz-dl -r' to fix this" in message
+    assert "(or 'qobuz-dl -r' if installed)." in message
 
 
 def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(

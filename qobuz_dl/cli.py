@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from io import StringIO
 
 from qobuz_dl.bundle import Bundle
@@ -34,6 +35,60 @@ SENSITIVE_CONFIG_KEYS = {
     "secrets",
     "user_auth_token",
 }
+
+
+@dataclass(frozen=True)
+class _StartupRequirements:
+    needs_config: bool
+    needs_auth: bool
+
+
+def _classify_startup(arguments):
+    if arguments.reset:
+        return _StartupRequirements(needs_config=False, needs_auth=False)
+    if arguments.show_config:
+        return _StartupRequirements(needs_config=True, needs_auth=False)
+    if arguments.purge:
+        return _StartupRequirements(needs_config=False, needs_auth=False)
+
+    command_needs_client = arguments.command is not None
+    return _StartupRequirements(
+        needs_config=command_needs_client,
+        needs_auth=command_needs_client,
+    )
+
+
+def _ensure_config_exists(config_file):
+    if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(config_file):
+        _reset_config(config_file)
+
+
+def _load_config_values(config_file):
+    config = configparser.ConfigParser()
+    config.read(config_file)
+
+    values = {
+        "email": config["DEFAULT"]["email"],
+        "password": config["DEFAULT"]["password"],
+        "default_folder": config["DEFAULT"]["default_folder"],
+        "default_limit": config["DEFAULT"]["default_limit"],
+        "default_quality": config["DEFAULT"]["default_quality"],
+        "no_m3u": config.getboolean("DEFAULT", "no_m3u"),
+        "albums_only": config.getboolean("DEFAULT", "albums_only"),
+        "no_fallback": config.getboolean("DEFAULT", "no_fallback"),
+        "og_cover": config.getboolean("DEFAULT", "og_cover"),
+        "embed_art": config.getboolean("DEFAULT", "embed_art"),
+        "no_cover": config.getboolean("DEFAULT", "no_cover"),
+        "no_database": config.getboolean("DEFAULT", "no_database"),
+        "app_id": config["DEFAULT"]["app_id"],
+        "smart_discography": config.getboolean("DEFAULT", "smart_discography"),
+        "folder_format": config["DEFAULT"]["folder_format"],
+        "track_format": config["DEFAULT"]["track_format"],
+    }
+    values["secrets"] = [
+        secret for secret in config["DEFAULT"]["secrets"].split(",") if secret
+    ]
+    return values
 
 
 def _redacted_config_text(config_file):
@@ -131,64 +186,29 @@ def _handle_commands(qobuz, arguments):
         _remove_leftovers(qobuz.directory)
 
 
-def _initial_checks():
-    # Help, version, and maintenance flags must not prompt for config setup.
-    if any(
-        arg in {"-h", "--help", "--version", "-r", "--reset", "-p", "--purge"}
-        for arg in sys.argv[1:]
-    ):
-        return
+def main():
+    parser = qobuz_dl_args()
+    arguments = parser.parse_args()
+    startup = _classify_startup(arguments)
 
-    if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
-        os.makedirs(CONFIG_PATH, exist_ok=True)
-        _reset_config(CONFIG_FILE)
+    if arguments.reset:
+        sys.exit(_reset_config(CONFIG_FILE))
 
-    if len(sys.argv) < 2:
-        qobuz_dl_args().print_help()
+    if arguments.command is None and not arguments.show_config and not arguments.purge:
+        parser.print_help()
         sys.exit(0)
 
-
-def main():
-    _initial_checks()
-
-    config = configparser.ConfigParser()
-    config.read(CONFIG_FILE)
-
-    try:
-        email = config["DEFAULT"]["email"]
-        password = config["DEFAULT"]["password"]
-        default_folder = config["DEFAULT"]["default_folder"]
-        default_limit = config["DEFAULT"]["default_limit"]
-        default_quality = config["DEFAULT"]["default_quality"]
-        no_m3u = config.getboolean("DEFAULT", "no_m3u")
-        albums_only = config.getboolean("DEFAULT", "albums_only")
-        no_fallback = config.getboolean("DEFAULT", "no_fallback")
-        og_cover = config.getboolean("DEFAULT", "og_cover")
-        embed_art = config.getboolean("DEFAULT", "embed_art")
-        no_cover = config.getboolean("DEFAULT", "no_cover")
-        no_database = config.getboolean("DEFAULT", "no_database")
-        app_id = config["DEFAULT"]["app_id"]
-        smart_discography = config.getboolean("DEFAULT", "smart_discography")
-        folder_format = config["DEFAULT"]["folder_format"]
-        track_format = config["DEFAULT"]["track_format"]
-
-        secrets = [
-            secret for secret in config["DEFAULT"]["secrets"].split(",") if secret
-        ]
-        arguments = qobuz_dl_args(
-            default_quality, default_limit, default_folder
-        ).parse_args()
-    except (KeyError, UnicodeDecodeError, configparser.Error) as error:
-        arguments = qobuz_dl_args().parse_args()
-        if not (arguments.reset or arguments.purge):
+    config_values = None
+    if startup.needs_config:
+        try:
+            _ensure_config_exists(CONFIG_FILE)
+            config_values = _load_config_values(CONFIG_FILE)
+        except (KeyError, UnicodeDecodeError, configparser.Error) as error:
             sys.exit(
                 f"{RED}Your config file is corrupted: {error}! "
                 "Run 'uvx qobuz-dl -r' to fix this "
                 "(or 'qobuz-dl -r' if installed)."
             )
-
-    if arguments.reset:
-        sys.exit(_reset_config(CONFIG_FILE))
 
     if arguments.show_config:
         print(f"Configuration: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
@@ -202,21 +222,40 @@ def main():
             pass
         sys.exit(f"{GREEN}The database was deleted.")
 
+    if startup.needs_auth:
+        arguments = qobuz_dl_args(
+            config_values["default_quality"],
+            config_values["default_limit"],
+            config_values["default_folder"],
+        ).parse_args()
+
     qobuz = QobuzDL(
         arguments.directory,
         arguments.quality,
-        arguments.embed_art or embed_art,
-        ignore_singles_eps=arguments.albums_only or albums_only,
-        no_m3u_for_playlists=arguments.no_m3u or no_m3u,
-        quality_fallback=_quality_fallback_enabled(arguments.no_fallback, no_fallback),
-        cover_og_quality=arguments.og_cover or og_cover,
-        no_cover=arguments.no_cover or no_cover,
-        downloads_db=None if no_database or arguments.no_db else QOBUZ_DB,
-        folder_format=arguments.folder_format or folder_format,
-        track_format=arguments.track_format or track_format,
-        smart_discography=arguments.smart_discography or smart_discography,
+        arguments.embed_art or config_values["embed_art"],
+        ignore_singles_eps=arguments.albums_only or config_values["albums_only"],
+        no_m3u_for_playlists=arguments.no_m3u or config_values["no_m3u"],
+        quality_fallback=_quality_fallback_enabled(
+            arguments.no_fallback,
+            config_values["no_fallback"],
+        ),
+        cover_og_quality=arguments.og_cover or config_values["og_cover"],
+        no_cover=arguments.no_cover or config_values["no_cover"],
+        downloads_db=None
+        if config_values["no_database"] or arguments.no_db
+        else QOBUZ_DB,
+        folder_format=arguments.folder_format or config_values["folder_format"],
+        track_format=arguments.track_format or config_values["track_format"],
+        smart_discography=(
+            arguments.smart_discography or config_values["smart_discography"]
+        ),
     )
-    qobuz.initialize_client(email, password, app_id, secrets)
+    qobuz.initialize_client(
+        config_values["email"],
+        config_values["password"],
+        config_values["app_id"],
+        config_values["secrets"],
+    )
 
     _handle_commands(qobuz, arguments)
 
