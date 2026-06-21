@@ -323,7 +323,16 @@ def download_with_progress(url, fname, desc):
             while next_report <= downloaded:
                 next_report += report_interval
 
-    http.stream_download(url, fname, progress=show_progress)
+    try:
+        http.stream_download(url, fname, progress=show_progress)
+    except BaseException:
+        try:
+            os.remove(fname)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            logger.debug("Could not remove partial download %s: %s", fname, error)
+        raise
 
 
 def _get_title(item_dict):
