@@ -155,6 +155,59 @@ def test_tag_mp3_writes_track_metadata_cover_flag_and_renames(tmp_path):
     assert no_cover.getall("APIC") == []
 
 
+def test_taggers_preserve_missing_optional_metadata_differences(tmp_path):
+    album = _fake_album()
+    album.pop("label")
+    track = _fake_track(album)
+    track.pop("composer")
+    track.pop("performer")
+
+    flac_dir = tmp_path / "flac-no-label"
+    flac_dir.mkdir()
+    flac_temp = flac_dir / ".02.tmp"
+    flac_final = flac_dir / "02. Finale.flac"
+    _write_fake_flac(flac_temp)
+
+    metadata.tag_flac(
+        str(flac_temp),
+        str(flac_dir),
+        str(flac_final),
+        track,
+        album,
+        istrack=True,
+        em_image=False,
+    )
+
+    flac = FLAC(flac_final)
+    assert flac["ARTIST"] == ["Album Artist"]
+    assert flac["LABEL"] == ["n/a"]
+    assert "COMPOSER" not in flac
+    assert "DISCNUMBER" not in flac
+
+    mp3_dir = tmp_path / "mp3-no-label"
+    mp3_dir.mkdir()
+    mp3_temp = mp3_dir / ".02.tmp"
+    mp3_final = mp3_dir / "02. Finale.mp3"
+    mp3_temp.write_bytes(b"fake mp3 frame bytes")
+
+    metadata.tag_mp3(
+        str(mp3_temp),
+        str(mp3_dir),
+        str(mp3_final),
+        track,
+        album,
+        istrack=False,
+        em_image=False,
+    )
+
+    mp3 = ID3(mp3_final, translate=False)
+    assert mp3["TPE1"].text == ["Album Artist"]
+    assert mp3["TRCK"].text == ["2/9"]
+    assert mp3["TPOS"].text == ["2"]
+    assert "TPUB" not in mp3
+    assert "TCOM" not in mp3
+
+
 def test_make_m3u_writes_sorted_relative_entries_from_fake_media(tmp_path):
     playlist_dir = tmp_path / "Playlist"
     playlist_dir.mkdir()

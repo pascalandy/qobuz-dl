@@ -30,6 +30,7 @@ ID3_LEGEND = {
     "title": id3.TIT2,
     "year": id3.TYER,
 }
+_MISSING = object()
 
 
 def _get_title(track_dict):
@@ -59,6 +60,45 @@ def _format_genres(genres: list) -> str:
     """
     genres = re.findall(r"([^\u2192\/]+)", "/".join(genres))
     return ", ".join(dict.fromkeys(genres))
+
+
+def _build_metadata_payload(d: dict, album: dict, istrack=True):
+    artist = d.get("performer", {}).get("name")
+    if istrack:
+        album_data = d["album"]
+        artist = artist or album_data["artist"]["name"]
+        copyright_text = d.get("copyright") or "n/a"
+    else:
+        album_data = album
+        artist = artist or album_data["artist"]["name"]
+        copyright_text = album.get("copyright") or "n/a"
+
+    try:
+        composer = d["composer"]["name"]
+    except KeyError:
+        composer = _MISSING
+
+    flac_label = album.get("label", {}).get("name", "n/a")
+    try:
+        mp3_label = album["label"]["name"]
+    except KeyError:
+        mp3_label = _MISSING
+
+    return {
+        "title": _get_title(d),
+        "tracknumber": str(d["track_number"]),
+        "discnumber": str(d["media_number"]),
+        "composer": composer,
+        "artist": artist,
+        "flac_label": flac_label,
+        "mp3_label": mp3_label,
+        "genre": _format_genres(album_data["genres_list"]),
+        "albumartist": album_data["artist"]["name"],
+        "tracktotal": str(album_data["tracks_count"]),
+        "album": album_data["title"],
+        "date": album_data["release_date_original"],
+        "copyright": _format_copyright(copyright_text),
+    }
 
 
 def _embed_flac_img(root_dir, audio: FLAC):
@@ -121,41 +161,26 @@ def tag_flac(
     :param bool em_image: Embed cover art into file
     """
     audio = FLAC(filename)
+    tags = _build_metadata_payload(d, album, istrack=istrack)
 
-    audio["TITLE"] = _get_title(d)
+    audio["TITLE"] = tags["title"]
 
-    audio["TRACKNUMBER"] = str(d["track_number"])  # TRACK NUMBER
+    audio["TRACKNUMBER"] = tags["tracknumber"]  # TRACK NUMBER
 
     if "Disc " in final_name:
-        audio["DISCNUMBER"] = str(d["media_number"])
+        audio["DISCNUMBER"] = tags["discnumber"]
 
-    try:
-        audio["COMPOSER"] = d["composer"]["name"]  # COMPOSER
-    except KeyError:
-        pass
+    if tags["composer"] is not _MISSING:
+        audio["COMPOSER"] = tags["composer"]  # COMPOSER
 
-    artist_ = d.get("performer", {}).get("name")  # TRACK ARTIST
-    if istrack:
-        audio["ARTIST"] = artist_ or d["album"]["artist"]["name"]  # TRACK ARTIST
-    else:
-        audio["ARTIST"] = artist_ or album["artist"]["name"]
-
-    audio["LABEL"] = album.get("label", {}).get("name", "n/a")
-
-    if istrack:
-        audio["GENRE"] = _format_genres(d["album"]["genres_list"])
-        audio["ALBUMARTIST"] = d["album"]["artist"]["name"]
-        audio["TRACKTOTAL"] = str(d["album"]["tracks_count"])
-        audio["ALBUM"] = d["album"]["title"]
-        audio["DATE"] = d["album"]["release_date_original"]
-        audio["COPYRIGHT"] = _format_copyright(d.get("copyright") or "n/a")
-    else:
-        audio["GENRE"] = _format_genres(album["genres_list"])
-        audio["ALBUMARTIST"] = album["artist"]["name"]
-        audio["TRACKTOTAL"] = str(album["tracks_count"])
-        audio["ALBUM"] = album["title"]
-        audio["DATE"] = album["release_date_original"]
-        audio["COPYRIGHT"] = _format_copyright(album.get("copyright") or "n/a")
+    audio["ARTIST"] = tags["artist"]  # TRACK ARTIST
+    audio["LABEL"] = tags["flac_label"]
+    audio["GENRE"] = tags["genre"]
+    audio["ALBUMARTIST"] = tags["albumartist"]
+    audio["TRACKTOTAL"] = tags["tracktotal"]
+    audio["ALBUM"] = tags["album"]
+    audio["DATE"] = tags["date"]
+    audio["COPYRIGHT"] = tags["copyright"]
 
     if em_image:
         _embed_flac_img(root_dir, audio)
@@ -181,39 +206,24 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
     except ID3NoHeaderError:
         audio = id3.ID3()
 
-    # temporarily holds metadata
-    tags = dict()
-    tags["title"] = _get_title(d)
-    try:
-        tags["label"] = album["label"]["name"]
-    except KeyError:
-        pass
-
-    artist_ = d.get("performer", {}).get("name")  # TRACK ARTIST
-    if istrack:
-        tags["artist"] = artist_ or d["album"]["artist"]["name"]  # TRACK ARTIST
-    else:
-        tags["artist"] = artist_ or album["artist"]["name"]
-
-    if istrack:
-        tags["genre"] = _format_genres(d["album"]["genres_list"])
-        tags["albumartist"] = d["album"]["artist"]["name"]
-        tags["album"] = d["album"]["title"]
-        tags["date"] = d["album"]["release_date_original"]
-        tags["copyright"] = _format_copyright(d.get("copyright") or "n/a")
-        tracktotal = str(d["album"]["tracks_count"])
-    else:
-        tags["genre"] = _format_genres(album["genres_list"])
-        tags["albumartist"] = album["artist"]["name"]
-        tags["album"] = album["title"]
-        tags["date"] = album["release_date_original"]
-        tags["copyright"] = _format_copyright(album.get("copyright") or "n/a")
-        tracktotal = str(album["tracks_count"])
-
+    payload = _build_metadata_payload(d, album, istrack=istrack)
+    tags = {
+        "title": payload["title"],
+        "artist": payload["artist"],
+        "genre": payload["genre"],
+        "albumartist": payload["albumartist"],
+        "album": payload["album"],
+        "date": payload["date"],
+        "copyright": payload["copyright"],
+    }
+    if payload["mp3_label"] is not _MISSING:
+        tags["label"] = payload["mp3_label"]
     tags["year"] = tags["date"][:4]
 
-    audio["TRCK"] = id3.TRCK(encoding=3, text=f"{d['track_number']}/{tracktotal}")
-    audio["TPOS"] = id3.TPOS(encoding=3, text=str(d["media_number"]))
+    audio["TRCK"] = id3.TRCK(
+        encoding=3, text=f"{payload['tracknumber']}/{payload['tracktotal']}"
+    )
+    audio["TPOS"] = id3.TPOS(encoding=3, text=payload["discnumber"])
 
     # write metadata in `tags` to file
     for k, v in tags.items():
