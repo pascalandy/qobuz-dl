@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S03 only; S01 and S02 evidence is retained from merged PRs.
+- Scope for this PR: S04 only; S01-S03 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -27,7 +27,7 @@
 | S01 | CLI/config safety | Help/version do not initialize config; parser exposes commands/options; show-config redacts sensitive values; reset/purge behavior is safe. | Pass |
 | S02 | Direct source routing | Album/track/artist/label/playlist URLs route correctly, invalid URLs do not crash, collection pages are all consumed. | Pass |
 | S03 | Text-file source ingestion | Local URL files ignore blank/comment lines, dispatch remaining URLs, and bad files fail gracefully. | Pass |
-| S04 | Lucky search mode | Query validation, type/limit mapping, result URLs, and download dispatch are correct. | Not evaluated |
+| S04 | Lucky search mode | Query validation, type/limit mapping, result URLs, and download dispatch are correct. | Pass |
 | S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Not evaluated |
 | S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Not evaluated |
 | S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Not evaluated |
@@ -117,3 +117,30 @@ S03 is covered in `tests/test_core_regressions.py`.
 ## S03 status
 
 Pass. S03 behavior is covered by local automated tests using temporary URL files, fake URL handlers, monkeypatched file errors, and captured logs. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
+
+## S04 evidence
+
+### Automated coverage
+
+S04 is covered in `tests/test_core_regressions.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| Short and invalid lucky queries are rejected before search/download | `test_lucky_mode_rejects_short_or_invalid_queries_without_search_or_download` parametrizes empty, too-short, whitespace-only, and non-string queries, patches `search_by_type` and `download_list_of_urls` to fail if touched, and verifies the invalid-query log path returns without dispatch. |
+| Short and invalid search-boundary queries avoid live client access | `test_search_by_type_rejects_short_or_invalid_queries_without_client` covers the same invalid query shapes directly against `search_by_type`, verifies no `client` attribute is required, and therefore proves no live Qobuz search boundary is touched. |
+| Valid lucky queries use the configured type and limit | `test_lucky_mode_uses_configured_search_boundary_and_download_flag` configures `lucky_type="track"` and `lucky_limit=2`, then verifies `lucky_mode` calls `search_by_type` with the normalized query, configured type, configured limit, and `lucky=True`. |
+| Download dispatch is controlled by the existing `download` flag | The same lucky-mode test verifies `download=True` dispatches the returned URL list through `download_list_of_urls`, while `download=False` returns the same URL list without dispatch. |
+| Lucky result URLs are built for album, track, artist, and playlist search types | `test_search_by_type_lucky_builds_urls_for_supported_types` parametrizes all supported lucky types with fake client methods and verifies URLs are normalized as `https://play.qobuz.com/{type}/{id}` with the requested limit. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_core_regressions.py -k "lucky or search_by_type"` | Pass: 13 tests passed, 28 deselected. |
+| `just ci` | Pass: ruff format check, ruff lint, 103 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S04 status
+
+Pass. S04 behavior is covered by local automated tests using fake client search methods, monkeypatched search/download dispatch boundaries, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.

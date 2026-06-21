@@ -168,6 +168,142 @@ def test_download_from_txt_file_logs_unreadable_file_without_dispatching(
     assert not hasattr(qdl, "client")
 
 
+@pytest.mark.parametrize("query", ["", "ab", "   ", None])
+def test_lucky_mode_rejects_short_or_invalid_queries_without_search_or_download(
+    tmp_path, caplog, query
+):
+    qdl = QobuzDL(directory=tmp_path)
+    qdl.search_by_type = lambda *args, **kwargs: pytest.fail(
+        "invalid lucky query should not search"
+    )
+    qdl.download_list_of_urls = lambda urls: pytest.fail(
+        f"invalid lucky query unexpectedly dispatched {urls}"
+    )
+    caplog.set_level("INFO", logger="qobuz_dl.core")
+
+    assert qdl.lucky_mode(query) is None
+
+    assert any(
+        "search query is too short or invalid" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+@pytest.mark.parametrize("query", ["", "ab", "   ", None])
+def test_search_by_type_rejects_short_or_invalid_queries_without_client(
+    tmp_path, caplog, query
+):
+    qdl = QobuzDL(directory=tmp_path)
+    caplog.set_level("INFO", logger="qobuz_dl.core")
+
+    assert qdl.search_by_type(query, "album", lucky=True) is None
+
+    assert not hasattr(qdl, "client")
+    assert any(
+        "search query is too short or invalid" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_lucky_mode_uses_configured_search_boundary_and_download_flag(tmp_path):
+    qdl = QobuzDL(directory=tmp_path, lucky_limit=2, lucky_type="track")
+    results = [
+        "https://play.qobuz.com/track/track1",
+        "https://play.qobuz.com/track/track2",
+    ]
+    searches = []
+    downloads = []
+
+    def fake_search(query, item_type, limit, lucky=False):
+        searches.append((query, item_type, limit, lucky))
+        return results
+
+    qdl.search_by_type = fake_search
+    qdl.download_list_of_urls = lambda urls: downloads.append(list(urls))
+
+    assert qdl.lucky_mode(" artist song ", download=True) == results
+    assert qdl.lucky_mode("artist song", download=False) == results
+
+    assert searches == [
+        ("artist song", "track", 2, True),
+        ("artist song", "track", 2, True),
+    ]
+    assert downloads == [results]
+
+
+@pytest.mark.parametrize(
+    ("item_type", "search_method", "result_key", "item", "expected_url"),
+    [
+        (
+            "album",
+            "search_albums",
+            "albums",
+            {
+                "artist": {"name": "Artist"},
+                "duration": 180,
+                "hires_streamable": True,
+                "id": "album1",
+                "title": "Album",
+            },
+            "https://play.qobuz.com/album/album1",
+        ),
+        (
+            "track",
+            "search_tracks",
+            "tracks",
+            {
+                "duration": 180,
+                "hires_streamable": False,
+                "id": "track1",
+                "performer": {"name": "Artist"},
+                "title": "Track",
+            },
+            "https://play.qobuz.com/track/track1",
+        ),
+        (
+            "artist",
+            "search_artists",
+            "artists",
+            {"albums_count": 7, "id": "artist1", "name": "Artist"},
+            "https://play.qobuz.com/artist/artist1",
+        ),
+        (
+            "playlist",
+            "search_playlists",
+            "playlists",
+            {"id": "playlist1", "name": "Playlist", "tracks_count": 12},
+            "https://play.qobuz.com/playlist/playlist1",
+        ),
+    ],
+)
+def test_search_by_type_lucky_builds_urls_for_supported_types(
+    tmp_path, item_type, search_method, result_key, item, expected_url
+):
+    qdl = QobuzDL(directory=tmp_path)
+    calls = []
+
+    def fake_search(self, query, limit):
+        calls.append((query, limit))
+        return {result_key: {"items": [item]}}
+
+    def unexpected_search(self, query, limit):
+        pytest.fail(f"unexpected search call for {query=} {limit=}")
+
+    search_methods = {
+        "search_albums": unexpected_search,
+        "search_artists": unexpected_search,
+        "search_playlists": unexpected_search,
+        "search_tracks": unexpected_search,
+    }
+    search_methods[search_method] = fake_search
+    qdl.client = type("Client", (), search_methods)()
+
+    urls = qdl.search_by_type(" valid query ", item_type, limit=3, lucky=True)
+
+    assert urls == [expected_url]
+    assert calls == [("valid query", 3)]
+
+
 @pytest.mark.parametrize(
     ("url", "meta_method", "item_key", "expected_item_id", "expected_album"),
     [
