@@ -193,6 +193,37 @@ def test_tag_mp3_converts_existing_v24_frames_before_v23_save(tmp_path):
     assert tagged["TYER"].text == ["2024"]
 
 
+def test_tag_mp3_clears_existing_v23_date_when_release_date_is_partial(tmp_path):
+    album = _fake_album()
+    album["release_date_original"] = "2024"
+    track = _fake_track(album)
+    root_dir = tmp_path / "mp3-partial-date"
+    root_dir.mkdir()
+    temp_file = root_dir / ".02.tmp"
+    final_file = root_dir / "02. Finale.mp3"
+    temp_file.write_bytes(b"fake mp3 frame bytes")
+
+    existing_tags = ID3()
+    existing_tags.add(TDRC(encoding=3, text="1999-12-31"))
+    existing_tags.save(temp_file, v2_version=4)
+
+    metadata.tag_mp3(
+        str(temp_file),
+        str(root_dir),
+        str(final_file),
+        track,
+        album,
+        istrack=True,
+        em_image=False,
+    )
+
+    tagged = ID3(final_file, translate=False)
+    assert tagged.version == (2, 3, 0)
+    assert "TDRC" not in tagged
+    assert "TDAT" not in tagged
+    assert tagged["TYER"].text == ["2024"]
+
+
 def test_taggers_preserve_missing_optional_metadata_differences(tmp_path):
     album = _fake_album()
     album.pop("label")

@@ -228,6 +228,8 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
     id3v23_date = _format_id3v23_tdat(release_date)
     if id3v23_date:
         tags["date"] = id3v23_date
+    else:
+        audio.delall("TDAT")
     if payload["mp3_label"] is not _MISSING:
         tags["label"] = payload["mp3_label"]
     tags["year"] = release_date[:4]
