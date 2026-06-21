@@ -129,6 +129,19 @@ def _recording_tag(monkeypatch, tagged):
     monkeypatch.setattr(downloader.metadata, "tag_flac", fake_tag)
 
 
+def test_download_id_by_type_delegates_to_explicit_methods(monkeypatch, tmp_path):
+    calls = []
+    download = Download(object(), "item-1", str(tmp_path), 27)
+    monkeypatch.setattr(download, "download_track", lambda: calls.append("track"))
+    monkeypatch.setattr(download, "download_release", lambda: calls.append("release"))
+
+    download.download_id_by_type()
+    download.download_id_by_type(track=True)
+    download.download_id_by_type(track=False)
+
+    assert calls == ["track", "track", "release"]
+
+
 def test_album_download_places_multidisc_tracks_cover_and_booklet(
     tmp_path, monkeypatch
 ):
