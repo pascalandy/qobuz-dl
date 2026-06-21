@@ -51,7 +51,10 @@ def _classify_startup(arguments):
     if arguments.show_config:
         return _StartupRequirements(needs_config=True, needs_auth=False)
 
-    command_needs_client = arguments.command is not None
+    if arguments.command is None:
+        return _StartupRequirements(needs_config=True, needs_auth=False)
+
+    command_needs_client = True
     return _StartupRequirements(
         needs_config=command_needs_client,
         needs_auth=command_needs_client,
@@ -194,21 +197,22 @@ def main():
     if arguments.reset:
         sys.exit(_reset_config(CONFIG_FILE))
 
-    if arguments.command is None and not arguments.show_config and not arguments.purge:
-        parser.print_help()
-        sys.exit(0)
-
     config_values = None
     if startup.needs_config:
         try:
             _ensure_config_exists(CONFIG_FILE)
-            config_values = _load_config_values(CONFIG_FILE)
+            if startup.needs_auth or arguments.show_config:
+                config_values = _load_config_values(CONFIG_FILE)
         except (KeyError, UnicodeDecodeError, configparser.Error) as error:
             sys.exit(
                 f"{RED}Your config file is corrupted: {error}! "
                 "Run 'uvx qobuz-dl -r' to fix this "
                 "(or 'qobuz-dl -r' if installed)."
             )
+
+    if arguments.command is None and not arguments.show_config and not arguments.purge:
+        parser.print_help()
+        sys.exit(0)
 
     if arguments.show_config:
         print(f"Configuration: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")

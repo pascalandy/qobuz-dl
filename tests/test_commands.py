@@ -54,6 +54,7 @@ def test_parser_accepts_top_level_flags():
         (["--purge"], False, False),
         (["--show-config"], True, False),
         (["--show-config", "--purge"], False, False),
+        ([], True, False),
         (["dl", "https://play.qobuz.com/album/example"], True, True),
         (["fun"], True, True),
         (["lucky", "joy", "division"], True, True),
@@ -102,6 +103,37 @@ def test_help_and_version_do_not_initialize_config(monkeypatch, tmp_path, argv):
     assert exc.value.code == 0
     assert not config_path.exists()
     assert not config_file.exists()
+
+
+def test_no_argument_first_run_creates_config_then_prints_help(
+    monkeypatch, tmp_path, capsys
+):
+    config_path = tmp_path / "config"
+    config_file = config_path / "config.ini"
+    reset_calls = []
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("no-argument startup must not initialize the Qobuz client")
+
+    def fake_reset(target):
+        reset_calls.append(target)
+        _write_valid_config(Path(target))
+
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl"])
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "_reset_config", fake_reset)
+    monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    output = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert reset_calls == [str(config_file)]
+    assert config_file.is_file()
+    assert "Download and organize Qobuz music" in output
 
 
 def test_parser_accepts_download_command_with_common_options():
