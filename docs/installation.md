@@ -16,7 +16,7 @@ Use `uvx` to run `qobuz-dl` without a persistent app install:
 uvx qobuz-dl
 ```
 
-`uvx` downloads and runs the published CLI in an isolated environment. The first run still creates the same persistent qobuz-dl config under your user config directory (`~/.config/qobuz-dl` on Linux/macOS, `%APPDATA%\qobuz-dl` on Windows). Your Qobuz auth/config and downloaded-IDs database are reused across later `uvx qobuz-dl ...` runs and are also reused if you later choose a persistent tool install.
+`uvx` downloads and runs the published CLI in an isolated environment. The first run still creates the same persistent qobuz-dl config under your user config directory (`~/.config/qobuz-dl/config.ini` on Linux/macOS, `%APPDATA%\qobuz-dl\config.ini` on Windows). The downloaded-IDs database lives beside it as `qobuz_dl.db`. Your Qobuz auth/config and downloaded-IDs database are reused across later `uvx qobuz-dl ...` runs and are also reused if you later choose a persistent tool install. See [Account and authentication](use-cases.md#where-authconfig-and-the-database-live) for exact fields, caveats, and portability steps.
 
 If configuration fails or you need to start over, reset the config file:
 
