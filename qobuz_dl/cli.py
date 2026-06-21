@@ -46,10 +46,10 @@ class _StartupRequirements:
 def _classify_startup(arguments):
     if arguments.reset:
         return _StartupRequirements(needs_config=False, needs_auth=False)
-    if arguments.show_config:
-        return _StartupRequirements(needs_config=True, needs_auth=False)
     if arguments.purge:
         return _StartupRequirements(needs_config=False, needs_auth=False)
+    if arguments.show_config:
+        return _StartupRequirements(needs_config=True, needs_auth=False)
 
     command_needs_client = arguments.command is not None
     return _StartupRequirements(

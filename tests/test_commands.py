@@ -53,7 +53,7 @@ def test_parser_accepts_top_level_flags():
         (["--reset"], False, False),
         (["--purge"], False, False),
         (["--show-config"], True, False),
-        (["--show-config", "--purge"], True, False),
+        (["--show-config", "--purge"], False, False),
         (["dl", "https://play.qobuz.com/album/example"], True, True),
         (["fun"], True, True),
         (["lucky", "joy", "division"], True, True),
@@ -383,6 +383,40 @@ def test_show_config_exits_before_client_initialization(monkeypatch, tmp_path, c
     assert "email = <redacted>" in output
     assert "password = <redacted>" in output
     assert "secrets = <redacted>" in output
+
+
+def test_show_config_with_purge_does_not_initialize_first_run_config(
+    monkeypatch, tmp_path, capsys
+):
+    config_path = tmp_path / "config"
+    config_file = config_path / "config.ini"
+    database_file = config_path / "qobuz_dl.db"
+    config_path.mkdir()
+    database_file.write_text("local duplicate tracking state")
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("maintenance flags must not initialize the Qobuz client")
+
+    def fail_if_reset(target):
+        pytest.fail(f"purge must not reset config: {target}")
+
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--show-config", "--purge"])
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
+    monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    output = capsys.readouterr().out
+    assert exc.value.code is None
+    assert not config_file.exists()
+    assert database_file.exists()
+    assert f"Configuration: {config_file}" in output
+    assert f"Database: {database_file}" in output
 
 
 def test_download_first_run_creates_config_once_then_initializes_client(
