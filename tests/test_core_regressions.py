@@ -62,35 +62,112 @@ def test_handle_url_logs_invalid_url_without_crashing(tmp_path, caplog):
     assert any("Invalid url" in record.getMessage() for record in caplog.records)
 
 
-def test_handle_url_downloads_items_from_every_page(tmp_path, monkeypatch):
-    """Artist/label/playlist downloads must not be truncated to the first page."""
-    qdl = QobuzDL(directory=tmp_path, no_m3u_for_playlists=True)
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://play.qobuz.com/album/album1", ("album1", True, None)),
+        ("https://play.qobuz.com/track/track1", ("track1", False, None)),
+    ],
+)
+def test_handle_url_routes_direct_album_and_track_downloads(tmp_path, url, expected):
+    qdl = QobuzDL(directory=tmp_path)
     downloaded = []
     qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloaded.append(
-        item_id
+        (item_id, album, alt_path)
     )
-    qdl.client = type(
-        "Client",
-        (),
-        {
-            "get_artist_meta": lambda self, item_id: iter(
-                [
-                    {
-                        "name": "Paged Artist",
-                        "albums": {"items": [{"id": "album-1"}, {"id": "album-2"}]},
-                    },
-                    {
-                        "name": "Paged Artist",
-                        "albums": {"items": [{"id": "album-3"}]},
-                    },
-                ]
-            ),
-        },
-    )()
 
-    qdl.handle_url("https://play.qobuz.com/artist/123")
+    qdl.handle_url(url)
 
-    assert downloaded == ["album-1", "album-2", "album-3"]
+    assert downloaded == [expected]
+
+
+@pytest.mark.parametrize(
+    ("url", "meta_method", "item_key", "expected_item_id", "expected_album"),
+    [
+        (
+            "https://play.qobuz.com/artist/artist1",
+            "get_artist_meta",
+            "albums",
+            "artist1",
+            True,
+        ),
+        (
+            "https://play.qobuz.com/label/label1",
+            "get_label_meta",
+            "albums",
+            "label1",
+            True,
+        ),
+        (
+            "https://play.qobuz.com/playlist/pl1",
+            "get_plist_meta",
+            "tracks",
+            "pl1",
+            False,
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("no_m3u_for_playlists", "expected_m3u_count"),
+    [(False, 1), (True, 0)],
+)
+def test_handle_url_downloads_collection_items_from_every_page(
+    tmp_path,
+    monkeypatch,
+    url,
+    meta_method,
+    item_key,
+    expected_item_id,
+    expected_album,
+    no_m3u_for_playlists,
+    expected_m3u_count,
+):
+    """Artist/label/playlist downloads must not be truncated to the first page."""
+    qdl = QobuzDL(
+        directory=tmp_path,
+        no_m3u_for_playlists=no_m3u_for_playlists,
+    )
+    downloaded = []
+    m3u_paths = []
+    metadata_item_ids = []
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloaded.append(
+        (item_id, album, alt_path)
+    )
+
+    def paged_meta(self, item_id):
+        metadata_item_ids.append(item_id)
+        return iter(
+            [
+                {
+                    "name": "Paged Collection",
+                    item_key: {"items": [{"id": "item1"}, {"id": "item2"}]},
+                },
+                {
+                    "name": "Paged Collection",
+                    item_key: {"items": [{"id": "item3"}]},
+                },
+            ]
+        )
+
+    qdl.client = type("Client", (), {meta_method: paged_meta})()
+    monkeypatch.setattr(
+        "qobuz_dl.core.make_m3u",
+        lambda playlist_path: m3u_paths.append(playlist_path),
+    )
+
+    qdl.handle_url(url)
+
+    collection_path = str(tmp_path / "Paged Collection")
+    assert metadata_item_ids == [expected_item_id]
+    assert downloaded == [
+        ("item1", expected_album, collection_path),
+        ("item2", expected_album, collection_path),
+        ("item3", expected_album, collection_path),
+    ]
+    if item_key == "tracks":
+        assert m3u_paths == [collection_path] * expected_m3u_count
+    else:
+        assert m3u_paths == []
 
 
 def test_smart_discography_filter_sees_albums_from_every_page():
