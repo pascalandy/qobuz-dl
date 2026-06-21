@@ -5,6 +5,7 @@
 import hashlib
 import logging
 import time
+from dataclasses import dataclass
 
 from qobuz_dl.color import GREEN, YELLOW
 from qobuz_dl.exceptions import (
@@ -19,6 +20,12 @@ from qobuz_dl.http import HttpClient
 RESET = "Reset your credentials with 'uvx qobuz-dl -r' (or 'qobuz-dl -r' if installed)"
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _ApiRequest:
+    endpoint: str
+    params: dict
 
 
 class Client:
@@ -43,86 +50,118 @@ class Client:
         self.cfg_setup()
 
     def api_call(self, epoint, **kwargs):
+        request = self._build_api_request(epoint, kwargs)
+        r = self.session.get(self.base + request.endpoint, params=request.params)
+        self._raise_mapped_api_error(request.endpoint, r)
+        r.raise_for_status()
+        return r.json()
+
+    def _build_api_request(self, epoint, kwargs):
         if epoint == "user/login":
-            params = {
-                "email": kwargs["email"],
-                "password": kwargs["pwd"],
-                "app_id": self.id,
-            }
+            params = self._login_params(kwargs)
         elif epoint == "track/get":
-            params = {"track_id": kwargs["id"]}
+            params = self._track_meta_params(kwargs)
         elif epoint == "album/get":
-            params = {"album_id": kwargs["id"]}
+            params = self._album_meta_params(kwargs)
         elif epoint == "playlist/get":
-            params = {
-                "extra": "tracks",
-                "playlist_id": kwargs["id"],
-                "limit": 500,
-                "offset": kwargs["offset"],
-            }
+            params = self._playlist_meta_params(kwargs)
         elif epoint == "artist/get":
-            params = {
-                "app_id": self.id,
-                "artist_id": kwargs["id"],
-                "limit": 500,
-                "offset": kwargs["offset"],
-                "extra": "albums",
-            }
+            params = self._artist_meta_params(kwargs)
         elif epoint == "label/get":
-            params = {
-                "label_id": kwargs["id"],
-                "limit": 500,
-                "offset": kwargs["offset"],
-                "extra": "albums",
-            }
+            params = self._label_meta_params(kwargs)
         elif epoint == "favorite/getUserFavorites":
-            unix = time.time()
-            r_sig = "favoritegetUserFavorites" + str(unix) + kwargs.get("sec", self.sec)
-            r_sig_hashed = hashlib.md5(r_sig.encode("utf-8")).hexdigest()
-            params = {
-                "app_id": self.id,
-                "user_auth_token": self.uat,
-                "type": kwargs["type"],
-                "offset": kwargs["offset"],
-                "limit": kwargs["limit"],
-                "request_ts": unix,
-                "request_sig": r_sig_hashed,
-            }
+            params = self._favorite_params(kwargs)
         elif epoint == "track/getFileUrl":
-            unix = time.time()
-            track_id = kwargs["id"]
-            fmt_id = kwargs["fmt_id"]
-            if int(fmt_id) not in (5, 6, 7, 27):
-                raise InvalidQuality("Invalid quality id: choose between 5, 6, 7 or 27")
-            r_sig = "trackgetFileUrlformat_id{}intentstreamtrack_id{}{}{}".format(
-                fmt_id, track_id, unix, kwargs.get("sec", self.sec)
-            )
-            r_sig_hashed = hashlib.md5(r_sig.encode("utf-8")).hexdigest()
-            params = {
-                "request_ts": unix,
-                "request_sig": r_sig_hashed,
-                "track_id": track_id,
-                "format_id": fmt_id,
-                "intent": "stream",
-            }
+            params = self._track_file_url_params(kwargs)
         else:
             params = kwargs
-        r = self.session.get(self.base + epoint, params=params)
+        return _ApiRequest(endpoint=epoint, params=params)
+
+    def _login_params(self, kwargs):
+        return {
+            "email": kwargs["email"],
+            "password": kwargs["pwd"],
+            "app_id": self.id,
+        }
+
+    def _track_meta_params(self, kwargs):
+        return {"track_id": kwargs["id"]}
+
+    def _album_meta_params(self, kwargs):
+        return {"album_id": kwargs["id"]}
+
+    def _playlist_meta_params(self, kwargs):
+        return {
+            "extra": "tracks",
+            "playlist_id": kwargs["id"],
+            "limit": 500,
+            "offset": kwargs["offset"],
+        }
+
+    def _artist_meta_params(self, kwargs):
+        return {
+            "app_id": self.id,
+            "artist_id": kwargs["id"],
+            "limit": 500,
+            "offset": kwargs["offset"],
+            "extra": "albums",
+        }
+
+    def _label_meta_params(self, kwargs):
+        return {
+            "label_id": kwargs["id"],
+            "limit": 500,
+            "offset": kwargs["offset"],
+            "extra": "albums",
+        }
+
+    def _favorite_params(self, kwargs):
+        unix = time.time()
+        r_sig = "favoritegetUserFavorites" + str(unix) + kwargs.get("sec", self.sec)
+        r_sig_hashed = hashlib.md5(r_sig.encode("utf-8")).hexdigest()
+        return {
+            "app_id": self.id,
+            "user_auth_token": self.uat,
+            "type": kwargs["type"],
+            "offset": kwargs["offset"],
+            "limit": kwargs["limit"],
+            "request_ts": unix,
+            "request_sig": r_sig_hashed,
+        }
+
+    def _track_file_url_params(self, kwargs):
+        unix = time.time()
+        track_id = kwargs["id"]
+        fmt_id = kwargs["fmt_id"]
+        if int(fmt_id) not in (5, 6, 7, 27):
+            raise InvalidQuality("Invalid quality id: choose between 5, 6, 7 or 27")
+        r_sig = "trackgetFileUrlformat_id{}intentstreamtrack_id{}{}{}".format(
+            fmt_id, track_id, unix, kwargs.get("sec", self.sec)
+        )
+        r_sig_hashed = hashlib.md5(r_sig.encode("utf-8")).hexdigest()
+        return {
+            "request_ts": unix,
+            "request_sig": r_sig_hashed,
+            "track_id": track_id,
+            "format_id": fmt_id,
+            "intent": "stream",
+        }
+
+    def _raise_mapped_api_error(self, epoint, response):
         if epoint == "user/login":
-            if r.status_code == 401:
+            if response.status_code == 401:
                 raise AuthenticationError("Invalid credentials.\n" + RESET)
-            elif r.status_code == 400:
+            elif response.status_code == 400:
                 raise InvalidAppIdError("Invalid app id.\n" + RESET)
             else:
                 logger.info(f"{GREEN}Logged: OK")
         elif (
             epoint in ["track/getFileUrl", "favorite/getUserFavorites"]
-            and r.status_code == 400
+            and response.status_code == 400
         ):
-            raise InvalidAppSecretError(f"Invalid app secret: {r.json()}.\n" + RESET)
-
-        r.raise_for_status()
-        return r.json()
+            raise InvalidAppSecretError(
+                f"Invalid app secret: {response.json()}.\n" + RESET
+            )
 
     def auth(self, email, pwd):
         usr_info = self.api_call("user/login", email=email, pwd=pwd)
