@@ -149,6 +149,7 @@ def test_tag_mp3_writes_track_metadata_cover_flag_and_renames(tmp_path):
     assert tagged["TCON"].text == ["Pop, Rock"]
     assert tagged["TCOP"].text == ["℗ 2024 Track Owner"]
     assert tagged["TYER"].text == ["2024"]
+    assert tagged.version == (2, 3, 0)
     assert tagged.getall("APIC")[0].data == b"fake-jpeg-cover"
 
     no_cover = ID3(tagged_files[1][0], translate=False)

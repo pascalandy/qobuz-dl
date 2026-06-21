@@ -233,5 +233,5 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
     if em_image:
         _embed_id3_img(root_dir, audio)
 
-    audio.save(filename, "v2_version=3")
+    audio.save(filename, v2_version=3)
     os.rename(filename, final_name)
