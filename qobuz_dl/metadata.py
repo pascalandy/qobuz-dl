@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from datetime import datetime
 
 import mutagen.id3 as id3
 from mutagen.flac import FLAC, Picture
@@ -60,6 +61,13 @@ def _format_genres(genres: list) -> str:
     """
     genres = re.findall(r"([^\u2192\/]+)", "/".join(genres))
     return ", ".join(dict.fromkeys(genres))
+
+
+def _format_id3v23_tdat(date_text):
+    try:
+        return datetime.strptime(date_text, "%Y-%m-%d").strftime("%d%m")
+    except (TypeError, ValueError):
+        return None
 
 
 def _build_metadata_payload(d: dict, album: dict, istrack=True):
@@ -208,18 +216,21 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
     audio.update_to_v23()
 
     payload = _build_metadata_payload(d, album, istrack=istrack)
+    release_date = payload["date"]
     tags = {
         "title": payload["title"],
         "artist": payload["artist"],
         "genre": payload["genre"],
         "albumartist": payload["albumartist"],
         "album": payload["album"],
-        "date": payload["date"],
         "copyright": payload["copyright"],
     }
+    id3v23_date = _format_id3v23_tdat(release_date)
+    if id3v23_date:
+        tags["date"] = id3v23_date
     if payload["mp3_label"] is not _MISSING:
         tags["label"] = payload["mp3_label"]
-    tags["year"] = tags["date"][:4]
+    tags["year"] = release_date[:4]
 
     audio["TRCK"] = id3.TRCK(
         encoding=3, text=f"{payload['tracknumber']}/{payload['tracktotal']}"

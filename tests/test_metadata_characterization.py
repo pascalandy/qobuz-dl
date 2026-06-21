@@ -69,6 +69,11 @@ def test_metadata_copyright_replaces_qobuz_marker_text_with_symbols():
     assert metadata._format_copyright("") == ""
 
 
+def test_metadata_formats_id3v23_date_when_full_release_date_is_available():
+    assert metadata._format_id3v23_tdat("2024-05-06") == "0605"
+    assert metadata._format_id3v23_tdat("2024") is None
+
+
 def test_tag_flac_writes_album_metadata_embeds_cover_and_renames(tmp_path):
     album = _fake_album()
     track = _fake_track(album)
@@ -144,7 +149,7 @@ def test_tag_mp3_writes_track_metadata_cover_flag_and_renames(tmp_path):
     assert tagged["TPE1"].text == ["Track Performer"]
     assert tagged["TPE2"].text == ["Album Artist"]
     assert tagged["TALB"].text == ["Fake Album"]
-    assert tagged["TDAT"].text == ["2024-05-06"]
+    assert tagged["TDAT"].text == ["0605"]
     assert tagged["TPUB"].text == ["Test Label"]
     assert tagged["TCON"].text == ["Pop, Rock"]
     assert tagged["TCOP"].text == ["℗ 2024 Track Owner"]
@@ -184,7 +189,7 @@ def test_tag_mp3_converts_existing_v24_frames_before_v23_save(tmp_path):
     assert tagged.version == (2, 3, 0)
     assert "TDRC" not in tagged
     assert "TSOP" not in tagged
-    assert tagged["TDAT"].text == ["2024-05-06"]
+    assert tagged["TDAT"].text == ["0605"]
     assert tagged["TYER"].text == ["2024"]
 
 
