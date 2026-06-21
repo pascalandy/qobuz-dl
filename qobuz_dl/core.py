@@ -28,6 +28,12 @@ QUALITIES = {
 logger = logging.getLogger(__name__)
 
 
+def _normalize_search_query(query):
+    if not isinstance(query, str):
+        return ""
+    return query.strip()
+
+
 class LastFmPlaylistParser(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -288,6 +294,7 @@ class QobuzDL:
         self.download_list_of_urls(urls)
 
     def lucky_mode(self, query, download=True):
+        query = _normalize_search_query(query)
         if len(query) < 3:
             logger.info(f"{RED}Your search query is too short or invalid")
             return
@@ -305,6 +312,7 @@ class QobuzDL:
         return results
 
     def search_by_type(self, query, item_type, limit=10, lucky=False):
+        query = _normalize_search_query(query)
         if len(query) < 3:
             logger.info(f"{RED}Your search query is too short or invalid")
             return
