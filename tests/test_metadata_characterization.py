@@ -171,7 +171,7 @@ def test_tag_mp3_converts_existing_v24_frames_before_v23_save(tmp_path):
     temp_file.write_bytes(b"fake mp3 frame bytes")
 
     existing_tags = ID3()
-    existing_tags.add(TDRC(encoding=3, text="1999-12-31"))
+    existing_tags.add(TDRC(encoding=3, text="1999-12-31T23:59"))
     existing_tags.add(TSOP(encoding=3, text="Sort Performer"))
     existing_tags.save(temp_file, v2_version=4)
 
@@ -189,6 +189,7 @@ def test_tag_mp3_converts_existing_v24_frames_before_v23_save(tmp_path):
     assert tagged.version == (2, 3, 0)
     assert "TDRC" not in tagged
     assert "TSOP" not in tagged
+    assert "TIME" not in tagged
     assert tagged["TDAT"].text == ["0605"]
     assert tagged["TYER"].text == ["2024"]
 
@@ -204,7 +205,7 @@ def test_tag_mp3_clears_existing_v23_date_when_release_date_is_partial(tmp_path)
     temp_file.write_bytes(b"fake mp3 frame bytes")
 
     existing_tags = ID3()
-    existing_tags.add(TDRC(encoding=3, text="1999-12-31"))
+    existing_tags.add(TDRC(encoding=3, text="1999-12-31T23:59"))
     existing_tags.save(temp_file, v2_version=4)
 
     metadata.tag_mp3(
@@ -221,6 +222,7 @@ def test_tag_mp3_clears_existing_v23_date_when_release_date_is_partial(tmp_path)
     assert tagged.version == (2, 3, 0)
     assert "TDRC" not in tagged
     assert "TDAT" not in tagged
+    assert "TIME" not in tagged
     assert tagged["TYER"].text == ["2024"]
 
 

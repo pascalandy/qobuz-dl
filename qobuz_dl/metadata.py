@@ -226,6 +226,7 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
         "copyright": payload["copyright"],
     }
     id3v23_date = _format_id3v23_tdat(release_date)
+    audio.delall("TIME")
     if id3v23_date:
         tags["date"] = id3v23_date
     else:
