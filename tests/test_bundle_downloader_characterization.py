@@ -153,4 +153,4 @@ def test_download_with_progress_raises_connection_error_when_stream_is_short(
     with pytest.raises(ConnectionError, match="File download was interrupted"):
         download_with_progress("https://media.example.test/file", target, "track")
 
-    assert target.read_bytes() == b"abc"
+    assert not target.exists()

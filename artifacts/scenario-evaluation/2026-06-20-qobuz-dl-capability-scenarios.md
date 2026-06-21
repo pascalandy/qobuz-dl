@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S06 only; S01-S05 evidence is retained from merged PRs.
+- Scope for this PR: S07 only; S01-S06 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -30,7 +30,7 @@
 | S04 | Lucky search mode | Query validation, type/limit mapping, result URLs, and download dispatch are correct. | Pass |
 | S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Pass |
 | S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Pass |
-| S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Not evaluated |
+| S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Pass |
 | S08 | Duplicate tracking | SQLite DB create/add/skip, --no-db wiring, and purge behavior are correct. | Not evaluated |
 | S09 | Metadata/M3U | FLAC/MP3 tagging helpers and M3U generation work from local fake media/metadata without live downloads. | Not evaluated |
 | S10 | HTTP/API/bundle/packaging | HTTP headers/params/errors/streaming, qopy endpoint params/signatures, bundle parsing, import/entry-point/build smoke are correct. | Not evaluated |
@@ -203,3 +203,33 @@ S06 is covered in `tests/test_lastfm_characterization.py` and `tests/test_core_r
 ## S06 status
 
 Pass. S06 behavior is covered by local automated tests using fixture HTML, fake HTTP responses, fake Qobuz search/download methods, monkeypatched M3U generation, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
+
+## S07 evidence
+
+### Automated coverage
+
+S07 is covered in `tests/test_download_execution_characterization.py` and `tests/test_bundle_downloader_characterization.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| Album download paths are correct | `test_album_download_places_multidisc_tracks_cover_and_booklet` fakes album metadata, track URLs, streamed downloads, and tagging, then verifies the generated album directory, temporary media paths, and final FLAC file paths. |
+| Track download paths are correct | `test_track_download_uses_fallback_quality_and_can_skip_cover` fakes a direct track download and verifies the generated track album directory, temporary media path, and final FLAC path. |
+| Requested quality fallback behavior is covered | `test_track_download_uses_fallback_quality_and_can_skip_cover` returns a fake Qobuz restriction with `FormatRestrictedByFormatAvailability`, enables fallback, and verifies the media stream and tag boundary are still reached. |
+| Requested quality no-fallback behavior is covered | `test_album_download_skips_restricted_quality_when_fallback_disabled` returns the same fake restriction with fallback disabled, verifies the release is skipped before any download/tag boundary, and checks the quality log path. |
+| Cover and booklet behavior respects existing options | `test_album_download_places_multidisc_tracks_cover_and_booklet` verifies cover download uses the original-quality URL when requested and booklet download occurs from fake goodies metadata; `test_track_download_uses_fallback_quality_and_can_skip_cover` verifies `no_cover=True` skips cover download while still downloading media. |
+| Multi-disc folder placement is correct | `test_album_download_places_multidisc_tracks_cover_and_booklet` verifies tracks with different fake `media_number` values are placed under `Disc 1` and `Disc 2`. |
+| Existing files are skipped safely | `test_existing_track_file_is_skipped_without_streaming_or_tagging` pre-creates the expected final FLAC in a pytest temp dir and verifies neither streaming nor tagging is called. |
+| Interrupted or failed media streams clean up partial output and surface/log safe failure | `test_failed_media_stream_removes_partial_file_and_logs_safe_failure` fakes a stream that writes a partial `.tmp` file and raises `ConnectionError`, then verifies the partial file is removed and the existing `QobuzDL.download_from_id` error log path is used; `test_download_with_progress_raises_connection_error_when_stream_is_short` verifies the shared streaming wrapper removes partial output before re-raising. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_download_execution_characterization.py tests/test_bundle_downloader_characterization.py::test_download_with_progress_raises_connection_error_when_stream_is_short` | Pass: 6 tests passed. |
+| `just ci` | Pass: ruff format check, ruff lint, 112 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S07 status
+
+Pass. S07 behavior is covered by local automated tests using fake Qobuz/API metadata, fake HTTP/download streams, monkeypatched tag/download boundaries, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or real media downloads are required.
