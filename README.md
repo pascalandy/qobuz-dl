@@ -54,7 +54,7 @@ Download an album into a library-friendly folder layout with embedded original-q
 ```sh
 uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb \
   --quality 27 \
-  --folder-format "{albumartist}/{album} ({year}) [{bit_depth}B-{sampling_rate}kHz]" \
+  --folder-format "{albumartist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]" \
   --track-format "{tracknumber}. {tracktitle}" \
   --embed-art \
   --og-cover

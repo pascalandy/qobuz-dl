@@ -290,9 +290,11 @@ class Download:
 
     @staticmethod
     def _get_track_attr(meta, track_title, bit_depth, sampling_rate):
+        albumartist = sanitize_filename(meta["album"]["artist"]["name"])
         return {
             "album": sanitize_filename(meta["album"]["title"]),
-            "artist": sanitize_filename(meta["album"]["artist"]["name"]),
+            "artist": albumartist,
+            "albumartist": albumartist,
             "tracktitle": track_title,
             "year": meta["album"]["release_date_original"].split("-")[0],
             "bit_depth": bit_depth,
@@ -301,8 +303,10 @@ class Download:
 
     @staticmethod
     def _get_album_attr(meta, album_title, file_format, bit_depth, sampling_rate):
+        albumartist = sanitize_filename(meta["artist"]["name"])
         return {
-            "artist": sanitize_filename(meta["artist"]["name"]),
+            "artist": albumartist,
+            "albumartist": albumartist,
             "album": sanitize_filename(album_title),
             "year": meta["release_date_original"].split("-")[0],
             "format": file_format,

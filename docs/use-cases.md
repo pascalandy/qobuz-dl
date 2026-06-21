@@ -9,7 +9,7 @@ This guide organizes `qobuz-dl` by local-library goal. Examples use `uvx qobuz-d
 | Goal | Workflow | Start with |
 |---|---|---|
 | Add a hi-res album to a local library | Download the album URL with `--quality 27` to request the highest hi-res tier supported by the CLI. Leave fallback enabled to accept a lower available tier, or add `--no-fallback` when you only want the requested quality. | `uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27` |
-| Keep a clean folder tree | Use `--folder-format` and `--track-format` with metadata such as album artist, album, year, bit depth, sample rate, track number, and title. | `uvx qobuz-dl dl ALBUM_URL -ff "{albumartist}/{album} ({year})" -tf "{tracknumber}. {tracktitle}"` |
+| Keep clean folder names | Use `--folder-format` and `--track-format` with metadata such as album artist, album, year, bit depth, sample rate, track number, and title. | `uvx qobuz-dl dl ALBUM_URL -ff "{albumartist} - {album} ({year})" -tf "{tracknumber}. {tracktitle}"` |
 | Intake an artist catalog | Download an artist URL. Add `--albums-only` to skip singles, EPs, and Various Artists releases where applicable; add `--smart-discography` to reduce likely spam/extras and prefer practical remaster/quality choices. | `uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography` |
 | Capture a label or playlist | Download label URLs, Qobuz playlist URLs, Last.fm playlist URLs, or a text file of saved URLs. Playlist downloads can create `.m3u` files unless you pass `--no-m3u`. | `uvx qobuz-dl dl urls.txt` |
 | Avoid duplicate downloads | Let the local downloaded-ID database skip IDs that were already downloaded. Use `--no-db` for a one-off bypass or `uvx qobuz-dl --purge` to reset the database. | `uvx qobuz-dl dl ALBUM_URL` |
@@ -282,7 +282,7 @@ Set folder naming for one run:
 
 ```sh
 uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
-  --folder-format "{albumartist}/{album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
+  --folder-format "{albumartist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
 ```
 
 Set track filename naming for one run:
@@ -296,7 +296,7 @@ Short forms:
 
 ```sh
 uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
-  -ff "{albumartist}/{album} ({year})" \
+  -ff "{albumartist} - {album} ({year})" \
   -tf "{tracknumber}. {tracktitle}"
 ```
 

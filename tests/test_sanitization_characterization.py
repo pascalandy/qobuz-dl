@@ -21,10 +21,11 @@ def test_album_and_artist_folder_attrs_use_current_pathvalidate_filename_behavio
     )
 
     assert attrs["artist"] == "Artist AB"
+    assert attrs["albumartist"] == "Artist AB"
     assert attrs["album"] == "Album NamePart"
     assert (
         sanitize_filepath(
-            "{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]".format(
+            "{albumartist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]".format(
                 **attrs
             )
         )
@@ -57,6 +58,7 @@ def test_track_folder_and_filename_generation_sanitize_illegal_names():
 
     assert folder_attrs["album"] == "Album NamePart"
     assert folder_attrs["artist"] == "Album Artist BadName"
+    assert folder_attrs["albumartist"] == "Album Artist BadName"
     assert sanitize_filename(
         "{tracknumber}. {artist} - {tracktitle}".format(**filename_attrs)
     ) == ("03. Track Artist BadName - Track NamePart")
