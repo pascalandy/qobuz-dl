@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S09 only; S01-S08 evidence is retained from merged PRs.
+- Scope for this PR: S10 only; S01-S09 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -33,7 +33,7 @@
 | S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Pass |
 | S08 | Duplicate tracking | SQLite DB create/add/skip, --no-db wiring, purge/reset behavior, and corrupt/legacy DB handling are correct. | Pass |
 | S09 | Metadata/M3U | FLAC/MP3 tagging helpers and M3U generation work from local fake media/metadata without live downloads. | Pass |
-| S10 | HTTP/API/bundle/packaging | HTTP headers/params/errors/streaming, qopy endpoint params/signatures, bundle parsing, import/entry-point/build smoke are correct. | Not evaluated |
+| S10 | HTTP/API/bundle/packaging | HTTP headers/params/errors/streaming, qopy endpoint params/signatures, bundle parsing, import/entry-point/build smoke are correct. | Pass |
 
 ## S01 evidence
 
@@ -297,3 +297,34 @@ S09 is covered in `tests/test_metadata_characterization.py`, with no-M3U call-pa
 ## S09 status
 
 Pass. S09 behavior is covered by local automated tests using local fake FLAC/MP3 bytes, fake metadata dictionaries, local fake cover bytes, pytest temporary directories, and mocked playlist call boundaries. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or real media downloads are required.
+
+## S10 evidence
+
+### Automated coverage
+
+S10 is covered in `tests/test_http.py`, `tests/test_qopy_characterization.py`, `tests/test_bundle_downloader_characterization.py`, `tests/test_imports.py`, and existing file-naming coverage in `tests/test_sanitization_characterization.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| HTTP requests preserve configured headers, timeout, and query params | `test_get_appends_query_params_and_passes_headers` verifies query encoding and caller-provided headers through a monkeypatched `urlopen`; `test_http_client_uses_configured_headers_and_timeout` verifies `HttpClient` forwards configured headers, timeout, and params to the shared boundary. |
+| HTTP status and request errors surface safely | `test_get_returns_http_error_response_and_raise_for_status_raises`, `test_get_maps_url_error_to_http_request_error`, and `test_get_maps_malformed_url_to_http_request_error` cover fake HTTP status responses, URL errors, and malformed URLs without live network calls. |
+| Mocked streaming writes chunks, reports progress, tolerates missing lengths, and detects interrupted streams | `test_stream_download_writes_chunks_calls_progress_and_returns_byte_count`, `test_stream_download_succeeds_when_content_length_is_missing`, and `test_stream_download_raises_connection_error_on_content_length_mismatch` use fake streaming responses and pytest temp files only. |
+| Streaming HTTP errors do not leave target files behind | `test_stream_download_http_status_error_does_not_create_target` uses a fake 503 response and verifies `HttpStatusError` carries the body while the target path is not created. |
+| qopy endpoint params and signatures are deterministic without live API calls | `test_api_call_success_uses_expected_endpoint_and_params`, `test_api_call_endpoint_param_shapes`, `test_track_file_url_invalid_app_secret_mapping`, and `test_favorite_wrappers_preserve_type_offset_and_limit` use fake sessions and monkeypatched time to verify endpoint URLs, params, request timestamps, and MD5 signatures. |
+| qopy auth/error mappings are local and safe | `test_login_status_mapping_for_invalid_credentials_and_app_id`, `test_track_file_url_invalid_quality_rejected_before_http_call`, and `test_client_init_updates_required_headers_when_auth_and_secret_tests_are_faked` use fake responses and sessions to verify credential/app-id/app-secret/quality paths and required headers. |
+| Bundle metadata parsing uses fake bundle pages only | `test_bundle_extracts_app_id_and_compact_fake_secrets` monkeypatches `Bundle` to use a fake `HttpClient`, verifies login and bundle URLs, and asserts extracted app ID plus compact fake secrets; `test_bundle_raises_bundle_error_when_login_page_has_no_bundle_url` covers the missing bundle URL error path. |
+| Downloader streaming and file naming fixtures avoid real downloads | `test_download_with_progress_writes_streamed_content`, `test_download_with_progress_throttles_progress_logging`, and `test_download_with_progress_raises_connection_error_when_stream_is_short` monkeypatch `qobuz_dl.downloader.http.stream_download`; `test_download_track_sanitizes_folder_and_final_file_paths` verifies generated folder/temp/final paths using monkeypatched download/tag boundaries. |
+| Package import, entry points, dependency metadata, CLI smoke, and build smoke work through `uv`/`just ci` | `test_package_exports_client_and_main` verifies package import exports, `test_installed_package_metadata_exposes_cli_entry_points_and_dependency` verifies installed entry points and retained `mutagen>=1.47,<2` dependency metadata, and `just ci` runs local CLI help smoke plus `uv build`. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_http.py tests/test_qopy_characterization.py tests/test_bundle_downloader_characterization.py tests/test_imports.py tests/test_sanitization_characterization.py::test_download_track_sanitizes_folder_and_final_file_paths` | Pass: 32 tests passed. |
+| `just ci` | Pass: ruff format check, ruff lint, 132 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S10 status
+
+Pass. S10 behavior is covered by local automated tests using fake HTTP sessions/responses, monkeypatched qopy and bundle HTTP boundaries, monkeypatched downloader streaming/tagging boundaries, package metadata inspection from the local `uv` environment, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, subscription checks, or real media downloads are required.

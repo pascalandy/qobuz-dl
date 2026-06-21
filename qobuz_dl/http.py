@@ -113,7 +113,7 @@ def stream_download(
 ) -> int:
     try:
         request = Request(url, headers=dict(headers or {}))
-        with urlopen(request, timeout=timeout) as response, open(target, "wb") as file:
+        with urlopen(request, timeout=timeout) as response:
             status = getattr(response, "status", response.getcode())
             if status >= 400:
                 raise HttpStatusError(status, response.read())
@@ -122,15 +122,16 @@ def stream_download(
                 total = int(total_header) if total_header else None
             except ValueError:
                 total = None
-            downloaded = 0
-            while True:
-                chunk = response.read(chunk_size)
-                if not chunk:
-                    break
-                size = file.write(chunk)
-                downloaded += size
-                if progress is not None:
-                    progress(size, downloaded, total)
+            with open(target, "wb") as file:
+                downloaded = 0
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    size = file.write(chunk)
+                    downloaded += size
+                    if progress is not None:
+                        progress(size, downloaded, total)
     except HTTPError as exc:
         raise HttpStatusError(exc.code, exc.read()) from exc
     except URLError as exc:
