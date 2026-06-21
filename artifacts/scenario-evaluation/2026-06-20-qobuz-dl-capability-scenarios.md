@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S07 only; S01-S06 evidence is retained from merged PRs.
+- Scope for this PR: S08 only; S01-S07 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -31,7 +31,7 @@
 | S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Pass |
 | S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Pass |
 | S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Pass |
-| S08 | Duplicate tracking | SQLite DB create/add/skip, --no-db wiring, and purge behavior are correct. | Not evaluated |
+| S08 | Duplicate tracking | SQLite DB create/add/skip, --no-db wiring, purge/reset behavior, and corrupt/legacy DB handling are correct. | Pass |
 | S09 | Metadata/M3U | FLAC/MP3 tagging helpers and M3U generation work from local fake media/metadata without live downloads. | Not evaluated |
 | S10 | HTTP/API/bundle/packaging | HTTP headers/params/errors/streaming, qopy endpoint params/signatures, bundle parsing, import/entry-point/build smoke are correct. | Not evaluated |
 
@@ -233,3 +233,36 @@ S07 is covered in `tests/test_download_execution_characterization.py` and `tests
 ## S07 status
 
 Pass. S07 behavior is covered by local automated tests using fake Qobuz/API metadata, fake HTTP/download streams, monkeypatched tag/download boundaries, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or real media downloads are required.
+
+## S08 evidence
+
+### Automated coverage
+
+S08 is covered in `tests/test_db.py`, `tests/test_duplicate_tracking.py`, and `tests/test_commands.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| SQLite DB creation, add, and lookup work from a missing DB file | `test_create_db_returns_path_and_tracks_download_ids` creates a SQLite DB in a pytest temp dir, records `album-1`, verifies lookup returns the recorded ID, and verifies a missing ID returns `None`. |
+| Successful album and track downloads are recorded and skipped on repeat | `test_duplicate_db_records_successful_album_and_track_downloads` uses a fake `downloader.Download` boundary, records a fake album and track download, then verifies repeated album/track IDs are skipped before the fake download boundary is called again. |
+| Failed downloads are not recorded as duplicates | `test_duplicate_db_records_only_successful_downloads` raises `ConnectionError` from the fake download boundary, verifies the ID is not recorded, then retries successfully and verifies the ID is recorded once. |
+| Repeated direct, text-file, and queued inputs skip already-recorded items safely | `test_duplicate_db_skips_repeated_direct_text_and_queue_inputs` sends repeated direct Qobuz URLs plus a local text file containing repeated URLs through `download_list_of_urls`, and verifies only the first occurrence of each fake release reaches the fake download boundary. |
+| Duplicate tracking can be bypassed for a run without blocking downloads | `test_no_db_bypasses_duplicate_tracking_for_repeated_downloads` constructs `QobuzDL` with `downloads_db=None` and verifies repeated IDs still reach the fake download boundary. |
+| `--no-db` CLI wiring disables duplicate tracking for the run | `test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download` patches `QobuzDL`, uses a valid temp config, runs `cli.main()` with `dl ... --no-db`, and verifies the constructed client receives `downloads_db=None` while still dispatching the requested source. |
+| Purge removes only duplicate DB state and exits before client initialization | `test_purge_only_removes_database_and_exits` and `test_first_run_purge_does_not_initialize_config` verify `--purge` removes the configured DB when present, tolerates an absent DB, does not reset first-run config, and does not initialize the Qobuz client. |
+| Reset leaves duplicate DB state in place unless purge is requested | `test_reset_config_leaves_duplicate_database_in_place`, `test_reset_exits_before_client_initialization`, and `test_first_run_reset_only_resets_once` verify reset updates config without deleting the duplicate DB and exits before client initialization. |
+| Corrupt or legacy DB state fails open without live services or real downloads | `test_corrupt_duplicate_db_fails_open_without_blocking_downloads` writes a non-SQLite DB file and verifies duplicate tracking disables itself without blocking a fake download; `test_legacy_duplicate_db_schema_fails_open_without_blocking_downloads` creates a legacy `downloads(item_id)` table and verifies DB errors are logged while fake downloads continue. |
+| `None` DB paths remain a no-op | `test_handle_download_id_noops_without_db_path` verifies DB lookup/recording is bypassed when no DB path is configured. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_duplicate_tracking.py tests/test_commands.py -k "duplicate or no_db or purge or reset"` | Pass: 14 tests passed, 15 deselected. |
+| `uv run pytest tests/test_db.py tests/test_duplicate_tracking.py tests/test_commands.py -k "db or duplicate or no_db or purge or reset"` | Pass: 16 tests passed, 15 deselected. |
+| `just ci` | Pass: ruff format check, ruff lint, 120 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S08 status
+
+Pass. S08 behavior is covered by local automated tests using temporary SQLite DB files, fake Qobuz/API metadata boundaries, fake download boundaries, monkeypatched config/database paths, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or real media downloads are required.

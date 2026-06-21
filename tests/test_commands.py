@@ -242,6 +242,30 @@ def test_reset_config_creates_parent_directory(monkeypatch, tmp_path):
     assert "default_folder = Music" in output
 
 
+def test_reset_config_leaves_duplicate_database_in_place(monkeypatch, tmp_path):
+    config_path = tmp_path / "config"
+    config_file = config_path / "config.ini"
+    database_file = config_path / "qobuz_dl.db"
+    database_file.parent.mkdir(parents=True, exist_ok=True)
+    database_file.write_bytes(b"existing duplicate state")
+    answers = iter(["user@example.com", "Music", "6"])
+
+    class FakeBundle:
+        def get_app_id(self):
+            return "123456789"
+
+        def get_secrets(self):
+            return {"america": "secret-one", "europe": "secret-two"}
+
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: "hidden-password")
+    monkeypatch.setattr(cli, "Bundle", FakeBundle)
+
+    cli._reset_config(str(config_file))
+
+    assert database_file.read_bytes() == b"existing duplicate state"
+
+
 def test_reset_exits_before_client_initialization(monkeypatch, tmp_path):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
@@ -293,6 +317,55 @@ def test_first_run_reset_only_resets_once(monkeypatch, tmp_path):
 
     assert exc.value.code == "reset-complete"
     assert reset_calls == [str(config_file)]
+
+
+def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "config"
+    config_file = config_path / "config.ini"
+    database_file = config_path / "qobuz_dl.db"
+    _write_valid_config(config_file)
+    initialized = []
+    downloaded = []
+
+    class FakeQobuzDL:
+        def __init__(self, *args, downloads_db, **kwargs):
+            self.directory = str(tmp_path / "downloads")
+            initialized.append(downloads_db)
+
+        def initialize_client(self, email, password, app_id, secrets):
+            initialized.append((email, password, app_id, secrets))
+
+        def download_list_of_urls(self, urls):
+            downloaded.append(list(urls))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "qobuz-dl",
+            "dl",
+            "https://play.qobuz.com/album/album-1",
+            "--no-db",
+        ],
+    )
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
+    monkeypatch.setattr(cli, "_remove_leftovers", lambda directory: None)
+
+    cli.main()
+
+    assert initialized[0] is None
+    assert initialized[1] == (
+        "user@example.com",
+        "hashed-password",
+        "123456",
+        ["secret-one", "secret-two"],
+    )
+    assert downloaded == [["https://play.qobuz.com/album/album-1"]]
 
 
 @pytest.mark.parametrize("database_exists", [True, False])
