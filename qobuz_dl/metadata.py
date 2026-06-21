@@ -205,6 +205,7 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
         audio = id3.ID3(filename)
     except ID3NoHeaderError:
         audio = id3.ID3()
+    audio.update_to_v23()
 
     payload = _build_metadata_payload(d, album, istrack=istrack)
     tags = {

@@ -1,5 +1,5 @@
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3
+from mutagen.id3 import ID3, TDRC, TSOP
 
 from qobuz_dl import metadata
 from qobuz_dl.utils import make_m3u
@@ -154,6 +154,38 @@ def test_tag_mp3_writes_track_metadata_cover_flag_and_renames(tmp_path):
 
     no_cover = ID3(tagged_files[1][0], translate=False)
     assert no_cover.getall("APIC") == []
+
+
+def test_tag_mp3_converts_existing_v24_frames_before_v23_save(tmp_path):
+    album = _fake_album()
+    track = _fake_track(album)
+    root_dir = tmp_path / "mp3-existing-v24"
+    root_dir.mkdir()
+    temp_file = root_dir / ".02.tmp"
+    final_file = root_dir / "02. Finale.mp3"
+    temp_file.write_bytes(b"fake mp3 frame bytes")
+
+    existing_tags = ID3()
+    existing_tags.add(TDRC(encoding=3, text="1999-12-31"))
+    existing_tags.add(TSOP(encoding=3, text="Sort Performer"))
+    existing_tags.save(temp_file, v2_version=4)
+
+    metadata.tag_mp3(
+        str(temp_file),
+        str(root_dir),
+        str(final_file),
+        track,
+        album,
+        istrack=True,
+        em_image=False,
+    )
+
+    tagged = ID3(final_file, translate=False)
+    assert tagged.version == (2, 3, 0)
+    assert "TDRC" not in tagged
+    assert "TSOP" not in tagged
+    assert tagged["TDAT"].text == ["2024-05-06"]
+    assert tagged["TYER"].text == ["2024"]
 
 
 def test_taggers_preserve_missing_optional_metadata_differences(tmp_path):
