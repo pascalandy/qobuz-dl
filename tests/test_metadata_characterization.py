@@ -1,5 +1,5 @@
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3
+from mutagen.id3 import ID3, TDRC, TSOP
 
 from qobuz_dl import metadata
 from qobuz_dl.utils import make_m3u
@@ -67,6 +67,11 @@ def test_metadata_copyright_replaces_qobuz_marker_text_with_symbols():
         "℗ 2024 Label © 2024 Owner"
     )
     assert metadata._format_copyright("") == ""
+
+
+def test_metadata_formats_id3v23_date_when_full_release_date_is_available():
+    assert metadata._format_id3v23_tdat("2024-05-06") == "0605"
+    assert metadata._format_id3v23_tdat("2024") is None
 
 
 def test_tag_flac_writes_album_metadata_embeds_cover_and_renames(tmp_path):
@@ -144,15 +149,134 @@ def test_tag_mp3_writes_track_metadata_cover_flag_and_renames(tmp_path):
     assert tagged["TPE1"].text == ["Track Performer"]
     assert tagged["TPE2"].text == ["Album Artist"]
     assert tagged["TALB"].text == ["Fake Album"]
-    assert tagged["TDAT"].text == ["2024-05-06"]
+    assert tagged["TDAT"].text == ["0605"]
     assert tagged["TPUB"].text == ["Test Label"]
     assert tagged["TCON"].text == ["Pop, Rock"]
     assert tagged["TCOP"].text == ["℗ 2024 Track Owner"]
     assert tagged["TYER"].text == ["2024"]
+    assert tagged.version == (2, 3, 0)
     assert tagged.getall("APIC")[0].data == b"fake-jpeg-cover"
 
     no_cover = ID3(tagged_files[1][0], translate=False)
     assert no_cover.getall("APIC") == []
+
+
+def test_tag_mp3_converts_existing_v24_frames_before_v23_save(tmp_path):
+    album = _fake_album()
+    track = _fake_track(album)
+    root_dir = tmp_path / "mp3-existing-v24"
+    root_dir.mkdir()
+    temp_file = root_dir / ".02.tmp"
+    final_file = root_dir / "02. Finale.mp3"
+    temp_file.write_bytes(b"fake mp3 frame bytes")
+
+    existing_tags = ID3()
+    existing_tags.add(TDRC(encoding=3, text="1999-12-31T23:59"))
+    existing_tags.add(TSOP(encoding=3, text="Sort Performer"))
+    existing_tags.save(temp_file, v2_version=4)
+
+    metadata.tag_mp3(
+        str(temp_file),
+        str(root_dir),
+        str(final_file),
+        track,
+        album,
+        istrack=True,
+        em_image=False,
+    )
+
+    tagged = ID3(final_file, translate=False)
+    assert tagged.version == (2, 3, 0)
+    assert "TDRC" not in tagged
+    assert "TSOP" not in tagged
+    assert "TIME" not in tagged
+    assert tagged["TDAT"].text == ["0605"]
+    assert tagged["TYER"].text == ["2024"]
+
+
+def test_tag_mp3_clears_existing_v23_date_when_release_date_is_partial(tmp_path):
+    album = _fake_album()
+    album["release_date_original"] = "2024"
+    track = _fake_track(album)
+    root_dir = tmp_path / "mp3-partial-date"
+    root_dir.mkdir()
+    temp_file = root_dir / ".02.tmp"
+    final_file = root_dir / "02. Finale.mp3"
+    temp_file.write_bytes(b"fake mp3 frame bytes")
+
+    existing_tags = ID3()
+    existing_tags.add(TDRC(encoding=3, text="1999-12-31T23:59"))
+    existing_tags.save(temp_file, v2_version=4)
+
+    metadata.tag_mp3(
+        str(temp_file),
+        str(root_dir),
+        str(final_file),
+        track,
+        album,
+        istrack=True,
+        em_image=False,
+    )
+
+    tagged = ID3(final_file, translate=False)
+    assert tagged.version == (2, 3, 0)
+    assert "TDRC" not in tagged
+    assert "TDAT" not in tagged
+    assert "TIME" not in tagged
+    assert tagged["TYER"].text == ["2024"]
+
+
+def test_taggers_preserve_missing_optional_metadata_differences(tmp_path):
+    album = _fake_album()
+    album.pop("label")
+    track = _fake_track(album)
+    track.pop("composer")
+    track.pop("performer")
+
+    flac_dir = tmp_path / "flac-no-label"
+    flac_dir.mkdir()
+    flac_temp = flac_dir / ".02.tmp"
+    flac_final = flac_dir / "02. Finale.flac"
+    _write_fake_flac(flac_temp)
+
+    metadata.tag_flac(
+        str(flac_temp),
+        str(flac_dir),
+        str(flac_final),
+        track,
+        album,
+        istrack=True,
+        em_image=False,
+    )
+
+    flac = FLAC(flac_final)
+    assert flac["ARTIST"] == ["Album Artist"]
+    assert flac["LABEL"] == ["n/a"]
+    assert "COMPOSER" not in flac
+    assert "DISCNUMBER" not in flac
+
+    mp3_dir = tmp_path / "mp3-no-label"
+    mp3_dir.mkdir()
+    mp3_temp = mp3_dir / ".02.tmp"
+    mp3_final = mp3_dir / "02. Finale.mp3"
+    mp3_temp.write_bytes(b"fake mp3 frame bytes")
+
+    metadata.tag_mp3(
+        str(mp3_temp),
+        str(mp3_dir),
+        str(mp3_final),
+        track,
+        album,
+        istrack=False,
+        em_image=False,
+    )
+
+    mp3 = ID3(mp3_final, translate=False)
+    assert mp3["TPE1"].text == ["Album Artist"]
+    assert mp3["TRCK"].text == ["2/9"]
+    assert mp3["TPOS"].text == ["2"]
+    assert "TPUB" not in mp3
+    assert "TCOM" not in mp3
 
 
 def test_make_m3u_writes_sorted_relative_entries_from_fake_media(tmp_path):
