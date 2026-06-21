@@ -109,6 +109,28 @@ def test_get_maps_malformed_url_to_http_request_error():
         http.get("www.last.fm/user/example/library/playlists/1")
 
 
+def test_http_client_uses_configured_headers_and_timeout(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["timeout"] = timeout
+        return FakeResponse(body=b"{}")
+
+    monkeypatch.setattr(http, "urlopen", fake_urlopen)
+
+    client = http.HttpClient(headers={"X-App-Id": "123456789"}, timeout=13)
+    response = client.get("https://api.example.test/album/get", params={"album_id": 1})
+
+    assert captured == {
+        "url": "https://api.example.test/album/get?album_id=1",
+        "headers": {"X-app-id": "123456789"},
+        "timeout": 13,
+    }
+    assert response.status_code == 200
+
+
 def test_stream_download_writes_chunks_calls_progress_and_returns_byte_count(
     tmp_path, monkeypatch
 ):
@@ -154,6 +176,23 @@ def test_stream_download_maps_malformed_url_to_http_request_error(tmp_path):
     with pytest.raises(http.HttpRequestError, match="unknown url type"):
         http.stream_download("media.example.test/track.flac", target)
 
+    assert not target.exists()
+
+
+def test_stream_download_http_status_error_does_not_create_target(
+    tmp_path, monkeypatch
+):
+    def fake_urlopen(request, timeout):
+        return FakeResponse(status=503, body=b"temporarily unavailable")
+
+    monkeypatch.setattr(http, "urlopen", fake_urlopen)
+    target = tmp_path / "unavailable.flac"
+
+    with pytest.raises(http.HttpStatusError) as exc_info:
+        http.stream_download("https://media.example.test/unavailable.flac", target)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.body == b"temporarily unavailable"
     assert not target.exists()
 
 

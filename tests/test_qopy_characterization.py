@@ -59,6 +59,60 @@ def test_api_call_success_uses_expected_endpoint_and_params():
     ]
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "kwargs", "expected_params"),
+    [
+        ("album/get", {"id": "album-1"}, {"album_id": "album-1"}),
+        (
+            "playlist/get",
+            {"id": "playlist-1", "offset": 500},
+            {
+                "extra": "tracks",
+                "playlist_id": "playlist-1",
+                "limit": 500,
+                "offset": 500,
+            },
+        ),
+        (
+            "artist/get",
+            {"id": "artist-1", "offset": 1000},
+            {
+                "app_id": "123456789",
+                "artist_id": "artist-1",
+                "limit": 500,
+                "offset": 1000,
+                "extra": "albums",
+            },
+        ),
+        (
+            "label/get",
+            {"id": "label-1", "offset": 1500},
+            {
+                "label_id": "label-1",
+                "limit": 500,
+                "offset": 1500,
+                "extra": "albums",
+            },
+        ),
+        (
+            "album/search",
+            {"query": "alpha beta", "limit": 3},
+            {"query": "alpha beta", "limit": 3},
+        ),
+        ("playlist/getUserPlaylists", {"limit": 25}, {"limit": 25}),
+    ],
+)
+def test_api_call_endpoint_param_shapes(endpoint, kwargs, expected_params):
+    session = FakeSession(FakeResponse(payload={"ok": True}))
+    client = make_client(session)
+
+    assert client.api_call(endpoint, **kwargs) == {"ok": True}
+
+    assert session.calls == [
+        ("https://www.qobuz.com/api.json/0.2/" + endpoint, expected_params)
+    ]
+
+
 def test_login_status_mapping_for_invalid_credentials_and_app_id():
     with pytest.raises(AuthenticationError, match="Invalid credentials"):
         make_client(FakeSession(FakeResponse(status_code=401))).api_call(
