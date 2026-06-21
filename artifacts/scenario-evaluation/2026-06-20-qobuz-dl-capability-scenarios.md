@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S08 only; S01-S07 evidence is retained from merged PRs.
+- Scope for this PR: S09 only; S01-S08 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -32,7 +32,7 @@
 | S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Pass |
 | S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Pass |
 | S08 | Duplicate tracking | SQLite DB create/add/skip, --no-db wiring, purge/reset behavior, and corrupt/legacy DB handling are correct. | Pass |
-| S09 | Metadata/M3U | FLAC/MP3 tagging helpers and M3U generation work from local fake media/metadata without live downloads. | Not evaluated |
+| S09 | Metadata/M3U | FLAC/MP3 tagging helpers and M3U generation work from local fake media/metadata without live downloads. | Pass |
 | S10 | HTTP/API/bundle/packaging | HTTP headers/params/errors/streaming, qopy endpoint params/signatures, bundle parsing, import/entry-point/build smoke are correct. | Not evaluated |
 
 ## S01 evidence
@@ -266,3 +266,34 @@ S08 is covered in `tests/test_db.py`, `tests/test_duplicate_tracking.py`, and `t
 ## S08 status
 
 Pass. S08 behavior is covered by local automated tests using temporary SQLite DB files, fake Qobuz/API metadata boundaries, fake download boundaries, monkeypatched config/database paths, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or real media downloads are required.
+
+## S09 evidence
+
+### Automated coverage
+
+S09 is covered in `tests/test_metadata_characterization.py`, with no-M3U call-path coverage retained in `tests/test_core_regressions.py` and `tests/test_lastfm_characterization.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| FLAC tagging applies local fake album/track metadata | `test_tag_flac_writes_album_metadata_embeds_cover_and_renames` writes a tiny local fake FLAC in a pytest temp dir, calls `metadata.tag_flac`, and verifies title/version/work formatting, track number, disc number, composer, artist, album artist, album title, track total, date, label, normalized genre, and formatted copyright tags. |
+| FLAC cover embedding and final rename work without downloads | The same FLAC test writes a local fake `cover.jpg`, enables `em_image=True`, verifies the embedded picture bytes, verifies the final `.flac` exists, and verifies the temporary file was moved away. |
+| MP3 tagging applies local fake album/track metadata | `test_tag_mp3_writes_track_metadata_cover_flag_and_renames` writes local fake MP3 bytes in pytest temp dirs, calls `metadata.tag_mp3`, and verifies title/version/work formatting, track/total, disc position, artist, album artist, album title, date/year, label, normalized genre, and formatted copyright ID3 frames. |
+| MP3 cover/no-cover behavior and final rename work without downloads | The same MP3 test runs both `em_image=True` and `em_image=False`, verifies APIC cover bytes are present only when requested, verifies final `.mp3` files exist, and verifies temporary files were moved away. |
+| Explicit/parental metadata fields are safe when unsupported by current helpers | The fake track metadata includes `parental_warning`; the FLAC and MP3 helper tests prove unsupported explicit/parental fields do not break supported tag writes or final file moves. |
+| M3U generation writes deterministic relative entries and preserves ordering | `test_make_m3u_writes_sorted_relative_entries_from_fake_media` creates root-level and nested fake FLAC files out of order, writes local tags, calls `make_m3u`, and verifies the playlist contains sorted relative paths in deterministic order. |
+| Existing no-M3U call paths remain respected | `test_handle_url_downloads_collection_items_from_every_page` verifies Qobuz playlist URLs call `make_m3u` only when `no_m3u_for_playlists` is false, and `test_lastfm_playlist_parsing_sanitizes_title_downloads_found_tracks_and_obeys_m3u_flag` verifies the same for Last.fm playlist ingestion. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_metadata_characterization.py` | Pass: 6 tests passed. |
+| `uv run pytest tests/test_metadata_characterization.py tests/test_core_regressions.py::test_handle_url_downloads_collection_items_from_every_page tests/test_lastfm_characterization.py::test_lastfm_playlist_parsing_sanitizes_title_downloads_found_tracks_and_obeys_m3u_flag` | Pass: 14 tests passed. |
+| `uv run ruff format qobuz_dl/utils.py tests/test_metadata_characterization.py` | Pass: 2 files left unchanged. |
+| `just ci` | Pass: ruff format check, ruff lint, 123 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S09 status
+
+Pass. S09 behavior is covered by local automated tests using local fake FLAC/MP3 bytes, fake metadata dictionaries, local fake cover bytes, pytest temporary directories, and mocked playlist call boundaries. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or real media downloads are required.
