@@ -62,6 +62,15 @@ def test_api_call_success_uses_expected_endpoint_and_params():
 @pytest.mark.parametrize(
     ("endpoint", "kwargs", "expected_params"),
     [
+        (
+            "user/login",
+            {"email": "user@example.com", "pwd": "password"},
+            {
+                "email": "user@example.com",
+                "password": "password",
+                "app_id": "123456789",
+            },
+        ),
         ("album/get", {"id": "album-1"}, {"album_id": "album-1"}),
         (
             "playlist/get",
@@ -96,6 +105,21 @@ def test_api_call_success_uses_expected_endpoint_and_params():
         ),
         (
             "album/search",
+            {"query": "alpha beta", "limit": 3},
+            {"query": "alpha beta", "limit": 3},
+        ),
+        (
+            "artist/search",
+            {"query": "alpha beta", "limit": 3},
+            {"query": "alpha beta", "limit": 3},
+        ),
+        (
+            "playlist/search",
+            {"query": "alpha beta", "limit": 3},
+            {"query": "alpha beta", "limit": 3},
+        ),
+        (
+            "track/search",
             {"query": "alpha beta", "limit": 3},
             {"query": "alpha beta", "limit": 3},
         ),
@@ -190,6 +214,38 @@ def test_favorite_wrappers_preserve_type_offset_and_limit(
                 "type": favorite_type,
                 "offset": 50,
                 "limit": 25,
+                "request_ts": fixed_time,
+                "request_sig": expected_sig,
+            },
+        )
+    ]
+
+
+def test_favorite_request_signing_accepts_secret_override(monkeypatch):
+    session = FakeSession(FakeResponse(payload={"items": []}))
+    client = make_client(session)
+    fixed_time = 1712345678.25
+    monkeypatch.setattr("qobuz_dl.qopy.time.time", lambda: fixed_time)
+
+    assert client.api_call(
+        "favorite/getUserFavorites",
+        type="albums",
+        offset=0,
+        limit=50,
+        sec="override",
+    ) == {"items": []}
+
+    expected_sig_payload = f"favoritegetUserFavorites{fixed_time}override"
+    expected_sig = hashlib.md5(expected_sig_payload.encode("utf-8")).hexdigest()
+    assert session.calls == [
+        (
+            "https://www.qobuz.com/api.json/0.2/favorite/getUserFavorites",
+            {
+                "app_id": "123456789",
+                "user_auth_token": "user-token",
+                "type": "albums",
+                "offset": 0,
+                "limit": 50,
                 "request_ts": fixed_time,
                 "request_sig": expected_sig,
             },
