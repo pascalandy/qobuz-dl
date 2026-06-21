@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S04 only; S01-S03 evidence is retained from merged PRs.
+- Scope for this PR: S05 only; S01-S04 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -28,7 +28,7 @@
 | S02 | Direct source routing | Album/track/artist/label/playlist URLs route correctly, invalid URLs do not crash, collection pages are all consumed. | Pass |
 | S03 | Text-file source ingestion | Local URL files ignore blank/comment lines, dispatch remaining URLs, and bad files fail gracefully. | Pass |
 | S04 | Lucky search mode | Query validation, type/limit mapping, result URLs, and download dispatch are correct. | Pass |
-| S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Not evaluated |
+| S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Pass |
 | S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Not evaluated |
 | S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Not evaluated |
 | S08 | Duplicate tracking | SQLite DB create/add/skip, --no-db wiring, and purge behavior are correct. | Not evaluated |
@@ -144,3 +144,32 @@ S04 is covered in `tests/test_core_regressions.py`.
 ## S04 status
 
 Pass. S04 behavior is covered by local automated tests using fake client search methods, monkeypatched search/download dispatch boundaries, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
+
+## S05 evidence
+
+### Automated coverage
+
+S05 is covered in `tests/test_terminal_interactive_characterization.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| Type selection is deterministic under fake input | `test_interactive_builtin_prompts_return_selected_urls_without_download` selects Tracks with monkeypatched `input`, fakes `search_by_type`, and verifies the returned track URL and prompts without constructing a live client. |
+| Search loop retries default empty result selection | `test_interactive_search_loop_retries_empty_selection_and_dedupes_in_order` sends an empty selection for the first fake search result list, verifies the loop asks for a second query, and asserts both fake search calls were made in order with type `track` and the configured limit. |
+| Multi-select parsing supports comma-separated values and ranges | `test_interactive_multiselect_accepts_commas_and_ranges` selects `1,3-4` against fake search results and verifies the corresponding URLs are returned in selection order. |
+| Multi-select dedupes repeated selections while preserving first-seen order | `test_interactive_search_loop_retries_empty_selection_and_dedupes_in_order` selects `3,1-2,2,3` and verifies the final queue is `3,1,2`. |
+| Default quality behavior is covered | `test_interactive_quality_prompt_defaults_to_current_quality` accepts an empty quality prompt and verifies the current quality remains selected; the retry-loop test also accepts the default quality after queueing. |
+| No-download/test-mode behavior avoids dispatch | `test_interactive_builtin_prompts_return_selected_urls_without_download` and `test_interactive_search_loop_retries_empty_selection_and_dedupes_in_order` call `interactive(download=False)` and verify `download_list_of_urls` is not dispatched. |
+| Ctrl-C exits safely | `test_interactive_keyboard_interrupt_cancels_cleanly` raises `KeyboardInterrupt` from monkeypatched `input`, verifies `interactive(download=False)` returns `None`, and fails the test if search or download dispatch happens after the interrupt. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_terminal_interactive_characterization.py` | Pass: 7 tests passed. |
+| `just ci` | Pass: ruff format check, ruff lint, 104 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S05 status
+
+Pass. S05 behavior is covered by local automated tests using monkeypatched input, fake search results, monkeypatched download dispatch boundaries, captured prompts, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
