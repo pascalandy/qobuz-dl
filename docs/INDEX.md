@@ -6,7 +6,7 @@ Project documentation lives here when it is too detailed for the README.
 
 - [Installation](installation.md) — requirements, uvx no-install usage, optional persistent install, first run, and reset instructions.
 - [Examples](examples.md) — download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate tracking.
-- [Use cases](use-cases.md) — goal-oriented CLI workflows for account setup, downloads, discovery, configuration, and maintenance.
+- [Use cases](use-cases.md) — goal-oriented local-library workflows for account setup, hi-res downloads, discovery, organization, duplicate tracking, and maintenance.
 - [CLI reference](cli.md) — top-level CLI usage and command overview.
 - [Module usage](module-usage.md) — importing `qobuz-dl` as a library.
 

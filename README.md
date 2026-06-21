@@ -1,6 +1,8 @@
 # qobuz-dl
 
-Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www.qobuz.com/). It *just works*™.
+Build and manage a local music library from [Qobuz](https://www.qobuz.com/) without leaving your terminal. `qobuz-dl` helps collectors and hi-fi listeners search, download, tag, and organize FLAC or MP3 releases from albums, tracks, artists, labels, playlists, Last.fm playlists, or URL lists.
+
+It is made for people who care about managing their own files: pull a new hi-res album into your folder structure, queue a discography intake, turn a playlist into local tracks plus an M3U file, keep cover art with the music, and avoid downloading the same release twice.
 
 [![CI](https://github.com/pascalandy/qobuz-dl/actions/workflows/ci.yml/badge.svg)](https://github.com/pascalandy/qobuz-dl/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://github.com/pascalandy/qobuz-dl/blob/master/pyproject.toml)
@@ -9,16 +11,17 @@ Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www
 
 ## Features
 
-* Download FLAC and MP3 files from Qobuz
-* Explore and download music directly from your terminal with **interactive** or **lucky** mode
-* Download albums, tracks, artists, playlists, and labels with **download** mode
-* Download music from Last.fm playlists
+* Download albums, tracks, artists, playlists, labels, Last.fm playlists, or batches from a text file
+* Choose MP3 320, CD-quality FLAC, 24-bit up to 96 kHz, or the highest hi-res tier supported by the CLI
+* Explore Qobuz from the terminal with **interactive** search, multi-select queueing, and **lucky** best-match downloads
+* Build artist intake runs with `--albums-only` and `--smart-discography`; pull label catalogs with `dl`
+* Organize files with folder and track naming patterns using album, artist, year, bit depth, sample rate, and track metadata
+* Keep library artwork with `cover.jpg`, embedded cover art, original-quality cover downloads, or no-cover mode
+* Write audio tags for FLAC and MP3 files
 * Queue support in **interactive** mode
 * Duplicate handling with a portable local database
 * Support for albums with multiple discs
 * Support for M3U playlists
-* Download URLs from a text file
-* Extended tags
 * Hardened dependency footprint: this fork removed the original runtime dependencies on `beautifulsoup4`, `colorama`, `pathvalidate`, `pick`, `requests`, and `tqdm`; only `mutagen` remains for audio metadata. See [Dependencies](docs/dependencies.md) for details.
 
 ## Quick start
@@ -40,10 +43,21 @@ Use `uv` for user-facing and local project commands. See [Installation](docs/ins
 
 ## Examples
 
-Download an album URL in 24-bit, sub-96 kHz quality:
+Download an album while requesting the highest hi-res tier the CLI supports:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb -q 7
+uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 27
+```
+
+Download an album into a library-friendly folder layout with embedded original-quality artwork:
+
+```sh
+uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb \
+  --quality 27 \
+  --folder-format "{albumartist}/{album} ({year}) [{bit_depth}B-{sampling_rate}kHz]" \
+  --track-format "{tracknumber}. {tracktitle}" \
+  --embed-art \
+  --og-cover
 ```
 
 Run interactive mode with a limit of 10 results:
@@ -58,7 +72,7 @@ Download the first album result for a search:
 uvx qobuz-dl lucky playboi carti die lit
 ```
 
-See [Examples](docs/examples.md) for download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate-tracking behavior.
+See [Use cases](docs/use-cases.md) for library-building workflows, and [Examples](docs/examples.md) for download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate-tracking behavior.
 
 ## Usage
 
