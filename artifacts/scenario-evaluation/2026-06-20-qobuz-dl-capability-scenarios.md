@@ -4,7 +4,7 @@
 
 - Evaluation method: pass/fail for each scenario.
 - Scenario granularity: 10 scenarios total, 1 implementation PR per scenario.
-- Scope for this PR: S05 only; S01-S04 evidence is retained from merged PRs.
+- Scope for this PR: S06 only; S01-S05 evidence is retained from merged PRs.
 - No live Qobuz credentials, subscription, API, or media downloads.
 - No live Last.fm pages.
 - Use mocked network, fake filesystem state, and temporary directories only.
@@ -29,7 +29,7 @@
 | S03 | Text-file source ingestion | Local URL files ignore blank/comment lines, dispatch remaining URLs, and bad files fail gracefully. | Pass |
 | S04 | Lucky search mode | Query validation, type/limit mapping, result URLs, and download dispatch are correct. | Pass |
 | S05 | Interactive queue mode | Type selection, search loop, multi-select ranges/dedupe, default quality, no-download test mode, and Ctrl-C behavior are correct. | Pass |
-| S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Not evaluated |
+| S06 | Last.fm playlist ingestion | Fixture HTML parsing, sanitization, missing Qobuz match skip, M3U optional behavior, and HTTP errors are safe. | Pass |
 | S07 | Download execution | Album/track download paths, quality fallback/no-fallback, cover/booklet/no-cover, multi-disc folders, existing file skip, and interrupted streams are handled. | Not evaluated |
 | S08 | Duplicate tracking | SQLite DB create/add/skip, --no-db wiring, and purge behavior are correct. | Not evaluated |
 | S09 | Metadata/M3U | FLAC/MP3 tagging helpers and M3U generation work from local fake media/metadata without live downloads. | Not evaluated |
@@ -173,3 +173,33 @@ S05 is covered in `tests/test_terminal_interactive_characterization.py`.
 ## S05 status
 
 Pass. S05 behavior is covered by local automated tests using monkeypatched input, fake search results, monkeypatched download dispatch boundaries, captured prompts, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
+
+## S06 evidence
+
+### Automated coverage
+
+S06 is covered in `tests/test_lastfm_characterization.py` and `tests/test_core_regressions.py`.
+
+| Behavior | Evidence |
+| --- | --- |
+| Fixture HTML parsing extracts playlist title, artists, and tracks | `test_lastfm_playlist_parser_extracts_fixture_title_artists_and_tracks` feeds `tests/fixtures/lastfm_playlist.html` to `LastFmPlaylistParser` and verifies the raw playlist title, artists, and track titles. |
+| Output directory names are sanitized | `test_lastfm_playlist_parsing_sanitizes_title_downloads_found_tracks_and_obeys_m3u_flag` verifies the fixture title `My: Last/fm Playlist?*` is used as the sanitized download directory `My Lastfm Playlist`. |
+| Parsed artist/title pairs drive fake Qobuz track searches | The same test verifies the generated fake search queries are `Alpha Artist First Song` and `Beta: Artist Second/Track`, with item type `track`, limit `1`, and `lucky=True`. |
+| Found Qobuz matches dispatch fake track downloads only | The same test fakes Qobuz search results and verifies `download_from_id` receives the parsed track IDs with `album=False` and the sanitized playlist directory as `alt_path`. |
+| Missing Qobuz matches are skipped safely | `test_lastfm_playlist_skips_tracks_without_qobuz_matches` returns no fake search result for the first parsed track and verifies only the matched second track is downloaded. |
+| Playlist M3U generation obeys the existing no-m3u flag | `test_lastfm_playlist_parsing_sanitizes_title_downloads_found_tracks_and_obeys_m3u_flag` parametrizes `no_m3u_for_playlists` and verifies `make_m3u` is called only when the flag is false. |
+| Empty or unusable playlist pages do not search, download, or create M3U files | `test_lastfm_playlist_with_no_usable_track_list_does_not_search_or_download` uses `tests/fixtures/lastfm_empty_playlist.html` and verifies fake search, download, and M3U boundaries are untouched. |
+| Last.fm HTTP errors fail gracefully | `test_lastfm_playlist_http_errors_do_not_escape` parametrizes fake `HttpRequestError` and `HttpStatusError`, verifies no exception escapes, and asserts search, download, and M3U boundaries are untouched. |
+
+### Commands and outcomes
+
+| Command | Outcome |
+| --- | --- |
+| `git status --short` | Clean before changes. |
+| `uv run pytest tests/test_lastfm_characterization.py tests/test_core_regressions.py::test_lastfm_playlist_skips_tracks_without_qobuz_matches` | Pass: 7 tests passed. |
+| `just ci` | Pass: ruff format check, ruff lint, 107 pytest tests, local CLI help smoke checks, and `uv build` all succeeded. |
+| `uv run python /Users/assistant/.agents/skills/autoreview/scripts/autoreview --mode local` | Pass: no accepted/actionable findings reported. |
+
+## S06 status
+
+Pass. S06 behavior is covered by local automated tests using fixture HTML, fake HTTP responses, fake Qobuz search/download methods, monkeypatched M3U generation, captured logs, and pytest temporary directories. No live Qobuz credentials, Qobuz API calls, Last.fm pages, or media downloads are required.
