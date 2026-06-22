@@ -19,6 +19,10 @@ Project documentation lives here when it is too detailed for the README.
 - [Changelog](../CHANGELOG.md) — notable changes per release.
 - [Contributing](../CONTRIBUTING.md) — setup, workflow, ground rules, and release steps.
 
+## Feature direction
+
+- [Bandwidth limit vision](feat/2026-06-22-bandwidth-limit-vision/vision-bandwidth-limit.md) — direction check for optional download pacing and central rate-limit/backoff handling.
+
 ## Research
 
 - [Qobuz official API and SDK research](research/qobuz-official-api.md) — official-source findings, missing developer docs, community substitutes, endpoint confidence, and gaps.
