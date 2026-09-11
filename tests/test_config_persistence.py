@@ -78,37 +78,77 @@ def test_startup_repairs_permissions_without_rewriting_config(
     assert config_file.read_bytes() == original
 
 
+@pytest.mark.parametrize(
+    ("operation", "failure"),
+    [
+        ("write", OSError),
+        ("write", ValueError),
+        ("write", KeyboardInterrupt),
+        ("fsync", OSError),
+        ("replace", OSError),
+        pytest.param(
+            "chmod",
+            PermissionError,
+            marks=pytest.mark.skipif(os.name != "posix", reason="POSIX modes required"),
+        ),
+    ],
+)
 def test_failed_reset_preserves_previous_config_and_removes_partial_write(
-    monkeypatch, config_file, capsys, caplog
+    monkeypatch, config_file, capsys, caplog, operation, failure
 ):
     config_file.parent.mkdir(mode=0o700)
     original = b"[DEFAULT]\nemail=old@example.com\ncustom_option=keep this\n"
     config_file.write_bytes(original)
     config_file.chmod(0o600)
     write_modes = []
+    original_write = configparser.ConfigParser.write
+
+    def fail_operation(*args, **kwargs):
+        if failure is KeyboardInterrupt:
+            raise KeyboardInterrupt
+        raise failure("Cannot write new-secret-one for new@example.com")
 
     def fail_during_write(config, stream, *args, **kwargs):
         write_modes.append(stat.S_IMODE(os.fstat(stream.fileno()).st_mode))
-        stream.write("[DEFAULT]\nsecrets = new-secret-one\n")
-        stream.flush()
-        raise OSError("Cannot write new-secret-one for new@example.com")
+        if operation == "write":
+            stream.write("[DEFAULT]\nsecrets = new-secret-one\n")
+            stream.flush()
+            fail_operation()
+        original_write(config, stream, *args, **kwargs)
 
     monkeypatch.setattr(configparser.ConfigParser, "write", fail_during_write)
+    if operation != "write":
+        monkeypatch.setattr(cli.os, operation, fail_operation)
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--reset"])
 
-    with pytest.raises((OSError, SystemExit)) as exc:
+    with pytest.raises(
+        KeyboardInterrupt if failure is KeyboardInterrupt else SystemExit
+    ) as exc:
         cli.main()
 
     assert config_file.read_bytes() == original
     assert sorted(path.name for path in config_file.parent.iterdir()) == ["config.ini"]
     if os.name == "posix":
-        assert write_modes == [0o600]
+        assert write_modes == ([] if operation == "chmod" else [0o600])
     output = capsys.readouterr()
     diagnostic = f"{exc.value}\n{output.out}\n{output.err}\n{caplog.text}"
     assert "new-secret-one" not in diagnostic
     assert "new@example.com" not in diagnostic
-    assert isinstance(exc.value, SystemExit)
-    assert exc.value.code not in (None, 0)
+    if failure is not KeyboardInterrupt:
+        assert exc.value.code not in (None, 0)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits required")
+def test_bare_config_filename_does_not_change_working_directory_permissions(
+    monkeypatch, config_file, tmp_path
+):
+    tmp_path.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+
+    cli._reset_config("config.ini")
+
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o755
+    assert stat.S_IMODE((tmp_path / "config.ini").stat().st_mode) == 0o600
 
 
 def test_successful_reset_preserves_prompt_values_and_database(

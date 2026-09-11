@@ -5,6 +5,8 @@ import hashlib
 import logging
 import os
 import sys
+import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from io import StringIO
 
@@ -43,6 +45,51 @@ class _StartupRequirements:
     needs_auth: bool
 
 
+class _ConfigStorageError(Exception):
+    pass
+
+
+def _secure_config_path(config_file: str) -> None:
+    try:
+        directory = os.path.dirname(config_file)
+        if directory:
+            os.makedirs(directory, mode=0o700, exist_ok=True)
+            if os.name == "posix":
+                os.chmod(directory, 0o700)
+        if os.name == "posix":
+            with suppress(FileNotFoundError):
+                os.chmod(config_file, 0o600)
+    except OSError:
+        raise _ConfigStorageError from None
+
+
+def _write_config(config_file: str, config: configparser.ConfigParser) -> None:
+    _secure_config_path(config_file)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=os.path.dirname(config_file) or ".",
+            prefix=f".{os.path.basename(config_file)}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = stream.name
+            if os.name == "posix":
+                os.chmod(temporary_path, 0o600)
+            config.write(stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, config_file)
+        temporary_path = None
+    except (OSError, ValueError, TypeError, configparser.Error):
+        raise _ConfigStorageError from None
+    finally:
+        if temporary_path is not None:
+            with suppress(OSError):
+                os.unlink(temporary_path)
+
+
 def _classify_startup(arguments):
     if arguments.reset:
         return _StartupRequirements(needs_config=False, needs_auth=False)
@@ -62,7 +109,8 @@ def _classify_startup(arguments):
 
 
 def _ensure_config_exists(config_file):
-    if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(config_file):
+    _secure_config_path(config_file)
+    if not os.path.isfile(config_file):
         _reset_config(config_file)
 
 
@@ -109,10 +157,8 @@ def _redacted_config_text(config_file):
 
 
 def _reset_config(config_file):
+    _secure_config_path(config_file)
     logging.info(f"{YELLOW}Creating config file: {config_file}")
-    config_directory = os.path.dirname(config_file)
-    if config_directory:
-        os.makedirs(config_directory, exist_ok=True)
     config = configparser.ConfigParser()
     config["DEFAULT"]["email"] = input("Enter your email:\n- ")
     password = getpass.getpass("Enter your password (input is hidden): ")
@@ -144,8 +190,7 @@ def _reset_config(config_file):
     config["DEFAULT"]["folder_format"] = DEFAULT_FOLDER
     config["DEFAULT"]["track_format"] = DEFAULT_TRACK
     config["DEFAULT"]["smart_discography"] = "false"
-    with open(config_file, "w") as configfile:
-        config.write(configfile)
+    _write_config(config_file, config)
     logging.info(
         f"{GREEN}Config file updated. Edit more options in {config_file}"
         "\nso you don't have to call custom flags every time you run "
@@ -194,21 +239,25 @@ def main():
     arguments = parser.parse_args()
     startup = _classify_startup(arguments)
 
-    if arguments.reset:
-        sys.exit(_reset_config(CONFIG_FILE))
-
     config_values = None
-    if startup.needs_config:
-        try:
+    try:
+        if arguments.reset:
+            sys.exit(_reset_config(CONFIG_FILE))
+        if startup.needs_config:
             _ensure_config_exists(CONFIG_FILE)
             if startup.needs_auth or arguments.show_config:
                 config_values = _load_config_values(CONFIG_FILE)
-        except (KeyError, UnicodeDecodeError, configparser.Error) as error:
-            sys.exit(
-                f"{RED}Your config file is corrupted: {error}! "
-                "Run 'uvx qobuz-dl -r' to fix this "
-                "(or 'qobuz-dl -r' if installed)."
-            )
+    except _ConfigStorageError:
+        sys.exit(
+            f"{RED}Unable to access configuration securely. "
+            "Check its directory permissions and available disk space."
+        )
+    except (KeyError, UnicodeDecodeError, configparser.Error) as error:
+        sys.exit(
+            f"{RED}Your config file is corrupted: {error}! "
+            "Run 'uvx qobuz-dl -r' to fix this "
+            "(or 'qobuz-dl -r' if installed)."
+        )
 
     if arguments.command is None and not arguments.show_config and not arguments.purge:
         parser.print_help()

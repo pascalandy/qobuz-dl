@@ -70,6 +70,10 @@ The config file stores:
 
 Treat the config file as a secret. The saved password is hashed, not plaintext, but that hash is still used for the tool's login flow. `--show-config` redacts `email`, `password`, `app_id`, `secrets`, `private_key`, and `user_auth_token` if those keys are present, but the actual config file contains the saved values. The current config creator does not write `user_auth_token`; Qobuz login returns that token when a command initializes, and the process keeps it in memory for that run.
 
+On POSIX systems, config creation and reset set the `qobuz-dl` directory to `0700` and `config.ini` to `0600`. Commands that load config also repair these permissions before reading it, without changing the file's contents.
+
+On Windows, config privacy depends on the directory's access control list. POSIX permission guarantees do not apply. If permission repair or config persistence fails, the CLI exits with a storage error that omits credentials and config contents.
+
 The database is a local SQLite file used only for duplicate tracking. It stores downloaded item IDs so repeated runs can skip releases that were already downloaded. It is not required for authentication.
 
 ### Move auth/config to another computer
@@ -142,6 +146,8 @@ uvx qobuz-dl -r
 ```
 
 `--reset` prompts for Qobuz email, Qobuz password, default download folder, and default quality, fetches the current Qobuz app ID and app secrets, rewrites `config.ini`, and exits before initializing the Qobuz client. It does not delete `qobuz_dl.db`; use `uvx qobuz-dl --purge` if you also want to remove duplicate-tracking history.
+
+The replacement is written to a temporary file in the same directory, then installed atomically. A failure before replacement preserves the previous config's contents.
 
 ## 2. Primary downloads
 
