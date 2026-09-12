@@ -35,6 +35,12 @@ The retry helper lets `KeyboardInterrupt` propagate. An interactive caller can h
 
 See [API rate-limit retries](cli.md#api-rate-limit-retries) for the attempt, wait, and endpoint limits.
 
+## Audio rate-limit results
+
+Audio acquisition exhaustion follows the normal download result contract. It returns a `failed` result with reason `request_error`. A partial album preserves paths finalized before the failed track, and cancellation propagates `KeyboardInterrupt`.
+
+See [audio rate-limit retries](cli.md#audio-rate-limit-retries) for the shared limits and media integrity rules.
+
 ## Download results
 
 `QobuzDL.download_from_id(item_id, album=True, alt_path=None)` returns an immutable `DownloadResult` with three fields:

@@ -158,6 +158,8 @@ HTTP-adjacent tests should prefer local fake response/session classes that imple
 
 Rate-limit tests must inject a controlled wall clock and sleep function. Assert the requested waits and call count. Do not delay the test suite.
 
+Keep API and media exhaustion scenarios separate. For media streams, cover both returned and raised `429` responses before transfer. Prove that failures after response acceptance do not retry, append another response, or send a `Range` request.
+
 The CI and local `just ci` gate build and install the exact wheel before testing its imports and entry points. This catches packaging metadata errors that source checks can miss.
 
 ## Good next tests
