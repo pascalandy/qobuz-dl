@@ -11,6 +11,7 @@ from qobuz_dl.downloader import (
     DownloadResult,
     _aggregate_download_results,
 )
+from qobuz_dl.exceptions import NonStreamable
 
 
 def _track(track_id="track-1", title="Single Track", track_number=1):
@@ -342,6 +343,21 @@ def test_database_duplicate_is_ignored_without_fabricated_paths(tmp_path, caplog
 
     _assert_result(result, "ignored", "database_duplicate")
     assert _completed_messages(caplog) == []
+
+
+def test_download_from_id_preserves_non_streamable_result(tmp_path):
+    qdl = QobuzDL(directory=tmp_path)
+    qdl.client = object()
+
+    class NonStreamableDownload:
+        def download_track(self):
+            raise NonStreamable
+
+    qdl._new_downloader = lambda item_id, alt_path=None: NonStreamableDownload()
+
+    result = qdl.download_from_id("track-1", album=False)
+
+    _assert_result(result, "failed", "not_streamable")
 
 
 @pytest.mark.parametrize("track", [True, False])

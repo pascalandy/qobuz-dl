@@ -6,6 +6,7 @@ import os
 import pytest
 
 from qobuz_dl.core import QobuzDL
+from qobuz_dl.downloader import DownloadResult
 from qobuz_dl.utils import get_url_info, smart_discography_filter
 
 
@@ -361,9 +362,12 @@ def test_handle_url_downloads_collection_items_from_every_page(
     downloaded = []
     m3u_paths = []
     metadata_item_ids = []
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloaded.append(
-        (item_id, album, alt_path)
-    )
+
+    def record_download(item_id, album=True, alt_path=None):
+        downloaded.append((item_id, album, alt_path))
+        return DownloadResult("finalized", "downloaded")
+
+    qdl.download_from_id = record_download
 
     def paged_meta(self, item_id):
         metadata_item_ids.append(item_id)
@@ -383,7 +387,7 @@ def test_handle_url_downloads_collection_items_from_every_page(
     qdl.client = type("Client", (), {meta_method: paged_meta})()
     monkeypatch.setattr(
         "qobuz_dl.core.make_m3u",
-        lambda playlist_path: m3u_paths.append(playlist_path),
+        lambda playlist_path, finalized_paths: m3u_paths.append(playlist_path),
     )
 
     qdl.handle_url(url)
@@ -628,7 +632,7 @@ def test_lastfm_playlist_skips_tracks_without_qobuz_matches(tmp_path, monkeypatc
     downloads = []
 
     monkeypatch.setattr("qobuz_dl.core.http.get_text", lambda url, timeout: html)
-    monkeypatch.setattr("qobuz_dl.core.make_m3u", lambda path: None)
+    monkeypatch.setattr("qobuz_dl.core.make_m3u", lambda path, finalized_paths: None)
 
     qdl = QobuzDL(directory=tmp_path)
 
@@ -639,9 +643,12 @@ def test_lastfm_playlist_skips_tracks_without_qobuz_matches(tmp_path, monkeypatc
         ]
     )
     qdl.search_by_type = lambda *args, **kwargs: next(searches)
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloads.append(
-        item_id
-    )
+
+    def record_download(item_id, album=True, alt_path=None):
+        downloads.append(item_id)
+        return DownloadResult("finalized", "downloaded")
+
+    qdl.download_from_id = record_download
 
     qdl.download_lastfm_pl("https://www.last.fm/user/example/library/playlists/1")
 
