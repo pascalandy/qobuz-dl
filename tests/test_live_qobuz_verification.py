@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import socket
 import stat
@@ -11,13 +12,14 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TIT2, TPE1, TRCK
 
-from qobuz_dl import downloader, metadata
+from qobuz_dl import downloader, live_verification, metadata
 from qobuz_dl.downloader import DownloadResult
 from qobuz_dl.live_verification import (
     ACTIVATION_ENV,
@@ -470,6 +472,244 @@ def test_invalid_inputs_fail_before_backend_or_secret_output(
     assert "plain-text-password" not in error
 
 
+def test_runtime_failure_writes_sanitized_report_before_sensitive_work(
+    tmp_path, capsys
+):
+    sensitive_calls = []
+    temporary_calls = []
+
+    class RuntimeFailureBackend(FakeBackend):
+        def runtime_facts(self):
+            print(SENTINEL)
+            print(SENTINEL, file=sys.stderr)
+            raise RuntimeError(SENTINEL)
+
+        def bundle_credentials(self):
+            sensitive_calls.append("bundle")
+            return super().bundle_credentials()
+
+    def recording_temporary_directory(*args, **kwargs):
+        temporary_calls.append((args, kwargs))
+        return tempfile.TemporaryDirectory(*args, **kwargs)
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path),
+            backend_factory=RuntimeFailureBackend,
+            temporary_directory_factory=recording_temporary_directory,
+        )
+        == 1
+    )
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "Live Qobuz verification failed [runtime:runtime_unavailable]. "
+        "Sanitized report written.\n"
+    )
+    report = _report(tmp_path)
+    assert report["sha"] is None
+    assert report["platform"] is None
+    assert report["reason"] == "runtime_unavailable"
+    assert next(iter(report["phases"])) == "runtime"
+    assert report["phases"]["runtime"] == "failed"
+    assert all(
+        status == "skipped"
+        for phase, status in report["phases"].items()
+        if phase != "runtime"
+    )
+    assert sensitive_calls == []
+    assert temporary_calls == []
+    assert SENTINEL not in output.err
+    assert SENTINEL not in json.dumps(report)
+
+
+def test_runtime_facts_accept_the_verifier_worktree_root():
+    runtime = RealBackend().runtime_facts()
+    top_level = subprocess.run(
+        ("git", "rev-parse", "--show-toplevel"),
+        cwd=live_verification._ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    sha = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=live_verification._ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert Path(top_level).resolve() == live_verification._ROOT.resolve()
+    assert runtime.sha == sha
+    assert re.fullmatch(r"[0-9a-f]{40}", runtime.sha)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "source-archive",
+        "nested-copy",
+        "malformed-sha",
+        "missing-git",
+        "system-collector",
+        "machine-collector",
+        "python-collector",
+        "backend-construction",
+    ],
+)
+def test_runtime_provenance_failures_are_sanitized_before_sensitive_work(
+    tmp_path, monkeypatch, capsys, failure
+):
+    backend = RealBackend()
+    sensitive_calls = []
+    temporary_calls = []
+
+    def forbidden_bundle():
+        sensitive_calls.append("bundle")
+        raise AssertionError(SENTINEL)
+
+    monkeypatch.setattr(backend, "bundle_credentials", forbidden_bundle)
+
+    def backend_factory():
+        return backend
+
+    if failure == "source-archive":
+        archive = tmp_path / "archive"
+        archive.mkdir()
+        monkeypatch.setattr(live_verification, "_ROOT", archive)
+    elif failure == "nested-copy":
+        enclosing = tmp_path / "enclosing"
+        nested = enclosing / "nested-copy"
+        nested.mkdir(parents=True)
+        subprocess.run(
+            ("git", "init", "--quiet", str(enclosing)),
+            check=True,
+            capture_output=True,
+        )
+        monkeypatch.setattr(live_verification, "_ROOT", nested)
+    elif failure == "malformed-sha":
+
+        def malformed_sha(command, **kwargs):
+            output = (
+                str(live_verification._ROOT)
+                if "--show-toplevel" in command
+                else SENTINEL
+            )
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+        monkeypatch.setattr(live_verification.subprocess, "run", malformed_sha)
+    elif failure == "missing-git":
+
+        def missing_git(*args, **kwargs):
+            raise FileNotFoundError(SENTINEL)
+
+        monkeypatch.setattr(live_verification.subprocess, "run", missing_git)
+    elif failure.endswith("-collector"):
+        collector_name = {
+            "system-collector": "system",
+            "machine-collector": "machine",
+            "python-collector": "python_version",
+        }[failure]
+
+        def failed_collector():
+            print(SENTINEL)
+            print(SENTINEL, file=sys.stderr)
+            raise RuntimeError(SENTINEL)
+
+        monkeypatch.setattr(
+            live_verification.platform, collector_name, failed_collector
+        )
+    else:
+
+        def failed_backend_factory():
+            print(SENTINEL)
+            raise RuntimeError(SENTINEL)
+
+        backend_factory = failed_backend_factory
+
+    def recording_temporary_directory(*args, **kwargs):
+        temporary_calls.append((args, kwargs))
+        return tempfile.TemporaryDirectory(*args, **kwargs)
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path),
+            backend_factory=backend_factory,
+            temporary_directory_factory=recording_temporary_directory,
+        )
+        == 1
+    )
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "Live Qobuz verification failed [runtime:runtime_unavailable]. "
+        "Sanitized report written.\n"
+    )
+    report = _report(tmp_path)
+    assert report["sha"] is None
+    assert report["platform"] is None
+    assert report["reason"] == "runtime_unavailable"
+    assert report["phases"] == {
+        phase: "failed" if phase == "runtime" else "skipped"
+        for phase in report["phases"]
+    }
+    assert sensitive_calls == []
+    assert temporary_calls == []
+    assert SENTINEL not in output.err
+    assert SENTINEL not in json.dumps(report)
+
+
+def test_runtime_keyboard_interrupt_is_sanitized_without_sensitive_work(
+    tmp_path, capsys
+):
+    sensitive_calls = []
+    temporary_calls = []
+
+    class InterruptedRuntimeBackend(FakeBackend):
+        def runtime_facts(self):
+            raise KeyboardInterrupt(SENTINEL)
+
+        def bundle_credentials(self):
+            sensitive_calls.append("bundle")
+            return super().bundle_credentials()
+
+    def recording_temporary_directory(*args, **kwargs):
+        temporary_calls.append((args, kwargs))
+        return tempfile.TemporaryDirectory(*args, **kwargs)
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path),
+            backend_factory=InterruptedRuntimeBackend,
+            temporary_directory_factory=recording_temporary_directory,
+        )
+        == 1
+    )
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "Live Qobuz verification failed [runtime:interrupted]. "
+        "Sanitized report written.\n"
+    )
+    report = _report(tmp_path)
+    assert report["sha"] is None
+    assert report["platform"] is None
+    assert report["reason"] == "interrupted"
+    assert report["phases"]["runtime"] == "failed"
+    assert report["phases"]["cleanup"] == "skipped"
+    assert sensitive_calls == []
+    assert temporary_calls == []
+    assert SENTINEL not in output.err
+    assert SENTINEL not in json.dumps(report)
+
+
 def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
     tmp_path, monkeypatch, capsys
 ):
@@ -523,6 +763,7 @@ def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
         "result": "passed",
         "reason": "ok",
         "phases": {
+            "runtime": "passed",
             "bundle": "passed",
             "login": "passed",
             "search": "passed",
@@ -1719,5 +1960,43 @@ def test_atomic_report_failure_preserves_previous_report(tmp_path, monkeypatch, 
         "Live Qobuz verification failed [report:report_write_failed]. "
         "No report was written.\n"
     )
+    assert report_path.read_text(encoding="utf-8") == '{"previous": true}\n'
+    assert list(tmp_path.glob(".live-report.json.*.tmp")) == []
+
+
+def test_runtime_report_write_failure_preserves_previous_report(
+    tmp_path, monkeypatch, capsys
+):
+    report_path = tmp_path / "live-report.json"
+    report_path.write_text('{"previous": true}\n', encoding="utf-8")
+
+    def failing_replace(source, destination):
+        raise OSError(SENTINEL)
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+
+    class RuntimeFailureBackend(FakeBackend):
+        def runtime_facts(self):
+            raise RuntimeError(SENTINEL)
+
+        def bundle_credentials(self):
+            raise AssertionError("runtime failure reached credentials")
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path),
+            backend_factory=RuntimeFailureBackend,
+        )
+        == 1
+    )
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "Live Qobuz verification failed [report:report_write_failed]. "
+        "No report was written.\n"
+    )
+    assert SENTINEL not in output.err
     assert report_path.read_text(encoding="utf-8") == '{"previous": true}\n'
     assert list(tmp_path.glob(".live-report.json.*.tmp")) == []
