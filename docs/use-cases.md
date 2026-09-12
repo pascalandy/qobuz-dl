@@ -432,7 +432,9 @@ uvx qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID --no-m3u
 
 ### Duplicate tracking
 
-By default, `qobuz-dl` tracks downloaded release IDs in a local database and skips already-downloaded releases.
+By default, `qobuz-dl` records a top-level album or track ID only after that request is genuinely finalized. Type and quality filters, demos, missing download URLs, tagging failures, and partial albums remain unrecorded and retryable. A retry reuses any expected audio files that were already finalized, then downloads the missing files.
+
+Rows already present in the database are trusted as before. `qobuz-dl` does not audit or repair old rows, so use `--no-db` or purge the database when you need to retry an ID that history already marks as downloaded.
 
 Bypass duplicate tracking for one run:
 

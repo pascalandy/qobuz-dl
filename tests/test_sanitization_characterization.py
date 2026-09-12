@@ -117,6 +117,7 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
 
     def fake_download_with_progress(url, fname, desc):
         downloaded.append((url, fname, desc))
+        Path(fname).write_bytes(b"audio")
 
     def fake_tag_flac(
         filename,
@@ -138,6 +139,7 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
                 embed_art,
             )
         )
+        os.replace(filename, final_file)
 
     monkeypatch.setattr(
         downloader, "download_with_progress", fake_download_with_progress

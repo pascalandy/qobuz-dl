@@ -208,7 +208,7 @@ class QobuzDL:
                 "according to the local database.\nUse the '--no-db' flag "
                 "to bypass this."
             )
-            return
+            return downloader.DownloadResult("ignored", "database_duplicate")
         try:
             dloader = downloader.Download(
                 self.client,
@@ -224,12 +224,17 @@ class QobuzDL:
                 self.track_format,
             )
             if album:
-                dloader.download_release()
+                result = dloader.download_release()
             else:
-                dloader.download_track()
+                result = dloader.download_track()
+        except (http.HttpError, ConnectionError):
+            result = downloader.DownloadResult("failed", "request_error")
+        except NonStreamable:
+            result = downloader.DownloadResult("failed", "not_streamable")
+
+        if result.state == "finalized":
             handle_download_id(self.downloads_db, item_id, add_id=True)
-        except (http.HttpError, ConnectionError, NonStreamable) as e:
-            logger.error(f"{RED}Error getting release: {e}. Skipping...")
+        return result
 
     def _resolve_url_download_plan(self, url):
         try:

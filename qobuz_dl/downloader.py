@@ -2,12 +2,11 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Literal, Tuple
 
 import qobuz_dl.http as http
 import qobuz_dl.metadata as metadata
 from qobuz_dl.color import CYAN, GREEN, OFF, RED, YELLOW
-from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.sanitize import sanitize_filename, sanitize_filepath
 
 QL_DOWNGRADE = "FormatRestrictedByFormatAvailability"
@@ -33,9 +32,51 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class DownloadResult:
+    state: Literal["finalized", "ignored", "failed"]
+    reason: Literal[
+        "downloaded",
+        "existing_file",
+        "database_duplicate",
+        "type_filter",
+        "quality_filter",
+        "demo",
+        "missing_url",
+        "not_streamable",
+        "request_error",
+        "tagging_error",
+        "empty_release",
+    ]
+    finalized_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class _DownloadPreparation:
     directory: str
     is_mp3: bool
+
+
+def _aggregate_download_results(results: list[DownloadResult]) -> DownloadResult:
+    finalized_paths = tuple(
+        path for result in results for path in result.finalized_paths
+    )
+    if not results:
+        return DownloadResult("ignored", "empty_release")
+
+    failed = next((result for result in results if result.state == "failed"), None)
+    if failed:
+        return DownloadResult("failed", failed.reason, finalized_paths)
+
+    ignored = next((result for result in results if result.state == "ignored"), None)
+    if ignored:
+        return DownloadResult("ignored", ignored.reason, finalized_paths)
+
+    reason = (
+        "downloaded"
+        if any(result.reason == "downloaded" for result in results)
+        else "existing_file"
+    )
+    return DownloadResult("finalized", reason, finalized_paths)
 
 
 class Download:
@@ -67,28 +108,40 @@ class Download:
 
     def download_id_by_type(self, track=True):
         if track:
-            self.download_track()
-        else:
-            self.download_release()
+            return self.download_track()
+        return self.download_release()
 
     def download_release(self):
-        meta = self.client.get_album_meta(self.item_id)
+        try:
+            meta = self.client.get_album_meta(self.item_id)
+        except (http.HttpError, ConnectionError) as error:
+            logger.error(f"{RED}Error getting release: {error}. Skipping...")
+            return DownloadResult("failed", "request_error")
 
         if not meta.get("streamable"):
-            raise NonStreamable("This release is not streamable")
+            logger.error(f"{RED}This release is not streamable. Skipping...")
+            return DownloadResult("failed", "not_streamable")
 
         if self.albums_only and (
             meta.get("release_type") != "album"
             or meta.get("artist", {}).get("name") == "Various Artists"
         ):
             logger.info(f"{OFF}Ignoring Single/EP/VA: {meta.get('title', 'n/a')}")
-            return
+            return DownloadResult("ignored", "type_filter")
+
+        tracks = meta["tracks"]["items"]
+        if not tracks:
+            return DownloadResult("ignored", "empty_release")
 
         album_title = _get_title(meta)
 
-        preparation = self._prepare_release_download(meta, album_title)
+        try:
+            preparation = self._prepare_release_download(meta, album_title)
+        except (http.HttpError, ConnectionError) as error:
+            logger.error(f"{RED}Error getting release: {error}. Skipping...")
+            return DownloadResult("failed", "request_error")
         if not preparation:
-            return
+            return DownloadResult("ignored", "quality_filter")
 
         if "goodies" in meta:
             try:
@@ -97,45 +150,64 @@ class Download:
                 )
             except Exception as error:
                 logger.debug("Skipping booklet download: %s", error)
-        media_numbers = [track["media_number"] for track in meta["tracks"]["items"]]
+        media_numbers = [track["media_number"] for track in tracks]
         is_multiple = len(set(media_numbers)) > 1
-        for i in meta["tracks"]["items"]:
-            parse = self.client.get_track_url(i["id"], fmt_id=self.quality)
-            if "sample" not in parse and parse.get("sampling_rate"):
-                self._download_prepared_track(
+        results = []
+        for track in tracks:
+            try:
+                parsed_url = self.client.get_track_url(track["id"], fmt_id=self.quality)
+                if "sample" in parsed_url:
+                    logger.info(f"{OFF}Demo. Skipping")
+                    results.append(DownloadResult("ignored", "demo"))
+                    continue
+                result = self._download_prepared_track(
                     preparation,
-                    parse,
-                    i,
+                    parsed_url,
+                    track,
                     meta,
                     False,
-                    i["media_number"] if is_multiple else None,
+                    track["media_number"] if is_multiple else None,
                 )
-            else:
-                logger.info(f"{OFF}Demo. Skipping")
-        logger.info(f"{GREEN}Completed")
+            except (http.HttpError, ConnectionError) as error:
+                logger.error(f"{RED}Error getting release: {error}. Skipping...")
+                results.append(DownloadResult("failed", "request_error"))
+                break
+            results.append(result)
+
+        aggregate = _aggregate_download_results(results)
+        if aggregate.state == "finalized":
+            logger.info(f"{GREEN}Completed")
+        return aggregate
 
     def download_track(self):
-        parse = self.client.get_track_url(self.item_id, self.quality)
+        try:
+            parsed_url = self.client.get_track_url(self.item_id, self.quality)
+            if "sample" in parsed_url:
+                logger.info(f"{OFF}Demo. Skipping")
+                return DownloadResult("ignored", "demo")
 
-        if "sample" not in parse and parse.get("sampling_rate"):
             meta = self.client.get_track_meta(self.item_id)
             track_title = _get_title(meta)
             artist = _safe_get(meta, "performer", "name")
             logger.info(f"\n{YELLOW}Downloading: {artist} - {track_title}")
-            preparation = self._prepare_track_download(meta, parse, track_title)
+            preparation = self._prepare_track_download(meta, parsed_url, track_title)
             if not preparation:
-                return
-            self._download_prepared_track(
+                return DownloadResult("ignored", "quality_filter")
+            result = self._download_prepared_track(
                 preparation,
-                parse,
+                parsed_url,
                 meta,
                 meta,
                 True,
                 None,
             )
-        else:
-            logger.info(f"{OFF}Demo. Skipping")
-        logger.info(f"{GREEN}Completed")
+        except (http.HttpError, ConnectionError) as error:
+            logger.error(f"{RED}Error getting release: {error}. Skipping...")
+            return DownloadResult("failed", "request_error")
+
+        if result.state == "finalized":
+            logger.info(f"{GREEN}Completed")
+        return result
 
     def _prepare_release_download(self, meta, album_title):
         file_format, quality_met, bit_depth, sampling_rate = self._get_format(meta)
@@ -199,7 +271,7 @@ class Download:
         is_track,
         multiple=None,
     ):
-        self._download_and_tag(
+        return self._download_and_tag(
             preparation.directory,
             track_url_dict,
             track_metadata,
@@ -224,12 +296,6 @@ class Download:
     ):
         extension = ".mp3" if is_mp3 else ".flac"
 
-        try:
-            url = track_url_dict["url"]
-        except KeyError:
-            logger.info(f"{OFF}Track not available for download")
-            return
-
         if multiple:
             root_dir = os.path.join(root_dir, f"Disc {multiple}")
             os.makedirs(root_dir, exist_ok=True)
@@ -249,7 +315,12 @@ class Download:
 
         if os.path.isfile(final_file):
             logger.info(f"{OFF}{track_title} was already downloaded")
-            return
+            return DownloadResult("finalized", "existing_file", (final_file,))
+
+        url = track_url_dict.get("url")
+        if not url:
+            logger.info(f"{OFF}Track not available for download")
+            return DownloadResult("failed", "missing_url")
 
         filename = os.path.join(root_dir, f".qobuz-dl-{uuid.uuid4().hex}.tmp")
         descriptor = os.open(
@@ -273,6 +344,13 @@ class Download:
                 )
             except Exception as e:
                 logger.error(f"{RED}Error tagging the file: {e}", exc_info=True)
+                finalized_paths = (final_file,) if os.path.isfile(final_file) else ()
+                return DownloadResult("failed", "tagging_error", finalized_paths)
+
+            if not os.path.isfile(final_file):
+                logger.error(f"{RED}Error tagging the file: no final file produced")
+                return DownloadResult("failed", "tagging_error")
+            return DownloadResult("finalized", "downloaded", (final_file,))
         finally:
             try:
                 os.remove(filename)
@@ -351,7 +429,7 @@ class Download:
                 new_track_dict["bit_depth"],
                 new_track_dict["sampling_rate"],
             )
-        except (KeyError, http.HttpError):
+        except KeyError:
             return ("Unknown", quality_met, None, None)
 
 
