@@ -151,6 +151,38 @@ def _track_quality_messages(caplog):
     ]
 
 
+def test_first_refusal_continues_to_later_admissible_track(
+    tmp_path, monkeypatch, caplog
+):
+    client = RecordingClient(
+        {
+            "track-1": _track_url("track-1", restricted=True),
+            "track-2": _track_url("track-2", sampling_rate=96),
+        },
+        tracks=TRACKS[:2],
+    )
+    transferred = _install_media_boundaries(monkeypatch)
+    qdl = _qobuz(tmp_path, client)
+    caplog.set_level("INFO", logger="qobuz_dl.downloader")
+    album_dir = tmp_path / "music/Album Artist - Album Title (2024) [24B-192kHz]"
+    first_path = album_dir / "01. Opening.flac"
+    second_path = album_dir / "02. Interlude.flac"
+
+    result = qdl.download_from_id("album-1", album=True)
+
+    assert result == DownloadResult("ignored", "quality_filter", (str(second_path),))
+    assert client.track_url_calls == [("track-1", 27), ("track-2", 27)]
+    assert transferred == ["track-2"]
+    assert not first_path.exists()
+    assert second_path.read_bytes() == b"audio:track-2"
+    assert _history_ids(qdl.downloads_db) == []
+    assert _track_quality_messages(caplog) == ["Track quality: 24-bit/96 kHz"]
+    assert "Skipping Opening as it doesn't meet quality requirement" in _plain_messages(
+        caplog
+    )
+    assert not any(message.endswith("Completed") for message in _plain_messages(caplog))
+
+
 def test_later_refusal_continues_and_retry_downloads_only_missing_track(
     tmp_path, monkeypatch, caplog
 ):
@@ -361,14 +393,14 @@ def test_empty_first_response_is_reused_without_quality_or_history(
     assert "Track not available for download" in _plain_messages(caplog)
 
 
-def test_restricted_first_flac_track_refuses_album_before_creating_files(
+def test_all_restricted_flac_tracks_are_refused_without_transfers(
     tmp_path, monkeypatch, caplog
 ):
     client = RecordingClient(
         {
             "track-1": _track_url("track-1", restricted=True),
-            "track-2": _track_url("track-2"),
-            "track-3": _track_url("track-3"),
+            "track-2": _track_url("track-2", restricted=True),
+            "track-3": _track_url("track-3", restricted=True),
         }
     )
     transferred = _install_media_boundaries(monkeypatch)
@@ -378,15 +410,18 @@ def test_restricted_first_flac_track_refuses_album_before_creating_files(
     result = qdl.download_from_id("album-1", album=True)
 
     assert result == DownloadResult("ignored", "quality_filter")
-    assert client.track_url_calls == [("track-1", 27)]
+    assert client.track_url_calls == [
+        ("track-1", 27),
+        ("track-2", 27),
+        ("track-3", 27),
+    ]
     assert transferred == []
-    assert list((tmp_path / "music").iterdir()) == []
+    assert not list((tmp_path / "music").rglob("*.flac"))
     assert _history_ids(qdl.downloads_db) == []
     assert _track_quality_messages(caplog) == []
-    assert (
-        "Skipping Album Title as it doesn't meet quality requirement"
-        in _plain_messages(caplog)
-    )
+    messages = _plain_messages(caplog)
+    for title in ("Opening", "Interlude", "Finale"):
+        assert f"Skipping {title} as it doesn't meet quality requirement" in messages
 
 
 def test_mp3_album_keeps_lazy_per_track_requests_and_ignores_restrictions(
