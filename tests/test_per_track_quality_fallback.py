@@ -195,7 +195,7 @@ def test_later_refusal_continues_and_retry_downloads_only_missing_track(
         "Skipping Interlude as it doesn't meet quality requirement"
         in _plain_messages(caplog)
     )
-    assert not any(message == "Completed" for message in _plain_messages(caplog))
+    assert not any(message.endswith("Completed") for message in _plain_messages(caplog))
 
     responses["track-2"] = _track_url("track-2", bit_depth=16, sampling_rate=44.1)
     caplog.clear()
@@ -225,7 +225,9 @@ def test_later_refusal_continues_and_retry_downloads_only_missing_track(
         "Track quality: 16-bit/44.1 kHz",
         "Track quality: 24-bit/96 kHz",
     ]
-    assert sum(message == "Completed" for message in _plain_messages(caplog)) == 1
+    assert (
+        sum(message.endswith("Completed") for message in _plain_messages(caplog)) == 1
+    )
 
 
 def test_allowed_downgrade_logs_each_returned_quality(tmp_path, monkeypatch, caplog):
