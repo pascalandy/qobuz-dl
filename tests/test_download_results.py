@@ -6,7 +6,11 @@ import pytest
 from qobuz_dl import downloader
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.db import handle_download_id
-from qobuz_dl.downloader import Download
+from qobuz_dl.downloader import (
+    Download,
+    DownloadResult,
+    _aggregate_download_results,
+)
 
 
 def _track(track_id="track-1", title="Single Track", track_number=1):
@@ -250,6 +254,62 @@ def test_partial_album_reuses_finalized_track_and_records_only_completed_retry(
     assert len(_completed_messages(caplog)) == 1
 
 
+@pytest.mark.parametrize("failure_point", ["url_request", "media_stream"])
+def test_partial_album_request_failure_retains_paths_and_stops(
+    tmp_path, monkeypatch, caplog, failure_point
+):
+    tracks = [
+        _track("track-1", "Opening", 1),
+        _track("track-2", "Interlude", 2),
+        _track("track-3", "Finale", 3),
+    ]
+    client = MutableDownloadClient(album_meta=_album_meta(tracks=tracks))
+    transferred = _install_file_boundaries(monkeypatch)
+    requested = []
+    get_track_url = client.get_track_url
+
+    def failing_track_url(track_id, fmt_id):
+        requested.append(track_id)
+        if failure_point == "url_request" and track_id == "track-2":
+            raise downloader.http.HttpRequestError("request failed")
+        return get_track_url(track_id, fmt_id)
+
+    client.get_track_url = failing_track_url
+    if failure_point == "media_stream":
+
+        def failing_stream(url, target_path, *, progress=None):
+            track_id = Path(url).stem
+            transferred.append(track_id)
+            Path(target_path).write_bytes(f"audio:{track_id}".encode())
+            if track_id == "track-2":
+                raise ConnectionError("stream failed")
+
+        monkeypatch.setattr(downloader.http, "stream_download", failing_stream)
+
+    qdl = QobuzDL(
+        directory=tmp_path / "music",
+        quality=27,
+        no_cover=True,
+        downloads_db=tmp_path / "downloads.sqlite",
+    )
+    qdl.client = client
+    caplog.set_level("INFO", logger="qobuz_dl.downloader")
+    album_dir = tmp_path / "music" / "Album Artist - Album Title (2024) [24B-96kHz]"
+    first_path = album_dir / "01. Opening.flac"
+
+    result = qdl.download_from_id("album-1", album=True)
+
+    _assert_result(result, "failed", "request_error", (first_path,))
+    assert first_path.read_bytes() == b"audio:track-1"
+    assert "track-3" not in requested
+    assert transferred == (
+        ["track-1"] if failure_point == "url_request" else ["track-1", "track-2"]
+    )
+    assert handle_download_id(qdl.downloads_db, "album-1") is None
+    assert not list(album_dir.glob(".*.tmp"))
+    assert _completed_messages(caplog) == []
+
+
 def test_empty_album_is_ignored_without_history_or_completed_message(tmp_path, caplog):
     client = MutableDownloadClient(album_meta=_album_meta(tracks=[]))
     qdl = QobuzDL(
@@ -294,3 +354,72 @@ def test_public_downloader_dispatch_returns_exact_child_result(
     monkeypatch.setattr(download, "download_release", lambda: expected)
 
     assert download.download_id_by_type(track=track) is expected
+
+
+def test_noop_tagger_is_failed_without_final_file(tmp_path, monkeypatch, caplog):
+    transferred = _install_file_boundaries(monkeypatch)
+    monkeypatch.setattr(downloader.metadata, "tag_flac", lambda *args: None)
+    caplog.set_level("INFO", logger="qobuz_dl.downloader")
+
+    result = Download(
+        MutableDownloadClient(),
+        "track-1",
+        str(tmp_path),
+        27,
+        no_cover=True,
+    ).download_track()
+
+    _assert_result(result, "failed", "tagging_error")
+    assert transferred == ["track-1"]
+    assert not list(tmp_path.rglob("*.flac"))
+    assert not list(tmp_path.rglob(".*.tmp"))
+    assert _completed_messages(caplog) == []
+
+
+@pytest.mark.parametrize(
+    ("children", "state", "reason", "paths"),
+    [
+        (
+            [
+                DownloadResult("finalized", "existing_file", ("first.flac",)),
+                DownloadResult("finalized", "downloaded", ("second.flac",)),
+            ],
+            "finalized",
+            "downloaded",
+            ("first.flac", "second.flac"),
+        ),
+        (
+            [
+                DownloadResult("finalized", "downloaded", ("first.flac",)),
+                DownloadResult("ignored", "demo"),
+                DownloadResult("finalized", "existing_file", ("third.flac",)),
+            ],
+            "ignored",
+            "demo",
+            ("first.flac", "third.flac"),
+        ),
+        (
+            [
+                DownloadResult("ignored", "demo"),
+                DownloadResult("failed", "missing_url"),
+                DownloadResult("failed", "tagging_error"),
+            ],
+            "failed",
+            "missing_url",
+            (),
+        ),
+        (
+            [
+                DownloadResult("finalized", "existing_file", ("first.flac",)),
+                DownloadResult("finalized", "existing_file", ("second.flac",)),
+            ],
+            "finalized",
+            "existing_file",
+            ("first.flac", "second.flac"),
+        ),
+    ],
+)
+def test_album_result_aggregation_preserves_order_and_blocking_precedence(
+    children, state, reason, paths
+):
+    _assert_result(_aggregate_download_results(children), state, reason, paths)
