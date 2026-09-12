@@ -4,6 +4,7 @@ import pytest
 
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.db import handle_download_id
+from qobuz_dl.downloader import DownloadResult
 
 
 def _record_downloads(monkeypatch, calls, failures=None):
@@ -29,13 +30,15 @@ def _record_downloads(monkeypatch, calls, failures=None):
 
         def download_release(self):
             if self.item_id in failures:
-                raise ConnectionError("fake download failed")
+                return DownloadResult("failed", "request_error")
             calls.append((self.item_id, False, self.path))
+            return DownloadResult("finalized", "downloaded")
 
         def download_track(self):
             if self.item_id in failures:
-                raise ConnectionError("fake download failed")
+                return DownloadResult("failed", "request_error")
             calls.append((self.item_id, True, self.path))
+            return DownloadResult("finalized", "downloaded")
 
         def download_id_by_type(self, track=True):
             pytest.fail("download_from_id should call explicit download methods")

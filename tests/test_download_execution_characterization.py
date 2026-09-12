@@ -125,6 +125,7 @@ def _recording_tag(monkeypatch, tagged):
                 "embed_art": embed_art,
             }
         )
+        os.replace(filename, final_file)
 
     monkeypatch.setattr(downloader.metadata, "tag_flac", fake_tag)
 
@@ -322,12 +323,15 @@ def test_failed_media_stream_removes_partial_file_and_logs_safe_failure(
     )
     qdl = QobuzDL(directory=tmp_path, quality=27, no_cover=True)
     qdl.client = FakeDownloadClient()
-    caplog.set_level("ERROR", logger="qobuz_dl.core")
+    caplog.set_level("ERROR", logger="qobuz_dl.downloader")
 
-    qdl.download_from_id("track-1", album=False)
+    result = qdl.download_from_id("track-1", album=False)
 
     track_dir = tmp_path / "Album Artist - Track Album (2024) [24B-96kHz]"
     assert not list(track_dir.glob(".*.tmp"))
+    assert result.state == "failed"
+    assert result.reason == "request_error"
+    assert result.finalized_paths == ()
     assert any(
         "Error getting release" in record.getMessage() for record in caplog.records
     )
