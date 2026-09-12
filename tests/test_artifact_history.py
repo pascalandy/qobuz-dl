@@ -125,6 +125,8 @@ class _Client:
             "url": f"https://media.example.test/{item_id}.flac",
             "sampling_rate": 44.1,
             "bit_depth": 16,
+            "format_id": 6,
+            "mime_type": "audio/flac",
         }
 
 
@@ -151,10 +153,11 @@ def _install_fixture_download(monkeypatch, *, failing_track=None):
     ):
         shutil.copyfile(FIXTURES / "synthetic-silence.flac", filename)
 
-    def rename(filename, _root, final_path, track, *_args):
+    def rename(filename, _root, final_path, track, *_args, finalize=True):
         if track["id"] == failing_track:
             raise RuntimeError("tagging failed")
-        os.replace(filename, final_path)
+        if finalize:
+            os.replace(filename, final_path)
 
     monkeypatch.setattr(downloader, "download_with_progress", copy_fixture)
     monkeypatch.setattr(downloader.metadata, "tag_flac", rename)
@@ -311,7 +314,6 @@ def test_artifacts_schema_lookalikes_are_rejected(tmp_path, lookalike):
 @pytest.mark.parametrize(
     ("extension", "expected_media"),
     [
-        ("mp3", MediaProperties("mp3", None, 44100, 32000)),
         ("flac", MediaProperties("flac", 16, 44100, 5440)),
     ],
 )
@@ -337,6 +339,46 @@ def test_real_media_facts_and_full_digest_are_persisted(
         sha256=hashlib.sha256(media_path.read_bytes()).hexdigest(),
     )
     assert history.verified_artifact("track-1", media_path) == artifact
+
+
+def test_unknown_bitrate_mode_mp3_fixture_is_not_verified(tmp_path):
+    media_path = _copy_fixture(tmp_path, "mp3")
+
+    assert DownloadHistory.inspect_artifact("track-1", media_path, 5) is None
+
+
+@pytest.mark.parametrize(
+    ("bitrate_mode", "accepted"),
+    [
+        (db.BitrateMode.CBR, True),
+        (db.BitrateMode.UNKNOWN, False),
+        (db.BitrateMode.ABR, False),
+        (db.BitrateMode.VBR, False),
+        (None, False),
+    ],
+)
+def test_mp3_inspection_requires_cbr(tmp_path, monkeypatch, bitrate_mode, accepted):
+    media_path = _copy_fixture(tmp_path, "mp3")
+
+    class ParsedInfo:
+        sample_rate = 44100
+        bitrate = 320000
+
+    if bitrate_mode is not None:
+        ParsedInfo.bitrate_mode = bitrate_mode
+
+    class ParsedMp3:
+        info = ParsedInfo()
+
+    monkeypatch.setattr(db, "MP3", lambda _stream: ParsedMp3())
+
+    artifact = DownloadHistory.inspect_artifact("track-1", media_path, 5)
+
+    if accepted:
+        assert artifact is not None
+        assert artifact.media == MediaProperties("mp3", None, 44100, 320000)
+    else:
+        assert artifact is None
 
 
 def test_path_key_supports_multiple_destinations_qualities_and_upsert(tmp_path):
@@ -572,9 +614,9 @@ def test_sqlite_write_error_sticky_disables_history_and_keeps_media_facts(
     )
     history.record_legacy_id("album-1")
 
-    assert artifact is None
+    assert artifact is not None
     assert history.enabled is False
-    assert history.verified_artifact("track-1", media_path) is None
+    assert history.verified_artifact("track-1", media_path) == artifact
     assert history.contains_legacy_id("album-1") is False
     assert _rows(database, "SELECT * FROM artifacts") == []
     assert _rows(database, "SELECT * FROM downloads") == []
@@ -636,9 +678,13 @@ def test_download_result_stays_successful_when_artifact_write_fails(
     _install_fixture_download(monkeypatch)
 
     result = qobuz.download_from_id("track-1", album=False)
+    reused = qobuz.download_from_id("track-1", album=False)
 
     assert result.state == "finalized"
     assert result.reason == "downloaded"
+    assert reused == DownloadResult(
+        "finalized", "verified_artifact", result.finalized_paths
+    )
     assert Path(result.finalized_paths[0]).is_file()
     assert qobuz.download_history.enabled is False
     assert _rows(database, "SELECT * FROM artifacts") == []

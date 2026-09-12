@@ -12,7 +12,7 @@ This guide organizes `qobuz-dl` by local-library goal. Examples use `uvx --from 
 | Keep clean folder names | Use `--folder-format` and `--track-format` with metadata such as album artist, album, year, bit depth, sample rate, track number, and title. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl ALBUM_URL -ff "{albumartist} - {album} ({year})" -tf "{tracknumber}. {tracktitle}"` |
 | Intake an artist catalog | Download an artist URL. Add `--albums-only` to skip singles, EPs, and Various Artists releases where applicable; add `--smart-discography` to reduce likely spam/extras and prefer practical remaster/quality choices. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography` |
 | Capture a label or playlist | Download label URLs, Qobuz playlist URLs, Last.fm playlist URLs, or a text file of saved URLs. Playlist downloads can create `.m3u` files unless you pass `--no-m3u`. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl urls.txt` |
-| Avoid duplicate downloads | Let the local downloaded-ID database skip IDs that were already downloaded. Use `--no-db` for a one-off bypass or `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge` to reset the database. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl ALBUM_URL` |
+| Avoid duplicate downloads | Let verified destination history reuse matching direct-track and album artifacts. Use `--no-db` to disable persistent history for one run, or use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge` to reset the database. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl ALBUM_URL` |
 | Choose an artwork policy | Keep the default `cover.jpg`, embed artwork with `--embed-art`, request original-quality covers with `--og-cover`, or skip cover downloads with `--no-cover`. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl ALBUM_URL --embed-art --og-cover` |
 | Discover from the terminal | Use `fun` for interactive search with queueing, or `lucky` when a best-match album, track, artist, or playlist search is good enough. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun --limit 10` |
 
@@ -90,7 +90,7 @@ On POSIX systems, config creation and reset set the `qobuz-dl` directory to `070
 
 On Windows, config privacy depends on the directory's access control list. POSIX permission guarantees do not apply. If permission repair or config persistence fails, the CLI exits with a storage error that omits credentials and config contents.
 
-The database is a local SQLite file used only for duplicate tracking. It stores downloaded item IDs so repeated runs can skip releases that were already downloaded. It is not required for authentication.
+The database is a local SQLite file used only for download history. It stores legacy item IDs and verified artifact evidence. Direct requests recheck the exact destination artifact before reuse. The database is not required for authentication.
 
 ### Move auth/config to another computer
 
@@ -448,7 +448,7 @@ By default, a playlist download rewrites its `.m3u` file from the current source
 
 The rewrite excludes audio files that are present in the playlist directory but absent from the source. It also excludes failed items without a readable final MP3 or FLAC path. Removing a source entry removes it from the next `.m3u` without deleting its audio file.
 
-When duplicate history already contains a track, a rerun can reuse the expected file at the same playlist destination without transferring it again. `qobuz-dl` does not search other destinations or copy files between them. Cross-destination reuse remains a separate decision.
+Qobuz and Last.fm playlist downloads retain the legacy duplicate behavior. A history row can let a playlist rerun reuse the expected file at the same playlist destination without transferring it again. Playlist artifact verification and repeat handling remain pending in [issue #81](https://github.com/pascalandy/qobuz-dl/issues/81).
 
 Disable `.m3u` creation and leave an existing playlist file unchanged:
 
@@ -458,15 +458,21 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://pl
 
 ### Duplicate tracking
 
-By default, `qobuz-dl` records a top-level album or track ID only after that request is genuinely finalized. Type and quality filters, demos, missing download URLs, tagging failures, and partial albums remain unrecorded and retryable. A retry reuses any expected audio files that were already finalized, then downloads the missing files.
+For a direct track or album request, `qobuz-dl` resolves the current destination and the effective Qobuz format before it considers the request complete. It reuses an artifact only when its exact path, Qobuz track ID, file size, SHA-256 digest, media properties, and effective quality still match the recorded evidence. Legacy ID-only rows remain historical records and cannot satisfy a direct request.
 
-Rows already present in the database are trusted as before. `qobuz-dl` does not audit or repair old rows, so use `--no-db` or purge the database when you need to retry an ID that history already marks as downloaded.
+If a matching artifact is missing or deleted, `qobuz-dl` downloads it again. An album retry downloads only missing or nonmatching tracks. Partial albums, failures, and quality refusals retain their existing aggregate result. If the same track has verified evidence at the destination but Qobuz now resolves a different effective quality, `qobuz-dl` tags and verifies the replacement before publication. When hard links are unavailable, exclusive-copy publication can be observed before the copy finishes. `qobuz-dl` accepts the replacement only after it verifies the published file. An occupied path without matching evidence is a conflict. `qobuz-dl` neither adopts nor overwrites that path.
+
+MP3 satisfaction requires explicit evidence for effective format `5` and nominal constant bitrate of 320 kbps. FLAC satisfaction uses the effective bit depth and sample rate returned for the current request.
 
 Bypass duplicate tracking for one run:
 
 ```sh
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-db
 ```
+
+`--no-db` makes no persistent database reads or writes. Evidence created earlier in the same process can satisfy a later occurrence. For direct track and album requests, an unexplained path that existed before the run still causes a conflict.
+
+If a handled failure or interruption occurs after displacement, `qobuz-dl` retains a logged private `.qdl-*` recovery directory beside the destination. It retains that directory even when it restores the prior artifact. Recovery assumes that the destination parent stays stable and no other process modifies the private directory.
 
 Delete the downloaded-IDs database so previously tracked releases may download again:
 

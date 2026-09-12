@@ -96,7 +96,7 @@ These options are shared by `fun`, `dl`, and `lucky`.
 | `-e`, `--embed-art` | Embed cover art into audio files. |
 | `--og-cover` | Download cover art at original quality when available. |
 | `--no-cover` | Do not download `cover.jpg`. |
-| `--no-db` | Disable duplicate tracking for this run; do not read or update the local database. |
+| `--no-db` | Disable persistent history for this run. Do not read or update the local database. Verified evidence created earlier in the process can satisfy a later occurrence. For direct track and album requests, an unexplained pre-existing path still conflicts. |
 | `-ff`, `--folder-format PATTERN` | Folder naming pattern. |
 | `-tf`, `--track-format PATTERN` | Track naming pattern. |
 | `-s`, `--smart-discography` | For artist discographies, filter likely spam/extras and prefer practical remaster/quality choices. |

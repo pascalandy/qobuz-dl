@@ -9,7 +9,7 @@ from typing import Literal
 
 from mutagen import MutagenError
 from mutagen.flac import FLAC
-from mutagen.mp3 import MP3
+from mutagen.mp3 import MP3, BitrateMode
 
 from qobuz_dl.color import RED, YELLOW
 
@@ -108,6 +108,8 @@ def _inspect_artifact(
                 audio = MP3(stream)
                 codec = "mp3"
                 bit_depth = None
+                if getattr(audio.info, "bitrate_mode", None) != BitrateMode.CBR:
+                    return None
 
             sample_rate = _positive_integer(audio.info.sample_rate)
             bitrate = _positive_integer(getattr(audio.info, "bitrate", None))
@@ -331,6 +333,7 @@ class DownloadHistory:
     def __init__(self, path, connection):
         self._path = path
         self._connection = connection
+        self._run_artifacts: dict[tuple[str, str], VerifiedArtifact] = {}
 
     @classmethod
     def open(cls, path: str | os.PathLike[str] | None) -> "DownloadHistory":
@@ -408,8 +411,6 @@ class DownloadHistory:
         path: str | os.PathLike[str],
         requested_quality: int,
     ) -> VerifiedArtifact | None:
-        if self._connection is None:
-            return None
         artifact = _inspect_artifact(
             track_id=str(track_id),
             path=path,
@@ -418,6 +419,16 @@ class DownloadHistory:
         if artifact is None:
             logger.warning("Finalized media could not be verified at %s", path)
             return None
+
+        return self.record_verified(artifact)
+
+    def record_verified(self, artifact: VerifiedArtifact) -> VerifiedArtifact | None:
+        for key in [key for key in self._run_artifacts if key[1] == artifact.path]:
+            self._run_artifacts.pop(key, None)
+        key = (artifact.track_id, artifact.path)
+        self._run_artifacts[key] = artifact
+        if self._connection is None:
+            return artifact
 
         try:
             self._connection.execute(
@@ -449,19 +460,31 @@ class DownloadHistory:
         except sqlite3.Error as error:
             logger.error(f"{RED}Artifact was not persisted: {artifact!r}")
             self._disable(error)
-            return None
+            return artifact
         return artifact
 
     def verified_artifact(
         self, track_id: str, path: str | os.PathLike[str]
     ) -> VerifiedArtifact | None:
-        if self._connection is None:
-            return None
         try:
             normalized = _normalized_path(path)
         except (OSError, TypeError, ValueError):
             return None
         normalized_track_id = str(track_id)
+        key = (normalized_track_id, normalized)
+        run_artifact = self._run_artifacts.get(key)
+        if run_artifact is not None:
+            inspected = _inspect_artifact(
+                track_id=normalized_track_id,
+                path=normalized,
+                requested_quality=run_artifact.requested_quality,
+            )
+            if inspected == run_artifact:
+                return run_artifact
+            self._run_artifacts.pop(key, None)
+
+        if self._connection is None:
+            return None
         try:
             row = self._connection.execute(
                 "SELECT requested_quality, codec, bit_depth, sample_rate_hz, "
@@ -493,7 +516,33 @@ class DownloadHistory:
             path=normalized,
             requested_quality=stored.requested_quality,
         )
-        return stored if inspected == stored else None
+        if inspected != stored:
+            return None
+        self._run_artifacts[key] = stored
+        return stored
+
+    @staticmethod
+    def inspect_artifact(
+        track_id: str,
+        path: str | os.PathLike[str],
+        requested_quality: int,
+    ) -> VerifiedArtifact | None:
+        return _inspect_artifact(
+            track_id=str(track_id),
+            path=path,
+            requested_quality=requested_quality,
+        )
+
+    @staticmethod
+    def reverify_artifact(artifact: VerifiedArtifact) -> bool:
+        return (
+            _inspect_artifact(
+                track_id=artifact.track_id,
+                path=artifact.path,
+                requested_quality=artifact.requested_quality,
+            )
+            == artifact
+        )
 
 
 def create_db(db_path):

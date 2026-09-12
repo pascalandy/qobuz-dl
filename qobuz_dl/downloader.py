@@ -1,6 +1,8 @@
 import errno
 import logging
 import os
+import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass
 from typing import Literal, Tuple
@@ -8,7 +10,7 @@ from typing import Literal, Tuple
 import qobuz_dl.http as http
 import qobuz_dl.metadata as metadata
 from qobuz_dl.color import CYAN, GREEN, OFF, RED, YELLOW
-from qobuz_dl.db import DownloadHistory
+from qobuz_dl.db import DownloadHistory, MediaProperties, VerifiedArtifact
 from qobuz_dl.sanitize import filename_component, sanitize_filename, sanitize_filepath
 
 QL_DOWNGRADE = "FormatRestrictedByFormatAvailability"
@@ -42,6 +44,7 @@ class DownloadResult:
     state: Literal["finalized", "ignored", "failed"]
     reason: Literal[
         "downloaded",
+        "verified_artifact",
         "existing_file",
         "database_duplicate",
         "type_filter",
@@ -51,6 +54,9 @@ class DownloadResult:
         "not_streamable",
         "request_error",
         "tagging_error",
+        "path_conflict",
+        "media_error",
+        "publish_error",
         "empty_release",
     ]
     finalized_paths: tuple[str, ...] = ()
@@ -61,6 +67,240 @@ class _DownloadPreparation:
     directory: str
     is_mp3: bool
     track_format: str
+
+
+@dataclass(frozen=True)
+class Create:
+    pass
+
+
+@dataclass(frozen=True)
+class Reuse:
+    artifact: VerifiedArtifact
+
+
+@dataclass(frozen=True)
+class Replace:
+    artifact: VerifiedArtifact
+
+
+@dataclass(frozen=True)
+class Conflict:
+    pass
+
+
+DestinationDecision = Create | Reuse | Replace | Conflict
+
+
+@dataclass(frozen=True)
+class _ExpectedMedia:
+    codec: Literal["flac", "mp3"]
+    bit_depth: int | None
+    sample_rate_hz: int | None
+    bitrate_bps: int | None
+
+
+class _TransactionFailure(Exception):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _same_artifact_content(first, second):
+    return (
+        first.track_id == second.track_id
+        and first.requested_quality == second.requested_quality
+        and first.media == second.media
+        and first.size_bytes == second.size_bytes
+        and first.sha256 == second.sha256
+    )
+
+
+@dataclass
+class _DestinationTransaction:
+    final_path: str
+    directory: str
+    staged_path: str
+    backup_path: str
+    backup_artifact: VerifiedArtifact | None = None
+    public_may_be_owned: bool = False
+    preserve_directory: bool = False
+    completed: bool = False
+
+    @classmethod
+    def create(cls, final_path):
+        parent = os.path.dirname(final_path)
+        # This assumes a stable destination parent and excludes arbitrary mutation
+        # by another process running as the same user.
+        directory = tempfile.mkdtemp(prefix=".qdl-", dir=parent)
+        suffix = os.path.splitext(final_path)[1]
+        staged_path = os.path.join(directory, f"staged{suffix}")
+        try:
+            descriptor = os.open(
+                staged_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o666,
+            )
+            os.close(descriptor)
+        except BaseException:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+        return cls(
+            final_path=final_path,
+            directory=directory,
+            staged_path=staged_path,
+            backup_path=os.path.join(directory, f"backup{suffix}"),
+        )
+
+    def fsync_staged(self):
+        try:
+            with open(self.staged_path, "r+b") as staged:
+                os.fsync(staged.fileno())
+        except OSError as error:
+            raise _TransactionFailure("publish_error") from error
+
+    def displace(self, expected):
+        current = DownloadHistory.inspect_artifact(
+            expected.track_id,
+            self.final_path,
+            expected.requested_quality,
+        )
+        if current is None or not _same_artifact_content(expected, current):
+            raise _TransactionFailure("path_conflict")
+
+        self.preserve_directory = True
+        # Portable filesystems have no conditional rename. The post-move check
+        # keeps a file swapped in after this recheck inside the private directory.
+        try:
+            os.rename(self.final_path, self.backup_path)
+        except FileNotFoundError as error:
+            raise _TransactionFailure("path_conflict") from error
+        except OSError as error:
+            raise _TransactionFailure("publish_error") from error
+        moved = DownloadHistory.inspect_artifact(
+            expected.track_id,
+            self.backup_path,
+            expected.requested_quality,
+        )
+        if moved is None or not _same_artifact_content(expected, moved):
+            raise _TransactionFailure("path_conflict")
+        self.backup_artifact = moved
+
+    def publish(self):
+        self.public_may_be_owned = True
+        try:
+            os.link(self.staged_path, self.final_path)
+            return
+        except FileExistsError as error:
+            self.public_may_be_owned = False
+            raise _TransactionFailure("path_conflict") from error
+        except OSError as error:
+            unsupported = {
+                errno.EPERM,
+                errno.EXDEV,
+                getattr(errno, "ENOSYS", errno.EPERM),
+                getattr(errno, "ENOTSUP", errno.EPERM),
+                getattr(errno, "EOPNOTSUPP", errno.EPERM),
+            }
+            if error.errno not in unsupported:
+                raise _TransactionFailure("publish_error") from error
+        self._copy_no_clobber(self.staged_path, self.final_path)
+
+    def prove_publication(self, staged_artifact):
+        final_artifact = DownloadHistory.inspect_artifact(
+            staged_artifact.track_id,
+            self.final_path,
+            staged_artifact.requested_quality,
+        )
+        if final_artifact is None or not _same_artifact_content(
+            staged_artifact, final_artifact
+        ):
+            raise _TransactionFailure("publish_error")
+        return final_artifact
+
+    def commit(self):
+        self.completed = True
+        try:
+            shutil.rmtree(self.directory)
+        except OSError as error:
+            logger.debug(
+                "Could not remove completed transaction %s: %s", self.directory, error
+            )
+
+    def retain_recovery(self):
+        self.completed = True
+        self.preserve_directory = True
+        logger.error("%sRecovery data was preserved at %s", RED, self.directory)
+
+    def abort(self):
+        if self.completed:
+            return
+        if not (self.preserve_directory or self.public_may_be_owned):
+            shutil.rmtree(self.directory, ignore_errors=True)
+            return
+
+        self.preserve_directory = True
+        try:
+            if self.public_may_be_owned:
+                self._quarantine_public()
+            if self.backup_artifact is not None:
+                try:
+                    self._restore_backup()
+                except Exception:
+                    pass
+        finally:
+            logger.error("%sRecovery data was preserved at %s", RED, self.directory)
+
+    def _quarantine_public(self):
+        quarantine_path = os.path.join(self.directory, f"quarantine-{uuid.uuid4().hex}")
+        try:
+            os.rename(self.final_path, quarantine_path)
+        except FileNotFoundError:
+            pass
+        except BaseException as error:
+            logger.error("%sCould not quarantine failed publication: %s", RED, error)
+            if not isinstance(error, Exception):
+                raise
+        else:
+            self.public_may_be_owned = False
+
+    def _restore_backup(self):
+        if os.path.lexists(self.final_path):
+            return
+        try:
+            self.public_may_be_owned = True
+            self._copy_no_clobber(self.backup_path, self.final_path)
+            restored = DownloadHistory.inspect_artifact(
+                self.backup_artifact.track_id,
+                self.final_path,
+                self.backup_artifact.requested_quality,
+            )
+            if restored is None or not _same_artifact_content(
+                self.backup_artifact, restored
+            ):
+                self._quarantine_public()
+                return
+            self.public_may_be_owned = False
+        except BaseException as error:
+            logger.error("%sCould not restore prior destination: %s", RED, error)
+            if self.public_may_be_owned:
+                self._quarantine_public()
+            raise
+
+    def _copy_no_clobber(self, source_path, destination_path):
+        try:
+            with (
+                open(source_path, "rb") as source,
+                open(destination_path, "xb") as destination,
+            ):
+                shutil.copyfileobj(source, destination)
+                destination.flush()
+                os.fsync(destination.fileno())
+        except FileExistsError as error:
+            self.public_may_be_owned = False
+            raise _TransactionFailure("path_conflict") from error
+        except OSError as error:
+            raise _TransactionFailure("publish_error") from error
 
 
 def _destination_name_max(directory: str) -> int:
@@ -101,11 +341,12 @@ def _aggregate_download_results(results: list[DownloadResult]) -> DownloadResult
     if ignored:
         return DownloadResult("ignored", ignored.reason, finalized_paths)
 
-    reason = (
-        "downloaded"
-        if any(result.reason == "downloaded" for result in results)
-        else "existing_file"
-    )
+    if any(result.reason == "downloaded" for result in results):
+        reason = "downloaded"
+    elif any(result.reason == "verified_artifact" for result in results):
+        reason = "verified_artifact"
+    else:
+        reason = "existing_file"
     return DownloadResult("finalized", reason, finalized_paths)
 
 
@@ -124,6 +365,7 @@ class Download:
         folder_format=None,
         track_format=None,
         download_history: DownloadHistory | None = None,
+        verified_destinations: bool = False,
     ):
         validate_cover_options(embed_art, no_cover)
         self.client = client
@@ -138,6 +380,7 @@ class Download:
         self.folder_format = folder_format or DEFAULT_FOLDER
         self.track_format = track_format or DEFAULT_TRACK
         self.download_history = download_history
+        self.verified_destinations = verified_destinations
 
     def download_id_by_type(self, track=True):
         if track:
@@ -170,7 +413,7 @@ class Download:
 
         first_track_url = None
         try:
-            if not self._is_mp3():
+            if self.verified_destinations or not self._is_mp3():
                 first_track_url = self.client.get_track_url(
                     tracks[0]["id"], fmt_id=self.quality
                 )
@@ -341,7 +584,7 @@ class Download:
         os.makedirs(directory, exist_ok=True)
         return _DownloadPreparation(
             directory=directory,
-            is_mp3=self._is_mp3(),
+            is_mp3=file_format == "MP3",
             track_format=track_format,
         )
 
@@ -350,6 +593,106 @@ class Download:
             logger.info(f"{OFF}Skipping cover")
             return
         _get_extra(cover_url, directory, og_quality=self.cover_og_quality)
+
+    def _expected_media(self, track_url_dict) -> _ExpectedMedia | None:
+        format_id = self._effective_format_id(track_url_dict)
+        if format_id == 5:
+            codec: Literal["flac", "mp3"] = "mp3"
+        elif format_id in {6, 7, 27}:
+            codec = "flac"
+        else:
+            return None
+
+        mime_type = track_url_dict.get("mime_type")
+        expected_mime = "audio/mpeg" if codec == "mp3" else "audio/flac"
+        if mime_type is not None and (
+            not isinstance(mime_type, str)
+            or mime_type.split(";", 1)[0].strip().lower() != expected_mime
+        ):
+            return None
+        sample_rate = track_url_dict.get("sampling_rate")
+        if (
+            not isinstance(sample_rate, bool)
+            and isinstance(sample_rate, (int, float))
+            and sample_rate > 0
+        ):
+            scaled_sample_rate = (
+                sample_rate * 1000 if sample_rate < 1000 else sample_rate
+            )
+            sample_rate_hz = (
+                int(scaled_sample_rate)
+                if float(scaled_sample_rate).is_integer()
+                else None
+            )
+        else:
+            sample_rate_hz = None
+
+        bit_depth = track_url_dict.get("bit_depth") if codec == "flac" else None
+        if (
+            isinstance(bit_depth, bool)
+            or not isinstance(bit_depth, (int, float))
+            or bit_depth <= 0
+            or not float(bit_depth).is_integer()
+        ):
+            bit_depth = None
+        elif bit_depth is not None:
+            bit_depth = int(bit_depth)
+
+        bitrate_bps = 320000 if codec == "mp3" else None
+        return _ExpectedMedia(codec, bit_depth, sample_rate_hz, bitrate_bps)
+
+    @staticmethod
+    def _effective_format_id(track_url_dict) -> int | None:
+        raw_format_id = track_url_dict.get("format_id")
+        if isinstance(raw_format_id, bool):
+            return None
+        if isinstance(raw_format_id, float) and not raw_format_id.is_integer():
+            return None
+        try:
+            return int(raw_format_id)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _media_matches(expected: _ExpectedMedia, actual: MediaProperties) -> bool:
+        if expected.codec != actual.codec:
+            return False
+        if (
+            expected.sample_rate_hz is not None
+            and expected.sample_rate_hz != actual.sample_rate_hz
+        ):
+            return False
+        if expected.codec == "flac":
+            return (
+                expected.sample_rate_hz is not None
+                and expected.bit_depth is not None
+                and expected.bit_depth == actual.bit_depth
+            )
+        return (
+            actual.bitrate_bps is not None
+            and expected.bitrate_bps is not None
+            and abs(actual.bitrate_bps - expected.bitrate_bps) < 500
+        )
+
+    def _destination_decision(
+        self,
+        *,
+        track_id,
+        final_file,
+        expected_media: _ExpectedMedia | None,
+    ) -> DestinationDecision:
+        artifact = None
+        if self.download_history is not None:
+            artifact = self.download_history.verified_artifact(track_id, final_file)
+        if artifact is not None:
+            if expected_media is not None and self._media_matches(
+                expected_media, artifact.media
+            ):
+                return Reuse(artifact)
+            return Replace(artifact)
+        if os.path.lexists(final_file):
+            return Conflict()
+        return Create()
 
     def _download_prepared_track(
         self,
@@ -367,9 +710,32 @@ class Download:
             os.makedirs(root_dir, exist_ok=True)
 
         track_title = track_metadata.get("title")
-        final_file = self._track_final_path(
-            root_dir, track_metadata, preparation.is_mp3, preparation.track_format
+        expected_media = (
+            self._expected_media(track_url_dict) if self.verified_destinations else None
         )
+        is_mp3 = (
+            expected_media.codec == "mp3"
+            if expected_media is not None
+            else preparation.is_mp3
+        )
+        final_file = self._track_final_path(
+            root_dir,
+            track_metadata,
+            is_mp3,
+            preparation.track_format,
+        )
+
+        if self.verified_destinations:
+            return self._download_verified_track(
+                root_dir=root_dir,
+                final_file=final_file,
+                track_url_dict=track_url_dict,
+                track_metadata=track_metadata,
+                album_or_track_metadata=album_or_track_metadata,
+                is_track=is_track,
+                expected_media=expected_media,
+                is_mp3=is_mp3,
+            )
 
         if os.path.isfile(final_file):
             logger.info(f"{OFF}{track_title} was already downloaded")
@@ -429,6 +795,104 @@ class Download:
                 logger.debug(
                     "Could not remove temporary download %s: %s", filename, error
                 )
+
+    def _download_verified_track(
+        self,
+        *,
+        root_dir,
+        final_file,
+        track_url_dict,
+        track_metadata,
+        album_or_track_metadata,
+        is_track,
+        expected_media,
+        is_mp3,
+    ):
+        url = track_url_dict.get("url")
+        if not url:
+            logger.info(f"{OFF}Track not available for download")
+            return DownloadResult("failed", "missing_url")
+
+        if expected_media is None:
+            logger.error(f"{RED}Media response did not identify a supported format")
+            return DownloadResult("failed", "media_error")
+
+        decision = self._destination_decision(
+            track_id=track_metadata["id"],
+            final_file=final_file,
+            expected_media=expected_media,
+        )
+        if isinstance(decision, Reuse):
+            logger.info(f"{OFF}{track_metadata.get('title')} was already downloaded")
+            return DownloadResult("finalized", "verified_artifact", (final_file,))
+        if isinstance(decision, Conflict):
+            logger.error(f"{RED}Destination path is already occupied: {final_file}")
+            return DownloadResult("failed", "path_conflict")
+
+        try:
+            transaction = _DestinationTransaction.create(final_file)
+        except OSError as error:
+            logger.error(f"{RED}Could not create private download directory: {error}")
+            return DownloadResult("failed", "publish_error")
+        try:
+            download_with_progress(
+                url,
+                transaction.staged_path,
+                transaction.staged_path,
+                retry_rate_limited=True,
+            )
+            tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
+            try:
+                tag_function(
+                    transaction.staged_path,
+                    root_dir,
+                    final_file,
+                    track_metadata,
+                    album_or_track_metadata,
+                    is_track,
+                    self.embed_art,
+                    finalize=False,
+                )
+            except Exception as error:
+                logger.error(f"{RED}Error tagging the file: {error}", exc_info=True)
+                raise _TransactionFailure("tagging_error") from error
+
+            transaction.fsync_staged()
+            staged_artifact = DownloadHistory.inspect_artifact(
+                track_id=track_metadata["id"],
+                path=transaction.staged_path,
+                requested_quality=int(self.quality),
+            )
+            if staged_artifact is None or not self._media_matches(
+                expected_media, staged_artifact.media
+            ):
+                logger.error(f"{RED}Downloaded media did not match the response")
+                raise _TransactionFailure("media_error")
+
+            if isinstance(decision, Replace):
+                transaction.displace(decision.artifact)
+            transaction.publish()
+            final_artifact = transaction.prove_publication(staged_artifact)
+
+        except _TransactionFailure as error:
+            transaction.abort()
+            return DownloadResult("failed", error.reason)
+        except BaseException:
+            transaction.abort()
+            raise
+
+        if self.download_history is not None:
+            try:
+                recorded = self.download_history.record_verified(final_artifact)
+            except BaseException:
+                transaction.retain_recovery()
+                raise
+            if recorded != final_artifact:
+                transaction.retain_recovery()
+                return DownloadResult("failed", "publish_error")
+
+        transaction.commit()
+        return DownloadResult("finalized", "downloaded", (final_file,))
 
     def _is_mp3(self):
         return int(self.quality) == 5
@@ -491,18 +955,28 @@ class Download:
 
     def _get_format(self, track_url_dict):
         quality_met = True
-        if int(self.quality) == 5:
+        format_id = (
+            self._effective_format_id(track_url_dict)
+            if isinstance(track_url_dict, dict)
+            else None
+        )
+        requested_mp3_legacy = not self.verified_destinations and int(self.quality) == 5
+        if not requested_mp3_legacy:
+            restrictions = track_url_dict.get("restrictions")
+            if isinstance(restrictions, list) and any(
+                restriction.get("code") == QL_DOWNGRADE for restriction in restrictions
+            ):
+                quality_met = False
+
+        if self.verified_destinations:
+            if format_id == 5:
+                return ("MP3", quality_met, None, None)
+            if format_id not in {6, 7, 27}:
+                return ("Unknown", quality_met, None, None)
+        elif requested_mp3_legacy:
             return ("MP3", quality_met, None, None)
 
         try:
-            restrictions = track_url_dict.get("restrictions")
-            if isinstance(restrictions, list):
-                if any(
-                    restriction.get("code") == QL_DOWNGRADE
-                    for restriction in restrictions
-                ):
-                    quality_met = False
-
             return (
                 "FLAC",
                 quality_met,

@@ -162,6 +162,8 @@ class DownloadClient:
         assert fmt_id == 27
         return {
             "url": f"https://media.example.test/{item_id}.flac",
+            "format_id": 27,
+            "mime_type": "audio/flac",
             "sampling_rate": 96,
             "bit_depth": 24,
         }
@@ -429,6 +431,10 @@ def test_media_retry_exhaustion_is_an_ordinary_partial_download_result(
     client = DownloadClient(tracks=tracks)
     client.album_meta.pop("goodies")
     qdl.client = client
+    new_downloader = qdl._new_downloader
+    qdl._new_downloader = lambda item_id, alt_path=None: new_downloader(
+        item_id, alt_path, verified_destinations=False
+    )
 
     result = qdl.download_from_id("album-1", album=True)
 

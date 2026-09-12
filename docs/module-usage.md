@@ -48,10 +48,14 @@ See [audio rate-limit retries](cli.md#audio-rate-limit-retries) for the shared l
 | Field | Meaning |
 |---|---|
 | `state` | `finalized` when the top-level request completed, `ignored` when it was deliberately skipped or contained an ignored item, or `failed` when it could not complete |
-| `reason` | Representative outcome: `downloaded`, `existing_file`, `database_duplicate`, `type_filter`, `quality_filter`, `demo`, `missing_url`, `not_streamable`, `request_error`, `tagging_error`, or `empty_release` |
+| `reason` | Representative outcome: `downloaded`, `verified_artifact`, `existing_file`, `database_duplicate`, `type_filter`, `quality_filter`, `demo`, `missing_url`, `not_streamable`, `request_error`, `tagging_error`, `path_conflict`, `media_error`, `publish_error`, or `empty_release` |
 | `finalized_paths` | Ordered tuple of final audio path strings confirmed during this attempt; partial albums may return paths even when their overall state is `ignored` or `failed` |
 
-Only a `finalized` result is added to duplicate history. A database duplicate returns `ignored` with reason `database_duplicate` and an empty `finalized_paths` tuple because the database check does not inspect the filesystem.
+Direct track and album requests return `verified_artifact` only after the exact destination artifact passes track identity, digest, media, and effective-quality checks. A missing or nonmatching album child is downloaded while verified children remain in place. Unknown occupied paths return `path_conflict`. Invalid or mismatched media evidence returns `media_error`, and a safe-publication failure returns `publish_error`.
+
+Legacy `database_duplicate` results remain possible for playlist paths. Playlist artifact verification is deferred to [issue #81](https://github.com/pascalandy/qobuz-dl/issues/81). Direct requests do not use legacy ID-only rows as satisfaction.
+
+With no persistent database path, `QobuzDL` keeps verified evidence in memory for the process lifetime. A later occurrence in that process can return `verified_artifact`. An unexplained pre-existing path still returns `path_conflict`.
 
 ```python
 result = qobuz.download_from_id("va4j3hdlwaubc", album=True)

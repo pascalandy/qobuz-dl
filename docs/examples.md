@@ -140,13 +140,13 @@ Reset the config file:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -r
 ```
 
-By default, `qobuz-dl` skips already downloaded items by ID and prints this message:
+Direct track and album requests reuse only verified artifacts at the current destination and effective quality. Qobuz and Last.fm playlists retain the legacy ID check until [issue #81](https://github.com/pascalandy/qobuz-dl/issues/81). That legacy check prints this message:
 
 ```text
 This release ID ({item_id}) was already downloaded
 ```
 
-To skip this check, add `--no-db` at the end of a command.
+To disable persistent history reads and writes, add `--no-db` at the end of a command. Verified evidence created earlier in the same process remains available for that process.
 
 To completely reset the downloaded-IDs database, run:
 

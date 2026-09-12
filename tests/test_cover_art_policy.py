@@ -284,8 +284,10 @@ class _TrackClient:
         assert (item_id, fmt_id) == ("track-1", 27)
         return {
             "url": "https://media.example.test/track-1.flac",
-            "sampling_rate": 96,
-            "bit_depth": 24,
+            "sampling_rate": 44.1,
+            "bit_depth": 16,
+            "format_id": 6,
+            "mime_type": "audio/flac",
         }
 
     def get_track_meta(self, item_id):
@@ -317,7 +319,7 @@ def test_missing_art_keeps_final_audio_and_records_success(
     expected = (
         tmp_path
         / "music"
-        / "Album Artist - Album (2024) [24B-96kHz]"
+        / "Album Artist - Album (2024) [16B-44.1kHz]"
         / "01. Track.flac"
     )
     assert result == DownloadResult("finalized", "downloaded", (str(expected),))
@@ -331,7 +333,7 @@ def test_existing_audio_is_not_retagged_when_art_becomes_available(
     tmp_path, monkeypatch
 ):
     music_dir = tmp_path / "music"
-    track_dir = music_dir / "Album Artist - Album (2024) [24B-96kHz]"
+    track_dir = music_dir / "Album Artist - Album (2024) [16B-44.1kHz]"
     track_dir.mkdir(parents=True)
     final_file = track_dir / "01. Track.flac"
     _write_fake_flac(final_file)

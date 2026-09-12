@@ -19,7 +19,7 @@ import pytest
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TIT2, TPE1, TRCK
 
-from qobuz_dl import downloader, live_verification, metadata
+from qobuz_dl import db, downloader, live_verification, metadata
 from qobuz_dl.downloader import DownloadResult
 from qobuz_dl.live_verification import (
     ACTIVATION_ENV,
@@ -99,7 +99,12 @@ class FakeClient:
     def __init__(self, track_id=AUTHORIZED_TRACK_ID):
         self.track_id = track_id
         self.search_items = [{"id": track_id}]
-        self.signed_response = {"url": SIGNED_URL}
+        self.signed_response = {
+            "url": SIGNED_URL,
+            "format_id": 5,
+            "mime_type": "audio/mpeg",
+            "sampling_rate": 44.1,
+        }
         self.searches = []
         self.signed_requests = []
         self.metadata_requests = []
@@ -166,8 +171,18 @@ def _live_environment(tmp_path, **replacements):
 
 
 def _mpeg_audio():
-    frame = b"\xff\xfb\x90\x64" + (b"\x00" * 413)
+    frame = b"\xff\xfb\xe0\x64" + (b"\x00" * 1040)
     return frame * 10
+
+
+def _install_cbr_mp3_inspection(monkeypatch):
+    class ParsedMp3:
+        class info:
+            sample_rate = 44100
+            bitrate = 320000
+            bitrate_mode = db.BitrateMode.CBR
+
+    monkeypatch.setattr(db, "MP3", lambda _stream: ParsedMp3())
 
 
 def _write_tagged_media(path, codec, tags):
@@ -351,6 +366,7 @@ def _json_response(payload):
 
 
 def _install_full_fake_http(monkeypatch, *, first_chunks=None, final_audio=None):
+    _install_cbr_mp3_inspection(monkeypatch)
     calls = []
     media_responses = [
         FakeUrlResponse(chunks=first_chunks or [b"first bytes", b"unused"]),
@@ -382,7 +398,14 @@ def _install_full_fake_http(monkeypatch, *, first_chunks=None, final_audio=None)
         if parsed.path.endswith("/track/search"):
             return _json_response({"tracks": {"items": [{"id": AUTHORIZED_TRACK_ID}]}})
         if parsed.path.endswith("/track/getFileUrl"):
-            return _json_response({"url": SIGNED_URL})
+            return _json_response(
+                {
+                    "url": SIGNED_URL,
+                    "format_id": 5,
+                    "mime_type": "audio/mpeg",
+                    "sampling_rate": 44.1,
+                }
+            )
         if parsed.path.endswith("/track/get"):
             return _json_response(_track_metadata())
         if parsed.netloc == "media.example.test":
@@ -757,7 +780,7 @@ def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
                 "format": "MP3",
                 "bit_depth": None,
                 "sampling_rate": 44100,
-                "bitrate_kbps": 128,
+                "bitrate_kbps": 320,
             },
         },
         "result": "passed",
@@ -1217,6 +1240,7 @@ def test_backend_output_and_raw_request_failure_are_contained(tmp_path, capsys):
 def test_progress_output_is_contained(tmp_path, monkeypatch, capsys):
     backend = FakeBackend()
     _install_media_only_http(monkeypatch)
+    _install_cbr_mp3_inspection(monkeypatch)
     real_download = downloader.download_with_progress
 
     def noisy_download(
@@ -1368,8 +1392,13 @@ def test_finalized_path_must_be_exactly_one_file_inside_destination(
 @pytest.mark.parametrize(
     ("audio_bytes", "expected_phase", "expected_reason"),
     [
-        (b"tags only", "media", "final_media_invalid"),
-        (_mpeg_audio(), "metadata", "metadata_mismatch"),
+        pytest.param(b"tags only", "media", "final_media_invalid", id="tags-only"),
+        pytest.param(
+            _mpeg_audio(),
+            "metadata",
+            "metadata_mismatch",
+            id="audio-without-tags",
+        ),
     ],
 )
 def test_mp3_requires_playable_audio_and_required_tags(
@@ -1901,6 +1930,7 @@ def test_cleanup_failure_overrides_success_and_writes_failed_report(
 ):
     backend = FakeBackend()
     _install_media_only_http(monkeypatch)
+    _install_cbr_mp3_inspection(monkeypatch)
 
     class FailingCleanupDirectory:
         def __init__(self, prefix):
