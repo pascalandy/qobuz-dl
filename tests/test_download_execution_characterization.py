@@ -209,7 +209,6 @@ def test_album_download_places_multidisc_tracks_cover_and_booklet(
     ]
     assert client.track_url_calls == [
         ("track-1", 27),
-        ("track-1", 27),
         ("track-2", 27),
     ]
 
@@ -245,7 +244,7 @@ def test_track_download_uses_fallback_quality_and_can_skip_cover(tmp_path, monke
     assert tagged[0]["is_track"] is True
 
 
-def test_album_download_skips_restricted_quality_when_fallback_disabled(
+def test_album_download_skips_each_restricted_track_when_fallback_disabled(
     tmp_path, monkeypatch, caplog
 ):
     monkeypatch.setattr(
@@ -254,24 +253,34 @@ def test_album_download_skips_restricted_quality_when_fallback_disabled(
         lambda *args, **kwargs: pytest.fail("download should be skipped"),
     )
     client = FakeDownloadClient(
+        album_meta=_album_meta(goodies=[]),
         restrictions=[{"code": downloader.QL_DOWNGRADE}],
     )
     caplog.set_level("INFO", logger="qobuz_dl.downloader")
 
-    Download(
+    result = Download(
         client,
         "album-1",
         str(tmp_path),
         27,
         downgrade_quality=False,
+        no_cover=True,
     ).download_release()
 
-    assert not list(tmp_path.iterdir())
-    assert any(
-        "doesn't meet quality requirement" in record.getMessage()
-        for record in caplog.records
+    assert (result.state, result.reason, result.finalized_paths) == (
+        "ignored",
+        "quality_filter",
+        (),
     )
-    assert client.track_url_calls == [("track-1", 27)]
+    assert not list(tmp_path.rglob("*.flac"))
+    assert (
+        sum(
+            "doesn't meet quality requirement" in record.getMessage()
+            for record in caplog.records
+        )
+        == 2
+    )
+    assert client.track_url_calls == [("track-1", 27), ("track-2", 27)]
 
 
 def test_existing_track_file_is_skipped_without_streaming_or_tagging(
