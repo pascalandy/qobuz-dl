@@ -504,12 +504,16 @@ class Download:
             return ("Unknown", quality_met, None, None)
 
 
-def download_with_progress(url, fname, desc, *, retry_rate_limited=False):
+def download_with_progress(
+    url, fname, desc, *, retry_rate_limited=False, after_write=None
+):
     """Stream ``url`` to ``fname``, logging throttled progress updates."""
     next_report = PROGRESS_MIN_INTERVAL_BYTES
 
     def show_progress(size, downloaded, total):
         nonlocal next_report
+        if after_write is not None:
+            after_write(size, downloaded, total)
         if not total:
             return
         report_interval = max(total // 100, PROGRESS_MIN_INTERVAL_BYTES)

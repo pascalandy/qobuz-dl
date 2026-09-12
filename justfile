@@ -58,3 +58,7 @@ verify-install:
 # Verify a full 40-character Git revision in isolated temporary environments (networked)
 verify-install-revision revision:
     uv run --frozen python scripts/verify_install.py {{ quote(revision) }}
+
+# Run the disabled-by-default verifier for one explicitly authorized Qobuz track
+live-qobuz:
+    uv run --frozen python scripts/live_qobuz.py
