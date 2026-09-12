@@ -170,8 +170,6 @@ class Download:
         except (http.HttpError, ConnectionError) as error:
             logger.error(f"{RED}Error getting release: {error}. Skipping...")
             return DownloadResult("failed", "request_error")
-        if not preparation:
-            return DownloadResult("ignored", "quality_filter")
 
         if "goodies" in meta:
             try:
@@ -257,12 +255,9 @@ class Download:
         return result
 
     def _prepare_release_download(self, meta, album_title, first_track_url):
-        file_format, quality_met, bit_depth, sampling_rate = self._get_format(
+        file_format, _quality_met, bit_depth, sampling_rate = self._get_format(
             first_track_url
         )
-
-        if not self._quality_allows_download(album_title, quality_met):
-            return None
 
         logger.info(
             f"\n{YELLOW}Downloading: {album_title}\nQuality: {file_format}"
