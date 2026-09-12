@@ -235,8 +235,6 @@ def test_top_level_help_is_complete_and_agent_readable(capsys):
     output = capsys.readouterr().out
     assert exc.value.code == 0
     assert "Download and organize Qobuz music" in output
-    assert "uvx qobuz-dl dl https://play.qobuz.com/album" in output
-    assert "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'" in output
     assert "Docs: https://github.com/pascalandy/qobuz-dl" in output
     assert "Docs: https://github.com/vitiko98/qobuz-dl" not in output
     assert "download Qobuz/Last.fm URLs or URLs from a text file" in output
@@ -260,27 +258,39 @@ def test_subcommand_help_documents_supported_inputs_and_flags(capsys):
     assert "audio quality: 5=MP3 320" in output
     assert "disable duplicate tracking for this run" in output
     assert "folder naming pattern" in output
-    assert "uvx qobuz-dl dl https://play.qobuz.com/album" in output
-    assert "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'" in output
 
 
-def test_interactive_and_lucky_help_use_uvx_examples(capsys):
+@pytest.mark.parametrize(
+    ("argv", "expected_command"),
+    [
+        (
+            ["--help"],
+            "uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl",
+        ),
+        (
+            ["dl", "--help"],
+            "uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl",
+        ),
+        (
+            ["fun", "--help"],
+            "uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun",
+        ),
+        (
+            ["lucky", "--help"],
+            "uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky",
+        ),
+    ],
+    ids=["root", "dl", "fun", "lucky"],
+)
+def test_help_uses_source_qualified_fork_command(capsys, argv, expected_command):
     parser = qobuz_dl_args()
 
-    with pytest.raises(SystemExit) as fun_exc:
-        parser.parse_args(["fun", "--help"])
-    fun_output = capsys.readouterr().out
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(argv)
 
-    with pytest.raises(SystemExit) as lucky_exc:
-        parser.parse_args(["lucky", "--help"])
-    lucky_output = capsys.readouterr().out
-
-    assert fun_exc.value.code == 0
-    assert lucky_exc.value.code == 0
-    assert "uvx qobuz-dl fun" in fun_output
-    assert "uvx qobuz-dl lucky" in lucky_output
-    assert "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'" in fun_output
-    assert "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'" in lucky_output
+    output = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert expected_command in output
 
 
 def test_version_flag_exits_successfully(capsys):
@@ -593,7 +603,10 @@ def test_download_corrupted_config_reports_recovery_without_client(
 
     message = str(exc.value)
     assert "Your config file is corrupted:" in message
-    assert "Run 'uvx qobuz-dl -r' to fix this" in message
+    assert (
+        "Run 'uvx --from git+https://github.com/pascalandy/qobuz-dl.git "
+        "qobuz-dl -r' to fix this"
+    ) in message
     assert "(or 'qobuz-dl -r' if installed)." in message
 
 
@@ -702,7 +715,6 @@ def test_secret_bearing_config_failures_are_sanitized(
     )
 
     assert "Your config file is corrupted:" in diagnostic
-    assert "Run 'uvx qobuz-dl -r' to fix this" in diagnostic
     assert "SECRET_SENTINEL" not in diagnostic
 
 
@@ -736,7 +748,6 @@ def test_show_config_second_read_failure_is_sanitized(
     )
 
     assert "The configuration file could not be read safely" in diagnostic
-    assert "Run 'uvx qobuz-dl -r' to fix this" in diagnostic
     assert "user@example.com" not in diagnostic
     assert "hashed-password" not in diagnostic
     assert "secret-one" not in diagnostic
