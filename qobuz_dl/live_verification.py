@@ -31,6 +31,7 @@ ACTIVATION_VALUE = "I_UNDERSTAND_THIS_USES_QOBUZ"
 _ROOT = Path(__file__).resolve().parents[1]
 _QUALITY_CHOICES = (5, 6, 7, 27)
 _PHASES = (
+    "runtime",
     "bundle",
     "login",
     "search",
@@ -138,8 +139,21 @@ class _ControlledInterruption(Exception):
     pass
 
 
+class _ReportWriteFailure(Exception):
+    pass
+
+
 class RealBackend:
     def runtime_facts(self) -> RuntimeFacts:
+        top_level = subprocess.run(
+            ("git", "rev-parse", "--show-toplevel"),
+            cwd=_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if not top_level or Path(top_level).resolve() != _ROOT.resolve():
+            raise ValueError("verifier root is not the Git top-level")
         completed = subprocess.run(
             ("git", "rev-parse", "HEAD"),
             cwd=_ROOT,
@@ -644,7 +658,7 @@ def _metadata_matches(audio, path: Path, expected: ExpectedMetadata) -> bool:
 
 
 def _report(
-    runtime: RuntimeFacts,
+    runtime: RuntimeFacts | None,
     inputs: LiveInputs,
     obtained: ObtainedQuality | None,
     phases: Mapping[str, str],
@@ -653,12 +667,16 @@ def _report(
 ) -> dict:
     return {
         "schema_version": 1,
-        "sha": runtime.sha,
-        "platform": {
-            "system": runtime.system,
-            "machine": runtime.machine,
-            "python": runtime.python,
-        },
+        "sha": None if runtime is None else runtime.sha,
+        "platform": (
+            None
+            if runtime is None
+            else {
+                "system": runtime.system,
+                "machine": runtime.machine,
+                "python": runtime.python,
+            }
+        ),
         "quality": {
             "requested": inputs.quality,
             "obtained": (
@@ -715,21 +733,26 @@ def _contained_backend_output():
 
 def verify(
     inputs: LiveInputs,
-    backend,
+    backend_factory,
     *,
     temporary_directory_factory=tempfile.TemporaryDirectory,
 ) -> VerificationOutcome:
-    with _contained_backend_output():
-        runtime = backend.runtime_facts()
-        phases = {phase: "pending" for phase in _PHASES}
-        obtained = None
-        current_phase = "bundle"
-        result = "failed"
-        reason = "unexpected_error"
-        temporary_directory = None
-        stages_passed = False
+    phases = {phase: "pending" for phase in _PHASES}
+    runtime: RuntimeFacts | None = None
+    obtained = None
+    current_phase = "runtime"
+    result = "failed"
+    reason = "unexpected_error"
+    temporary_directory = None
+    stages_passed = False
 
+    with _contained_backend_output():
         try:
+            backend = backend_factory()
+            runtime = backend.runtime_facts()
+            phases["runtime"] = "passed"
+
+            current_phase = "bundle"
             temporary_directory = temporary_directory_factory(prefix="qobuz-dl-live-")
             workspace = Path(temporary_directory.name)
             config_path = workspace / "config.ini"
@@ -801,14 +824,21 @@ def verify(
             phases["metadata"] = "passed"
             stages_passed = True
         except VerificationFailure as error:
-            current_phase = error.phase
-            reason = error.reason
+            if current_phase == "runtime":
+                reason = "runtime_unavailable"
+            else:
+                current_phase = error.phase
+                reason = error.reason
             phases[current_phase] = "failed"
         except KeyboardInterrupt:
             reason = "interrupted"
             phases[current_phase] = "failed"
         except Exception:
-            reason = "unexpected_error"
+            reason = (
+                "runtime_unavailable"
+                if current_phase == "runtime"
+                else "unexpected_error"
+            )
             phases[current_phase] = "failed"
         finally:
             if temporary_directory is not None:
@@ -829,15 +859,21 @@ def verify(
         for phase, status in phases.items():
             if status == "pending":
                 phases[phase] = "skipped"
-        _write_report(
-            inputs.report_path,
-            _report(runtime, inputs, obtained, phases, result, reason),
-        )
-        return VerificationOutcome(
+        report = _report(runtime, inputs, obtained, phases, result, reason)
+        outcome = VerificationOutcome(
             passed=result == "passed",
             phase="complete" if result == "passed" else current_phase,
             reason=reason,
         )
+
+    try:
+        _write_report(
+            inputs.report_path,
+            report,
+        )
+    except (Exception, KeyboardInterrupt):
+        raise _ReportWriteFailure from None
+    return outcome
 
 
 def main(
@@ -880,16 +916,21 @@ def main(
         return 2
 
     try:
-        with _contained_backend_output():
-            backend = backend_factory()
-            outcome = verify(
-                inputs,
-                backend,
-                temporary_directory_factory=temporary_directory_factory,
-            )
-    except (Exception, KeyboardInterrupt):
+        outcome = verify(
+            inputs,
+            backend_factory,
+            temporary_directory_factory=temporary_directory_factory,
+        )
+    except _ReportWriteFailure:
         print(
             "Live Qobuz verification failed [report:report_write_failed]. "
+            "No report was written.",
+            file=sys.stderr,
+        )
+        return 1
+    except (Exception, KeyboardInterrupt):
+        print(
+            "Live Qobuz verification failed [complete:unexpected_error]. "
             "No report was written.",
             file=sys.stderr,
         )
