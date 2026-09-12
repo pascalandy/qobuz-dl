@@ -79,7 +79,6 @@ Enter a search query when prompted:
 ```text
 Logging...
 Logged: OK
-Membership: Studio
 
 1. Albums
 2. Tracks

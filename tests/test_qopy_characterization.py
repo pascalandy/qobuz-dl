@@ -1,13 +1,18 @@
 import hashlib
+import json
+import traceback
 
 import pytest
 
+from qobuz_dl.color import GREEN
 from qobuz_dl.exceptions import (
     AuthenticationError,
+    IneligibleError,
     InvalidAppIdError,
     InvalidAppSecretError,
     InvalidQuality,
 )
+from qobuz_dl.http import HttpResponse, HttpStatusError
 from qobuz_dl.qopy import Client
 
 
@@ -43,6 +48,31 @@ def make_client(session):
     client.sec = "secret"
     client.uat = "user-token"
     return client
+
+
+def make_auth_client(response):
+    session = FakeSession(response)
+    session.headers = {"X-App-Id": "123456789"}
+    client = Client.__new__(Client)
+    client.id = "123456789"
+    client.base = "https://www.qobuz.com/api.json/0.2/"
+    client.session = session
+    client.sec = None
+    return client
+
+
+def response(status_code, payload):
+    if isinstance(payload, bytes):
+        content = payload
+    else:
+        content = json.dumps(payload).encode()
+    return HttpResponse(status_code=status_code, headers={}, content=content)
+
+
+def assert_auth_state_unmodified(client):
+    assert not hasattr(client, "uat")
+    assert not hasattr(client, "label")
+    assert client.session.headers == {"X-App-Id": "123456789"}
 
 
 def test_api_call_success_uses_expected_endpoint_and_params():
@@ -151,6 +181,201 @@ def test_login_status_mapping_for_invalid_credentials_and_app_id():
         make_client(FakeSession(FakeResponse(status_code=400))).api_call(
             "user/login", email="ok@example.com", pwd="ok"
         )
+
+
+@pytest.mark.parametrize("status_code", [429, 500])
+def test_login_unmapped_http_failure_retains_response_without_success_or_state(
+    status_code, caplog
+):
+    secret_body = b'{"message":"signed-url-secret"}'
+    client = make_auth_client(response(status_code, secret_body))
+
+    with caplog.at_level("INFO", logger="qobuz_dl.qopy"):
+        with pytest.raises(HttpStatusError) as exc_info:
+            client.auth("user@example.com", "password-secret")
+
+    assert exc_info.value.status_code == status_code
+    assert exc_info.value.body == secret_body
+    assert "Logged: OK" not in caplog.text
+    assert_auth_state_unmodified(client)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "error_type", "expected_message"),
+    [
+        (400, InvalidAppIdError, "Invalid app id."),
+        (401, AuthenticationError, "Invalid credentials."),
+    ],
+)
+def test_login_mapped_errors_are_distinct_and_do_not_reflect_response_secrets(
+    status_code, error_type, expected_message, caplog
+):
+    sentinel = "login-token-and-password-sentinel"
+    client = make_auth_client(response(status_code, {"message": sentinel}))
+
+    with caplog.at_level("INFO", logger="qobuz_dl.qopy"):
+        with pytest.raises(error_type) as exc_info:
+            client.auth("user@example.com", "password-secret")
+
+    rendered_traceback = "".join(
+        traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb)
+    )
+    assert str(exc_info.value).startswith(expected_message)
+    assert sentinel not in str(exc_info.value)
+    assert sentinel not in rendered_traceback
+    assert sentinel not in caplog.text
+    assert "Logged: OK" not in caplog.text
+    assert_auth_state_unmodified(client)
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "kwargs"),
+    [
+        ("track/getFileUrl", {"id": "5966783", "fmt_id": 5, "sec": "bad"}),
+        (
+            "favorite/getUserFavorites",
+            {"type": "albums", "offset": 0, "limit": 50, "sec": "bad"},
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"message":"signed-url-secret-sentinel"}',
+        b"signed-url-secret-sentinel is not JSON",
+    ],
+)
+def test_app_secret_mappings_never_parse_or_reflect_response_body(
+    endpoint, kwargs, body, caplog
+):
+    client = make_client(FakeSession(response(400, body)))
+
+    with caplog.at_level("INFO", logger="qobuz_dl.qopy"):
+        with pytest.raises(InvalidAppSecretError) as exc_info:
+            client.api_call(endpoint, **kwargs)
+
+    rendered_traceback = "".join(
+        traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb)
+    )
+    assert str(exc_info.value).startswith("Invalid app secret.")
+    assert "signed-url-secret-sentinel" not in str(exc_info.value)
+    assert "signed-url-secret-sentinel" not in rendered_traceback
+    assert "signed-url-secret-sentinel" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        {},
+        {"user": "malformed-user-sentinel", "user_auth_token": "token-sentinel"},
+        {
+            "user": {"credential": {"parameters": []}},
+            "user_auth_token": "token-sentinel",
+        },
+        {
+            "user": {"credential": {"parameters": {"short_label": "Studio"}}},
+            "user_auth_token": "",
+        },
+        {
+            "user": {"credential": {"parameters": {"short_label": "Studio"}}},
+            "user_auth_token": 123,
+        },
+        {
+            "user": {"credential": {"parameters": {"other": "label-sentinel"}}},
+            "user_auth_token": "token-sentinel",
+        },
+        {
+            "user": {"credential": {"parameters": {"short_label": None}}},
+            "user_auth_token": "token-sentinel",
+        },
+    ],
+)
+def test_malformed_login_payload_is_fixed_error_without_partial_state_or_secrets(
+    payload, caplog
+):
+    client = make_auth_client(response(200, payload))
+
+    with caplog.at_level("INFO", logger="qobuz_dl.qopy"):
+        with pytest.raises(AuthenticationError) as exc_info:
+            client.auth("user@example.com", "password-secret")
+
+    rendered_traceback = "".join(
+        traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb)
+    )
+    assert str(exc_info.value) == "Invalid login response."
+    assert "sentinel" not in rendered_traceback
+    assert "sentinel" not in caplog.text
+    assert "Logged: OK" not in caplog.text
+    assert_auth_state_unmodified(client)
+
+
+def test_malformed_login_json_is_fixed_error_without_exception_chain_or_state(caplog):
+    sentinel = "unterminated-secret-sentinel"
+    client = make_auth_client(response(200, ('{"' + sentinel).encode()))
+
+    with caplog.at_level("INFO", logger="qobuz_dl.qopy"):
+        with pytest.raises(AuthenticationError) as exc_info:
+            client.auth("user@example.com", "password-secret")
+
+    rendered_traceback = "".join(
+        traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb)
+    )
+    assert str(exc_info.value) == "Invalid login response."
+    assert sentinel not in rendered_traceback
+    assert "JSONDecodeError" not in rendered_traceback
+    assert "Logged: OK" not in caplog.text
+    assert_auth_state_unmodified(client)
+
+
+@pytest.mark.parametrize("parameters", [None, {}])
+def test_recognized_free_account_login_remains_ineligible(parameters, caplog):
+    client = make_auth_client(
+        response(200, {"user": {"credential": {"parameters": parameters}}})
+    )
+
+    with caplog.at_level("INFO", logger="qobuz_dl.qopy"):
+        with pytest.raises(
+            IneligibleError, match="Free accounts are not eligible to download tracks"
+        ):
+            client.auth("user@example.com", "password-secret")
+
+    assert "Logged: OK" not in caplog.text
+    assert_auth_state_unmodified(client)
+
+
+def test_valid_auth_installs_state_before_one_fixed_success_log(monkeypatch):
+    hostile_label = "Studio hostile-label-sentinel"
+    client = make_auth_client(
+        response(
+            200,
+            {
+                "user": {"credential": {"parameters": {"short_label": hostile_label}}},
+                "user_auth_token": "token-123",
+            },
+        )
+    )
+    observed_logs = []
+
+    def observe_log(message):
+        observed_logs.append(
+            (
+                message,
+                client.uat,
+                client.session.headers.get("X-User-Auth-Token"),
+                client.label,
+            )
+        )
+
+    monkeypatch.setattr("qobuz_dl.qopy.logger.info", observe_log)
+
+    client.auth("user@example.com", "password-secret")
+
+    assert observed_logs == [
+        (f"{GREEN}Logged: OK", "token-123", "token-123", hostile_label)
+    ]
+    assert hostile_label not in observed_logs[0][0]
 
 
 def test_track_file_url_invalid_app_secret_mapping(monkeypatch):

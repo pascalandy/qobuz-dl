@@ -1,6 +1,6 @@
 # qobuz-dl local project capabilities
 
-Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026-05-26. Source files were not modified; this file is the requested research artifact.
+Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026-05-26. Only the authentication and endpoint evidence was updated on 2026-09-11. Other sections retain the original exploration date.
 
 ## Project shape and entry points
 
@@ -27,30 +27,30 @@ Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026
 - Config lives under OS config dir: macOS/Linux `~/.config/qobuz-dl/config.ini`; DB at `~/.config/qobuz-dl/qobuz_dl.db` (`qobuz_dl/cli.py:23-30`).
 - First non-help run creates config interactively: email, MD5-hashed password, default folder, default quality, limit, booleans, app ID, secrets, and filename formats (`qobuz_dl/cli.py:225-264`). Help/version bypass config creation (`qobuz_dl/cli.py:292-293`).
 - App ID and app secrets are scraped from Qobuz web bundle: fetch `https://play.qobuz.com/login`, parse bundle JS URL, fetch bundle, extract production app ID and timezone-specific secrets (`qobuz_dl/bundle.py:17-77`).
-- Client auth uses Qobuz endpoint `user/login` with email, MD5 password, and app ID; free accounts without credential parameters are rejected (`qobuz_dl/qopy.py:43-49`, `qobuz_dl/qopy.py:124-131`).
-- After login, `X-User-Auth-Token` is added to the HTTP session headers (`qobuz_dl/qopy.py:124-131`). Initial headers include `User-Agent`, `X-App-Id`, and JSON content type (`qobuz_dl/qopy.py:22-37`).
-- Secret validation calls `track/getFileUrl` on hard-coded track ID `5966783` at format 5 until a secret works (`qobuz_dl/qopy.py:194-208`).
+- Client auth uses Qobuz endpoint `user/login` with email, MD5 password, and app ID. Before changing session state, it validates the response structure, eligible membership parameters, a string membership label, and a non-empty string user token. Free accounts without membership parameters are rejected, while malformed success responses raise the fixed `Invalid login response.` error (`qobuz_dl/qopy.py:62-63`, `qobuz_dl/qopy.py:82-87`, `qobuz_dl/qopy.py:164-197`; `tests/test_qopy_characterization.py:266-345`).
+- After validation, the user token is stored and added to the session as `X-User-Auth-Token`, then authentication prints the fixed `Logged: OK` message. The server-provided membership label is retained internally but not logged (`qobuz_dl/qopy.py:199-202`; `tests/test_qopy_characterization.py:348-378`). Initial headers include `User-Agent`, `X-App-Id`, and JSON content type (`qobuz_dl/qopy.py:38-47`).
+- Secret validation calls `track/getFileUrl` on hard-coded track ID `5966783` at format 5 until a secret works (`qobuz_dl/qopy.py:266-284`).
 
 ## Qobuz API/client endpoints used
 
-Production HTTP boundary is `qobuz_dl/http.py`; it wraps stdlib `urllib` for GET params/headers, JSON/text helpers, and streaming downloads (`qobuz_dl/http.py:1-123`). `qopy.Client` base URL is `https://www.qobuz.com/api.json/0.2/` (`qobuz_dl/qopy.py:38`).
+Production HTTP boundary is `qobuz_dl/http.py`; it wraps stdlib `urllib` for GET params/headers, JSON/text helpers, and streaming downloads (`qobuz_dl/http.py:1-123`). `qopy.Client` base URL is `https://www.qobuz.com/api.json/0.2/` (`qobuz_dl/qopy.py:49`).
 
 Endpoints wired in `qobuz_dl/qopy.py`:
 
 | Capability | Endpoint | Evidence |
 |---|---|---|
-| Login | `user/login` | `qobuz_dl/qopy.py:43-49`, `qobuz_dl/qopy.py:124-131` |
-| Track metadata | `track/get` | `qobuz_dl/qopy.py:50-51`, `qobuz_dl/qopy.py:152-153` |
-| Album metadata | `album/get` | `qobuz_dl/qopy.py:52-53`, `qobuz_dl/qopy.py:149-150` |
-| Playlist metadata with tracks | `playlist/get`, `extra=tracks`, paged 500 | `qobuz_dl/qopy.py:54-60`, `qobuz_dl/qopy.py:161-162` |
-| Artist metadata with albums | `artist/get`, `extra=albums`, paged 500 | `qobuz_dl/qopy.py:61-68`, `qobuz_dl/qopy.py:158-159` |
-| Label metadata with albums | `label/get`, `extra=albums`, paged 500 | `qobuz_dl/qopy.py:69-75`, `qobuz_dl/qopy.py:164-165` |
-| File URL | `track/getFileUrl` with signed `request_sig` and `intent=stream` | `qobuz_dl/qopy.py:88-106`, `qobuz_dl/qopy.py:155-156` |
-| Search albums/artists/playlists/tracks | `album/search`, `artist/search`, `playlist/search`, `track/search` | `qobuz_dl/qopy.py:167-177`, used by `qobuz_dl/core.py:313-368` |
-| Favorites | `favorite/getUserFavorites` | wrappers exist at `qobuz_dl/qopy.py:179-189`, but see caveat below |
-| User playlists | `playlist/getUserPlaylists` | wrapper exists at `qobuz_dl/qopy.py:191-192`, not used by CLI |
+| Login | `user/login` | `qobuz_dl/qopy.py:62-63`, `qobuz_dl/qopy.py:82-87`, `qobuz_dl/qopy.py:152-202` |
+| Track metadata | `track/get` | `qobuz_dl/qopy.py:64-65`, `qobuz_dl/qopy.py:89-90`, `qobuz_dl/qopy.py:221-222` |
+| Album metadata | `album/get` | `qobuz_dl/qopy.py:66-67`, `qobuz_dl/qopy.py:92-93`, `qobuz_dl/qopy.py:218-219` |
+| Playlist metadata with tracks | `playlist/get`, `extra=tracks`, paged 500 | `qobuz_dl/qopy.py:68-69`, `qobuz_dl/qopy.py:95-101`, `qobuz_dl/qopy.py:204-216`, `qobuz_dl/qopy.py:230-231` |
+| Artist metadata with albums | `artist/get`, `extra=albums`, paged 500 | `qobuz_dl/qopy.py:70-71`, `qobuz_dl/qopy.py:103-110`, `qobuz_dl/qopy.py:204-216`, `qobuz_dl/qopy.py:227-228` |
+| Label metadata with albums | `label/get`, `extra=albums`, paged 500 | `qobuz_dl/qopy.py:72-73`, `qobuz_dl/qopy.py:112-118`, `qobuz_dl/qopy.py:204-216`, `qobuz_dl/qopy.py:233-234` |
+| File URL | `track/getFileUrl` with signed `request_sig` and `intent=stream` | `qobuz_dl/qopy.py:76-77`, `qobuz_dl/qopy.py:134-150`, `qobuz_dl/qopy.py:224-225` |
+| Search albums/artists/playlists/tracks | `album/search`, `artist/search`, `playlist/search`, `track/search` | `qobuz_dl/qopy.py:236-246`, used by `qobuz_dl/core.py:377-430` |
+| Favorites | `favorite/getUserFavorites` | wrappers exist at `qobuz_dl/qopy.py:248-261`; request behavior is documented below |
+| User playlists | `playlist/getUserPlaylists` | wrapper exists at `qobuz_dl/qopy.py:263-264`, not used by CLI |
 
-Caveat: `favorite/getUserFavorites` wrapper appears not currently usable as written: the special `api_call` branch requires `kwargs["sec"]` and hard-codes `type: "albums"`, while `get_favorite_*` wrappers do not pass `sec` (`qobuz_dl/qopy.py:76-87`, `qobuz_dl/qopy.py:179-189`). No CLI path calls these wrappers.
+`favorite/getUserFavorites` requests use the configured app secret by default and preserve each wrapper's type, offset, and limit. Direct API calls can override the secret (`qobuz_dl/qopy.py:120-132`, `qobuz_dl/qopy.py:248-261`; `tests/test_qopy_characterization.py:417-482`). No CLI path calls these wrappers.
 
 ## Download behavior
 
