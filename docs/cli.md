@@ -12,6 +12,8 @@ The CLI can download from direct URLs, local text files, interactive search, or 
 
 On Windows, `--help`, `--version`, and `<command> --help` work when `APPDATA` is missing or empty. Commands that continue into config or database work require a nonempty `APPDATA` value. See [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live) for paths and the missing-`APPDATA` diagnostic.
 
+For the plaintext prompt, stored password digest, and current login transport, see [Account and authentication](use-cases.md#1-account-and-authentication).
+
 ## Global options
 
 | Option | Description |

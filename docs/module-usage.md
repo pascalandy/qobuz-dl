@@ -5,20 +5,27 @@
 For local development, run scripts through `uv run` so the project environment supplies the dependencies.
 
 ```python
+import getpass
+import hashlib
 import logging
 from qobuz_dl.core import QobuzDL
 
 logging.basicConfig(level=logging.INFO)
 
-email = "your@email.com"
-password = "your_password"
+email = input("Qobuz email: ")
+password_plaintext = getpass.getpass("Qobuz password: ")
+password_md5 = hashlib.md5(password_plaintext.encode("utf-8")).hexdigest()
 
 qobuz = QobuzDL()
 qobuz.get_tokens()  # get 'app_id' and 'secrets' attrs
-qobuz.initialize_client(email, password, qobuz.app_id, qobuz.secrets)
+qobuz.initialize_client(email, password_md5, qobuz.app_id, qobuz.secrets)
 
 qobuz.handle_url("https://play.qobuz.com/album/va4j3hdlwaubc")
 ```
+
+`initialize_client` forwards its password argument unchanged. Pass one lowercase MD5 hexadecimal digest computed from the UTF-8 plaintext password, as shown above. If you load an existing digest from `config.ini`, pass it unchanged. Do not hash the digest again.
+
+The digest is not encryption. Treat it as credential-equivalent because the current login flow can use it without the plaintext password. See [Authentication credential and transport evidence](research/authentication-transport.md) for the current request placement and its verification limits.
 
 ## Download results
 

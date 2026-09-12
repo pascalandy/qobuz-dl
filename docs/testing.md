@@ -146,6 +146,8 @@ Default tests must not require:
 
 Network behavior should be tested with mocks. Live API or download tests should be opt-in integration tests only.
 
+`tests/test_auth_contract.py` uses synthetic credentials and blocks sockets. It proves one UTF-8 MD5 operation during CLI setup, unchanged digest forwarding, and the current local login and Favorites request placement. It does not prove which methods or parameter locations the Qobuz server accepts or requires. See [Authentication credential and transport evidence](research/authentication-transport.md).
+
 ## Fixture and mock conventions
 
 Small readable static fixtures live under `tests/fixtures/`. Characterization tests should pair those fixtures with local fakes or `monkeypatch` so references to Last.fm, Qobuz, or media URLs never perform live network calls in the default suite.
