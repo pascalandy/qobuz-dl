@@ -11,7 +11,7 @@ from io import StringIO
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
-from qobuz_dl.commands import qobuz_dl_args
+from qobuz_dl.commands import QUALITY_CHOICES, qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
 
@@ -46,6 +46,31 @@ class _StartupRequirements:
 
 class _ConfigStorageError(Exception):
     pass
+
+
+class _ConfigValidationError(Exception):
+    pass
+
+
+_CONFIG_STRING_KEYS = (
+    "email",
+    "password",
+    "default_folder",
+    "app_id",
+    "folder_format",
+    "track_format",
+    "secrets",
+)
+_CONFIG_BOOLEAN_KEYS = (
+    "no_m3u",
+    "albums_only",
+    "no_fallback",
+    "og_cover",
+    "embed_art",
+    "no_cover",
+    "no_database",
+    "smart_discography",
+)
 
 
 def _secure_config_path(config_file: str) -> None:
@@ -113,46 +138,88 @@ def _ensure_config_exists(config_file):
         _reset_config(config_file)
 
 
-def _load_config_values(config_file):
+def _read_config(config_file):
     config = configparser.ConfigParser()
-    config.read(config_file)
+    try:
+        with open(config_file) as stream:
+            config.read_file(stream)
+    except FileNotFoundError:
+        # Preserve the existing --show-config --purge behavior when no config exists.
+        return config
+    except (OSError, UnicodeError, configparser.Error):
+        raise _ConfigValidationError(
+            "The configuration file could not be read safely."
+        ) from None
+    return config
 
-    values = {
-        "email": config["DEFAULT"]["email"],
-        "password": config["DEFAULT"]["password"],
-        "default_folder": config["DEFAULT"]["default_folder"],
-        "default_limit": config["DEFAULT"]["default_limit"],
-        "default_quality": config["DEFAULT"]["default_quality"],
-        "no_m3u": config.getboolean("DEFAULT", "no_m3u"),
-        "albums_only": config.getboolean("DEFAULT", "albums_only"),
-        "no_fallback": config.getboolean("DEFAULT", "no_fallback"),
-        "og_cover": config.getboolean("DEFAULT", "og_cover"),
-        "embed_art": config.getboolean("DEFAULT", "embed_art"),
-        "no_cover": config.getboolean("DEFAULT", "no_cover"),
-        "no_database": config.getboolean("DEFAULT", "no_database"),
-        "app_id": config["DEFAULT"]["app_id"],
-        "smart_discography": config.getboolean("DEFAULT", "smart_discography"),
-        "folder_format": config["DEFAULT"]["folder_format"],
-        "track_format": config["DEFAULT"]["track_format"],
-    }
-    values["secrets"] = [
-        secret for secret in config["DEFAULT"]["secrets"].split(",") if secret
-    ]
+
+def _required_config_value(config, key):
+    try:
+        return config[config.default_section][key]
+    except KeyError:
+        raise _ConfigValidationError(
+            f"Required configuration option '{key}' is missing."
+        ) from None
+    except configparser.InterpolationError:
+        raise _ConfigValidationError(
+            f"Configuration option '{key}' could not be resolved."
+        ) from None
+
+
+def _load_config_values(config_file):
+    config = _read_config(config_file)
+    keys = (
+        *_CONFIG_STRING_KEYS,
+        *_CONFIG_BOOLEAN_KEYS,
+        "default_quality",
+        "default_limit",
+    )
+    values = {key: _required_config_value(config, key) for key in keys}
+
+    for key in _CONFIG_BOOLEAN_KEYS:
+        try:
+            values[key] = config.getboolean(config.default_section, key)
+        except ValueError:
+            raise _ConfigValidationError(f"'{key}' must be a Boolean.") from None
+
+    try:
+        values["default_quality"] = int(values["default_quality"])
+    except ValueError:
+        raise _ConfigValidationError(
+            "'default_quality' must be one of 5, 6, 7, 27."
+        ) from None
+    if values["default_quality"] not in QUALITY_CHOICES:
+        raise _ConfigValidationError(
+            "'default_quality' must be one of 5, 6, 7, 27."
+        ) from None
+
+    try:
+        values["default_limit"] = int(values["default_limit"])
+    except ValueError:
+        raise _ConfigValidationError("'default_limit' must be an integer.") from None
+
+    values["secrets"] = [secret for secret in values["secrets"].split(",") if secret]
     return values
 
 
 def _redacted_config_text(config_file):
-    config = configparser.ConfigParser()
-    config.read(config_file)
-    for section in [config.default_section, *config.sections()]:
-        values = config[section]
-        for key in SENSITIVE_CONFIG_KEYS:
-            if key in values:
-                values[key] = "<redacted>"
+    try:
+        config = _read_config(config_file)
+        for section in [config.default_section, *config.sections()]:
+            values = config[section]
+            for key in SENSITIVE_CONFIG_KEYS:
+                if key in values:
+                    values[key] = "<redacted>"
 
-    buffer = StringIO()
-    config.write(buffer)
-    return buffer.getvalue()
+        buffer = StringIO()
+        config.write(buffer)
+        return buffer.getvalue()
+    except _ConfigValidationError:
+        raise
+    except (OSError, ValueError, TypeError, configparser.Error):
+        raise _ConfigValidationError(
+            "The configuration file could not be displayed safely."
+        ) from None
 
 
 def _reset_config(config_file):
@@ -227,6 +294,7 @@ def main():
     startup = _classify_startup(arguments)
 
     config_values = None
+    redacted_config = None
     try:
         if arguments.reset:
             sys.exit(_reset_config(CONFIG_FILE))
@@ -234,12 +302,14 @@ def main():
             _ensure_config_exists(CONFIG_FILE)
             if startup.needs_auth or arguments.show_config:
                 config_values = _load_config_values(CONFIG_FILE)
+        if arguments.show_config:
+            redacted_config = _redacted_config_text(CONFIG_FILE)
     except _ConfigStorageError:
         sys.exit(
             f"{RED}Unable to access configuration securely. "
             "Check its directory permissions and available disk space."
         )
-    except (KeyError, UnicodeDecodeError, configparser.Error) as error:
+    except _ConfigValidationError as error:
         sys.exit(
             f"{RED}Your config file is corrupted: {error}! "
             "Run 'uvx qobuz-dl -r' to fix this "
@@ -252,7 +322,7 @@ def main():
 
     if arguments.show_config:
         print(f"Configuration: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
-        print(_redacted_config_text(CONFIG_FILE))
+        print(redacted_config)
         sys.exit()
 
     if arguments.purge:
