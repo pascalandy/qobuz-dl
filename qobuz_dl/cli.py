@@ -105,6 +105,7 @@ def _write_config(config_file: str, config: configparser.ConfigParser) -> None:
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
+            encoding="utf-8",
             dir=os.path.dirname(config_file) or ".",
             prefix=f".{os.path.basename(config_file)}.",
             suffix=".tmp",
@@ -153,7 +154,7 @@ def _ensure_config_exists(config_file):
 def _read_config(config_file):
     config = configparser.ConfigParser()
     try:
-        with open(config_file) as stream:
+        with open(config_file, encoding="utf-8") as stream:
             config.read_file(stream)
     except FileNotFoundError:
         # Preserve the existing --show-config --purge behavior when no config exists.

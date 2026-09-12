@@ -208,8 +208,11 @@ class _LocalTrackClient:
 def _install_fake_media_network(monkeypatch):
     temporary_paths = []
 
-    def fake_stream_download(url, target_path, *, progress=None):
+    def fake_stream_download(
+        url, target_path, *, progress=None, retry_rate_limited=False
+    ):
         assert url.startswith("https://media.example.test/")
+        assert retry_rate_limited is True
         temporary_path = Path(target_path)
         temporary_paths.append(temporary_path)
         _write_synthetic_flac(temporary_path)

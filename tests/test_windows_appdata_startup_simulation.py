@@ -230,17 +230,17 @@ def test_simulated_windows_resolver_rejects_missing_appdata(monkeypatch, environ
         resolver()
 
 
-def test_simulated_posix_resolver_keeps_existing_paths(monkeypatch, tmp_path):
+def test_simulated_posix_resolver_keeps_existing_paths(monkeypatch):
     resolver, _ = _resolver_contract()
-    home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
+    home = "/synthetic/home"
+    monkeypatch.setenv("HOME", home)
     monkeypatch.setattr(
         cli,
         "os",
-        _CliOsProxy(name="posix", path=posixpath, environ={"HOME": str(home)}),
+        _CliOsProxy(name="posix", path=posixpath, environ={"HOME": home}),
     )
 
     assert resolver() == (
-        str(home / ".config" / "qobuz-dl" / "config.ini"),
-        str(home / ".config" / "qobuz-dl" / "qobuz_dl.db"),
+        "/synthetic/home/.config/qobuz-dl/config.ini",
+        "/synthetic/home/.config/qobuz-dl/qobuz_dl.db",
     )

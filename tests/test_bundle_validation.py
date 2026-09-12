@@ -360,7 +360,7 @@ def test_valid_bundle_persists_exact_app_id_and_ordered_secrets(monkeypatch, tmp
 
     assert exc_info.value.code in (None, 0)
     config = configparser.ConfigParser()
-    config.read(config_file)
+    config.read(config_file, encoding="utf-8")
     assert config["DEFAULT"]["app_id"] == APP_ID
     assert config["DEFAULT"]["secrets"] == "europe-secret,\U0001f600,\u083f"
 
