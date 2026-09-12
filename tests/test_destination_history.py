@@ -887,6 +887,7 @@ def test_decoy_public_staging_symlink_is_untouched_by_private_workspace(
         decoy.symlink_to(unrelated)
     except OSError as error:
         pytest.skip(f"symlink creation unavailable: {error}")
+    original_target = os.readlink(decoy)
     transfer = downloader.download_with_progress
     staged_paths = []
 
@@ -903,7 +904,8 @@ def test_decoy_public_staging_symlink_is_untouched_by_private_workspace(
     assert staged_paths[0].parent.parent == final_path.parent
     assert staged_paths[0].parent != final_path.parent
     assert decoy.is_symlink()
-    assert os.readlink(decoy) == str(unrelated)
+    assert os.readlink(decoy) == original_target
+    assert decoy.samefile(unrelated)
     assert unrelated.read_bytes() == b"keep me"
 
 
