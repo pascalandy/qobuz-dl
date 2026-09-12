@@ -320,3 +320,135 @@ def test_failed_media_stream_removes_partial_file_and_logs_safe_failure(
     assert any(
         "Error getting release" in record.getMessage() for record in caplog.records
     )
+
+
+def test_track_tag_failure_removes_only_its_operation_temporary(tmp_path, monkeypatch):
+    track_dir = tmp_path / "Album Artist - Track Album (2024) [24B-96kHz]"
+    track_dir.mkdir()
+    sentinel = track_dir / ".unrelated.tmp"
+    sentinel.write_bytes(b"unrelated sentinel bytes")
+    operation_paths = []
+
+    def fake_stream_download(url, target_path, *, progress=None):
+        operation_path = Path(target_path)
+        operation_paths.append(operation_path)
+        operation_path.write_bytes(b"downloaded audio bytes")
+
+    def fail_tag(*args, **kwargs):
+        raise RuntimeError("tagging failed")
+
+    monkeypatch.setattr(downloader.http, "stream_download", fake_stream_download)
+    monkeypatch.setattr(downloader.metadata, "tag_flac", fail_tag)
+
+    Download(
+        FakeDownloadClient(),
+        "track-1",
+        str(tmp_path),
+        27,
+        no_cover=True,
+    ).download_track()
+
+    assert len(operation_paths) == 1
+    assert not operation_paths[0].exists()
+    assert sentinel.read_bytes() == b"unrelated sentinel bytes"
+
+
+def test_track_tag_interrupt_propagates_and_removes_operation_temporary(
+    tmp_path, monkeypatch
+):
+    operation_paths = []
+    interrupt = KeyboardInterrupt("tagging interrupted")
+
+    def fake_stream_download(url, target_path, *, progress=None):
+        operation_path = Path(target_path)
+        operation_paths.append(operation_path)
+        operation_path.write_bytes(b"downloaded audio bytes")
+
+    def interrupt_tag(*args, **kwargs):
+        raise interrupt
+
+    monkeypatch.setattr(downloader.http, "stream_download", fake_stream_download)
+    monkeypatch.setattr(downloader.metadata, "tag_flac", interrupt_tag)
+    download = Download(
+        FakeDownloadClient(),
+        "track-1",
+        str(tmp_path),
+        27,
+        no_cover=True,
+    )
+
+    with pytest.raises(KeyboardInterrupt) as exc_info:
+        download.download_track()
+
+    assert exc_info.value is interrupt
+    assert len(operation_paths) == 1
+    assert not operation_paths[0].exists()
+
+
+def test_nested_track_downloads_own_distinct_temporary_files(tmp_path, monkeypatch):
+    operation_paths = {}
+    final_paths = {}
+    observations = {}
+    audio_a = b"operation A partial and final bytes"
+    audio_b = b"operation B partial bytes"
+    download_b = Download(
+        FakeDownloadClient(track_meta=_track_meta("track-b", "Operation B")),
+        "track-b",
+        str(tmp_path),
+        27,
+        no_cover=True,
+    )
+
+    def fake_stream_download(url, target_path, *, progress=None):
+        operation = "a" if url.endswith("track-a.flac") else "b"
+        operation_path = Path(target_path)
+        operation_paths[operation] = operation_path
+        operation_path.write_bytes(audio_a if operation == "a" else audio_b)
+        if operation == "a":
+            download_b.download_track()
+            path_a = operation_paths["a"]
+            observations["a_exists_after_b"] = path_a.exists()
+            observations["a_bytes_after_b"] = (
+                path_a.read_bytes() if path_a.exists() else None
+            )
+            observations["b_exists_after_failure"] = operation_paths["b"].exists()
+        else:
+            live_paths = (operation_paths["a"], operation_paths["b"])
+            observations["both_exist_during_b"] = all(
+                path.exists() for path in live_paths
+            )
+
+    def fake_tag(
+        filename,
+        root_dir,
+        final_file,
+        track_metadata,
+        album_or_track_metadata,
+        is_track,
+        embed_art,
+    ):
+        operation = "a" if track_metadata["id"] == "track-a" else "b"
+        final_paths[operation] = Path(final_file)
+        if operation == "b":
+            raise RuntimeError("operation B tagging failed")
+        os.replace(filename, final_file)
+
+    monkeypatch.setattr(downloader.http, "stream_download", fake_stream_download)
+    monkeypatch.setattr(downloader.metadata, "tag_flac", fake_tag)
+
+    Download(
+        FakeDownloadClient(track_meta=_track_meta("track-a", "Operation A")),
+        "track-a",
+        str(tmp_path),
+        27,
+        no_cover=True,
+    ).download_track()
+
+    assert observations["both_exist_during_b"] is True
+    assert operation_paths["a"] != operation_paths["b"]
+    assert final_paths["a"] != final_paths["b"]
+    assert observations["a_exists_after_b"] is True
+    assert observations["a_bytes_after_b"] == audio_a
+    assert observations["b_exists_after_failure"] is False
+    assert not operation_paths["b"].exists()
+    assert final_paths["a"].read_bytes() == audio_a
