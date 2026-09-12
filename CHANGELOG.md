@@ -4,9 +4,15 @@ All notable changes to this fork of `qobuz-dl` are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Package maturity is now Beta while the unchanged access model continues to use app parameters derived from Qobuz's public web bundle, as documented in [Qobuz access and project status](docs/qobuz-access.md)
+
 ## [1.0.0] - 2026-06-12
 
-First production-ready release of this fork.
+First 1.0.0 release of this fork.
 
 ### Fixed
 

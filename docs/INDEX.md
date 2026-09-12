@@ -15,6 +15,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 
 ## User documentation
 
+- [Qobuz access and project status](qobuz-access.md) records the current access decision, Beta maturity, public notices, and evidence limits
 - [Installation](installation.md): explicit fork source, no-install and persistent usage, reproducible revisions, config persistence, and install verification.
 - [Examples](examples.md) — download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate tracking.
 - [Use cases](use-cases.md) — goal-oriented local-library workflows for account setup, hi-res downloads, discovery, organization, duplicate tracking, and maintenance.
@@ -42,6 +43,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 
 ## Research
 
+- [Qobuz access and project status](qobuz-access.md) is the canonical current decision. The research documents below preserve dated evidence and uncertainty
 - [Authentication credential and transport evidence](research/authentication-transport.md). Local credential representations, current request placement, dated public-client observations, and server-contract limits.
 - [Qobuz official API and SDK research](research/qobuz-official-api.md) — official-source findings, missing developer docs, community substitutes, endpoint confidence, and gaps.
 - [go-qobuz unofficial client reference](research/go-qobuz-reference.md) — notes on the Go implementation's auth flow, endpoint surface, signing behavior, and future-use boundaries.
