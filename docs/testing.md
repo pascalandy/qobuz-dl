@@ -202,11 +202,13 @@ The run checks these phases in order:
 4. Request one signed media URL at the requested quality.
 5. Call the production `download_with_progress` path, stop from its `after_write` hook after the first written chunk, and require an empty interruption destination.
 6. Download the same track once to the dedicated destination.
-7. Require exactly one non-empty finalized path inside the dedicated destination. Validate media properties with Mutagen and require audio payload. Full decoding and integrity verification are outside this check.
+7. Require exactly one non-empty finalized path inside the dedicated destination. Validate media properties with Mutagen. For FLAC, structurally validate the initial frame header and its CRC. Require its sample rate, channel count, and bit depth to agree with `STREAMINFO`. Require the frame block size not to exceed the `STREAMINFO` maximum block size. If `STREAMINFO` has a positive total sample count, require the frame block size not to exceed that count. Require at least three bytes after the header CRC. This check does not decode audio or verify complete-file integrity.
 8. Fetch one authoritative record for the same authorized track. Compare the final MP3 or FLAC title, artist, album, and track number with that record.
 9. Remove the private config and both temporary destinations.
 
 An invalid authoritative record reports `metadata_reference_invalid`. A tag mismatch reports `metadata_mismatch`. These fixed failures do not include the track ID, the reference values, or the final tag values.
+
+A malformed FLAC structure reports the fixed `final_media_invalid` reason without exposing media bytes or paths. Stronger decoder and complete-file integrity evidence belongs to the authorized live run in issue #48.
 
 The JSON receipt contains its schema version, the full Git SHA, the operating system, the machine type, the Python version, and the requested quality. It reads the obtained format and sample rate from the completed media. It also records FLAC bit depth or MP3 bitrate when applicable. The receipt contains the result, a fixed reason code, each phase status including `cleanup`, and the verifier limits.
 
