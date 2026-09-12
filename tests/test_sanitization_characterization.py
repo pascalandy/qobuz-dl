@@ -3,7 +3,7 @@ from pathlib import Path
 
 import qobuz_dl.downloader as downloader
 from qobuz_dl.core import QobuzDL
-from qobuz_dl.downloader import Download
+from qobuz_dl.downloader import Download, DownloadResult
 from qobuz_dl.sanitize import sanitize_filename, sanitize_filepath
 
 
@@ -185,9 +185,11 @@ def test_playlist_and_artist_handle_url_directories_are_sanitized(
     qdl = QobuzDL(directory=tmp_path, no_m3u_for_playlists=True)
     downloaded = []
 
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloaded.append(
-        (item_id, album, alt_path)
-    )
+    def record_download(item_id, album=True, alt_path=None):
+        downloaded.append((item_id, album, alt_path))
+        return DownloadResult("finalized", "downloaded")
+
+    qdl.download_from_id = record_download
     qdl.client = type(
         "Client",
         (),

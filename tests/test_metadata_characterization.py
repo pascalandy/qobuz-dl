@@ -279,7 +279,7 @@ def test_taggers_preserve_missing_optional_metadata_differences(tmp_path):
     assert "TCOM" not in mp3
 
 
-def test_make_m3u_writes_sorted_relative_entries_from_fake_media(tmp_path):
+def test_make_m3u_writes_explicit_relative_entries_from_fake_media(tmp_path):
     playlist_dir = tmp_path / "Playlist"
     playlist_dir.mkdir()
     media = [
@@ -295,12 +295,12 @@ def test_make_m3u_writes_sorted_relative_entries_from_fake_media(tmp_path):
         audio["ARTIST"] = artist
         audio.save()
 
-    make_m3u(playlist_dir)
+    make_m3u(playlist_dir, tuple(path for path, _title, _artist in media))
 
     playlist = (playlist_dir / "Playlist.m3u").read_text(encoding="utf-8")
     assert playlist.split("\n\n") == [
         "#EXTM3U",
-        "#EXTINF:0, Artist A - First\n01. First.flac",
         "#EXTINF:0, Artist B - Second\n02. Second.flac",
+        "#EXTINF:0, Artist A - First\n01. First.flac",
         "#EXTINF:0, Artist C - Third\nDisc 2/03. Third.flac",
     ]
