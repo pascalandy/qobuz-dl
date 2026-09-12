@@ -1,11 +1,12 @@
 import sys
+import traceback
 from pathlib import Path
 
 import pytest
 
 import qobuz_dl.cli as cli
 from qobuz_dl.cli import _quality_fallback_enabled, _redacted_config_text
-from qobuz_dl.commands import qobuz_dl_args
+from qobuz_dl.commands import QUALITY_CHOICES, qobuz_dl_args
 
 
 def _write_valid_config(config_file):
@@ -34,6 +35,51 @@ def _write_valid_config(config_file):
             ]
         )
     )
+
+
+def _replace_config_value(config_file, key, value):
+    contents = config_file.read_text()
+    prefix = f"{key} = "
+    lines = [
+        f"{prefix}{value}" if line.startswith(prefix) else line
+        for line in contents.splitlines()
+    ]
+    config_file.write_text("\n".join(lines))
+
+
+def _configure_cli_main(monkeypatch, config_file, argv, client):
+    class UnexpectedBundle:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("existing config must not construct Bundle")
+
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", *argv])
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_file.parent))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "QOBUZ_DB", str(config_file.parent / "qobuz_dl.db"))
+    monkeypatch.setattr(cli, "Bundle", UnexpectedBundle)
+    monkeypatch.setattr(cli, "QobuzDL", client)
+
+
+class _UnexpectedRuntime:
+    def __init__(self, *args, **kwargs):
+        pytest.fail("invalid config must stop before runtime construction")
+
+
+def _run_config_failure(monkeypatch, capsys, caplog, config_file, argv):
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        argv,
+        _UnexpectedRuntime,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    output = capsys.readouterr()
+    formatted_exception = "".join(
+        traceback.format_exception(exc.type, exc.value, exc.tb)
+    )
+    return f"{formatted_exception}\n{output.out}\n{output.err}\n{caplog.text}"
 
 
 def test_parser_accepts_top_level_flags():
@@ -549,6 +595,307 @@ def test_download_corrupted_config_reports_recovery_without_client(
     assert "Your config file is corrupted:" in message
     assert "Run 'uvx qobuz-dl -r' to fix this" in message
     assert "(or 'qobuz-dl -r' if installed)." in message
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "no_m3u",
+        "albums_only",
+        "no_fallback",
+        "og_cover",
+        "embed_art",
+        "no_cover",
+        "no_database",
+        "smart_discography",
+    ],
+)
+def test_invalid_config_boolean_is_safe_and_stops_before_runtime(
+    monkeypatch, tmp_path, capsys, caplog, key
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, key, "SECRET_SENTINEL")
+
+    diagnostic = _run_config_failure(
+        monkeypatch,
+        capsys,
+        caplog,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/album-1"],
+    )
+
+    assert f"'{key}' must be a Boolean" in diagnostic
+    assert "Your config file is corrupted:" in diagnostic
+    assert "SECRET_SENTINEL" not in diagnostic
+
+
+@pytest.mark.parametrize("quality", ["99", "SECRET_SENTINEL"])
+def test_invalid_config_quality_is_safe_and_stops_before_runtime(
+    monkeypatch, tmp_path, capsys, caplog, quality
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, "default_quality", quality)
+
+    diagnostic = _run_config_failure(
+        monkeypatch,
+        capsys,
+        caplog,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/album-1"],
+    )
+
+    assert "'default_quality' must be one of 5, 6, 7, 27" in diagnostic
+    assert "SECRET_SENTINEL" not in diagnostic
+
+
+def test_invalid_config_limit_is_safe_and_stops_before_runtime(
+    monkeypatch, tmp_path, capsys, caplog
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, "default_limit", "SECRET_SENTINEL")
+
+    diagnostic = _run_config_failure(monkeypatch, capsys, caplog, config_file, ["fun"])
+    assert "'default_limit' must be an integer" in diagnostic
+    assert "SECRET_SENTINEL" not in diagnostic
+
+
+@pytest.mark.parametrize(
+    ("corrupt_config", "argv"),
+    [
+        (
+            "password = hashed-password\nSECRET_SENTINEL",
+            ["dl", "https://play.qobuz.com/album/album-1"],
+        ),
+        (
+            "password = %(SECRET_SENTINEL)s",
+            ["dl", "https://play.qobuz.com/album/album-1"],
+        ),
+        (
+            "password = hashed-password\npassword = SECRET_SENTINEL",
+            ["dl", "https://play.qobuz.com/album/album-1"],
+        ),
+        ("password = hashed-password\nSECRET_SENTINEL", ["--show-config"]),
+    ],
+    ids=[
+        "malformed-line",
+        "interpolation",
+        "duplicate-option",
+        "show-config-malformed-line",
+    ],
+)
+def test_secret_bearing_config_failures_are_sanitized(
+    monkeypatch, tmp_path, capsys, caplog, corrupt_config, argv
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, "password", corrupt_config)
+
+    diagnostic = _run_config_failure(
+        monkeypatch,
+        capsys,
+        caplog,
+        config_file,
+        argv,
+    )
+
+    assert "Your config file is corrupted:" in diagnostic
+    assert "Run 'uvx qobuz-dl -r' to fix this" in diagnostic
+    assert "SECRET_SENTINEL" not in diagnostic
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        lambda: OSError("SECRET_SENTINEL"),
+        lambda: UnicodeDecodeError("utf-8", b"\xff", 0, 1, "SECRET_SENTINEL"),
+    ],
+    ids=["read-error", "decoding-error"],
+)
+def test_show_config_second_read_failure_is_sanitized(
+    monkeypatch, tmp_path, capsys, caplog, failure
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+
+    original_open = open
+    read_count = 0
+
+    def fail_second_read(*args, **kwargs):
+        nonlocal read_count
+        read_count += 1
+        if read_count == 2:
+            raise failure()
+        return original_open(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "open", fail_second_read, raising=False)
+    diagnostic = _run_config_failure(
+        monkeypatch, capsys, caplog, config_file, ["--show-config"]
+    )
+
+    assert "The configuration file could not be read safely" in diagnostic
+    assert "Run 'uvx qobuz-dl -r' to fix this" in diagnostic
+    assert "user@example.com" not in diagnostic
+    assert "hashed-password" not in diagnostic
+    assert "secret-one" not in diagnostic
+    assert "SECRET_SENTINEL" not in diagnostic
+
+
+@pytest.mark.parametrize("quality", QUALITY_CHOICES)
+def test_valid_config_quality_reaches_client(monkeypatch, tmp_path, quality):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, "default_quality", str(quality))
+    initialized = []
+
+    class FakeQobuzDL:
+        def __init__(self, directory, selected_quality, *args, **kwargs):
+            self.directory = directory
+            initialized.append(selected_quality)
+
+        def initialize_client(self, *args):
+            pass
+
+        def download_list_of_urls(self, urls):
+            pass
+
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/album-1"],
+        FakeQobuzDL,
+    )
+
+    cli.main()
+
+    assert initialized == [quality]
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("1", True),
+        ("yes", True),
+        ("true", True),
+        ("on", True),
+        ("0", False),
+        ("no", False),
+        ("false", False),
+        ("off", False),
+    ],
+)
+def test_configparser_boolean_vocabulary_is_accepted(
+    monkeypatch, tmp_path, configured, expected
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    boolean_keys = (
+        "no_m3u",
+        "albums_only",
+        "no_fallback",
+        "og_cover",
+        "embed_art",
+        "no_cover",
+        "no_database",
+        "smart_discography",
+    )
+    for key in boolean_keys:
+        _replace_config_value(config_file, key, configured)
+    initialized = []
+
+    class FakeQobuzDL:
+        def __init__(self, directory, quality, embed_art, **kwargs):
+            self.directory = directory
+            initialized.append((embed_art, kwargs))
+
+        def initialize_client(self, *args):
+            pass
+
+        def download_list_of_urls(self, urls):
+            pass
+
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/album-1"],
+        FakeQobuzDL,
+    )
+
+    cli.main()
+
+    embed_art, options = initialized[0]
+    assert embed_art is expected
+    assert options["ignore_singles_eps"] is expected
+    assert options["no_m3u_for_playlists"] is expected
+    assert options["quality_fallback"] is (not expected)
+    assert options["cover_og_quality"] is expected
+    assert options["no_cover"] is expected
+    assert (options["downloads_db"] is None) is expected
+    assert options["smart_discography"] is expected
+
+
+@pytest.mark.parametrize("limit", [0, -5])
+def test_zero_and_negative_config_limits_are_preserved(monkeypatch, tmp_path, limit):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, "default_limit", str(limit))
+    observed_limits = []
+
+    class FakeQobuzDL:
+        def __init__(self, directory, *args, **kwargs):
+            self.directory = directory
+
+        def initialize_client(self, *args):
+            pass
+
+        def interactive(self):
+            observed_limits.append(self.interactive_limit)
+
+    _configure_cli_main(monkeypatch, config_file, ["fun"], FakeQobuzDL)
+
+    cli.main()
+
+    assert observed_limits == [limit]
+
+
+def test_explicit_cli_values_override_valid_config_defaults(monkeypatch, tmp_path):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, "default_folder", "Configured Music")
+    _replace_config_value(config_file, "default_quality", "5")
+    initialized = []
+
+    class FakeQobuzDL:
+        def __init__(self, directory, quality, embed_art, **kwargs):
+            self.directory = directory
+            initialized.append((directory, quality, embed_art))
+
+        def initialize_client(self, *args):
+            pass
+
+        def download_list_of_urls(self, urls):
+            pass
+
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        [
+            "dl",
+            "https://play.qobuz.com/album/album-1",
+            "--directory",
+            "CLI Music",
+            "--quality",
+            "27",
+            "--embed-art",
+        ],
+        FakeQobuzDL,
+    )
+
+    cli.main()
+
+    assert initialized == [("CLI Music", 27, True)]
 
 
 def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
