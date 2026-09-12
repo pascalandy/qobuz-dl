@@ -10,9 +10,23 @@ An agent result must distinguish bytes transferred, time spent honoring provider
 
 ## Request Or Decision
 
-Decide whether `qobuz-dl` should add bandwidth limiting or other polite download controls so the CLI does not consume unbounded Qobuz/media bandwidth and behaves more responsibly during large downloads.
+Issue #50 records a fresh maintainer decision about whether `qobuz-dl` should add bandwidth limiting. The historical vision remains useful context, but recovery of its original source is no longer a prerequisite for implementation.
 
-Recommendation: revise the original idea into a narrower feature direction. Add opt-in user-configurable download pacing and central `429`/`Retry-After` handling, but do not add a hard default media bandwidth cap or claim parity with official Qobuz player behavior without stronger evidence.
+Commit `00641bf4ae4a1a01716215f02bda7e38473dfaea` remains unavailable and was not recovered. The approved policy below supersedes that recovery dependency.
+
+## Maintainer Decision
+
+Approve an explicit, optional cap for audio media downloads. Keep downloads unlimited by default. Reject automatic rate selection.
+
+The accepted rate grammar is `[1-9][0-9]*(KiB/s|MiB/s)`. The value is a positive integer followed immediately by the exact unit `KiB/s` or `MiB/s`. Spaces, decimals, signs, SI units, and case variants are invalid. The exact token `off` is also valid.
+
+Both configuration and the CLI accept a rate or `off`. A CLI value overrides the configured value. CLI `off` therefore disables a configured cap for one invocation. If neither source sets a positive rate, downloads remain unlimited.
+
+The cap applies only to audio media payload bytes. Covers, booklets, Qobuz API traffic, bundle traffic, and Last.fm traffic remain unlimited. This is a local user preference. It is not a Qobuz quota, a claim of Qobuz approval, or a substitute for server-directed rate-limit handling.
+
+Pacing occurs at the application layer while `stream_download` reads and writes an audio response body. The implementation handles one bounded application read at a time and may reduce the read size below the existing 64 KiB maximum to keep waits responsive. The rate calculation counts the time spent reading and writing each chunk, and it banks no idle credit before that chunk. The application does not add read-ahead or retain more than the current chunk. TLS, socket, kernel, proxy, and server buffers remain outside this control, so the setting limits application consumption over time rather than guaranteeing an exact wire rate.
+
+This policy favors a small, predictable control. A positive rate is explicit, `off` is an explicit escape hatch, and command-line precedence supports temporary overrides without changing persistent configuration. Automatic selection has no trustworthy input and would make throughput depend on an undocumented guess.
 
 ## Mode
 
@@ -32,8 +46,9 @@ Evaluation method: pass/fail against the original FSST criteria.
 | Repo download path and HTTP boundary are checked | Pass | `qobuz_dl/http.py`, `qobuz_dl/downloader.py`, `qobuz_dl/qopy.py`, and related tests are referenced in Current State. |
 | External evidence is credible and scoped | Pass | Evidence uses Qobuz primary sources, HTTP standards/docs, HLS structure, Spotify/TIDAL music API rate-limit guidance, and YouTube quota governance. |
 | Qobuz-specific uncertainty is explicit | Pass | The evidence gap names the missing Qobuz media byte-rate, streamer prefetch, and partner-guidance data. |
-| Direction is pressure-tested | Pass | The artifact includes lenses, anti-goals, assumptions, risks, trade-offs, and a Revise recommendation. |
-| Future feature is concrete but not overclaimed | Pass | The candidate feature shape names the HTTP boundary, optional pacing, bounded retries, tests, and docs limits. |
+| Direction is pressure-tested | Pass | The artifact includes lenses, anti-goals, assumptions, risks, trade-offs, and the approved explicit-pacing decision. |
+| Future feature is concrete but not overclaimed | Pass | The maintainer decision fixes the grammar, precedence, payload scope, application-layer boundary, and buffering limit. |
+| Recovery dependency is superseded | Pass | The missing commit was not recovered. A fresh maintainer decision now supplies the policy for implementation. |
 
 ## Problem Or Opportunity
 
@@ -56,7 +71,9 @@ Indirect beneficiary: Qobuz and upstream media infrastructure, because the clien
 
 ## Current State
 
-The production HTTP boundary is `qobuz_dl/http.py`. API calls use `HttpClient.get`, which wraps `get`; streamed file downloads use `stream_download`, which opens the URL with `urlopen`, reads fixed-size chunks, writes them immediately to disk, reports progress, checks `content-length`, and returns the byte count. It currently does not pace reads, sleep between chunks, parse `Retry-After`, retry `429`, or expose response headers on `HttpStatusError`.
+The following snapshot is historical context from before issues #39 and #40. See [API rate-limit retries](../../cli.md#api-rate-limit-retries) and [audio rate-limit retries](../../cli.md#audio-rate-limit-retries) for current `429` behavior. The original snapshot remains here as evidence for the vision.
+
+The production HTTP boundary is `qobuz_dl/http.py`. API calls use `HttpClient.get`, which wraps `get`; streamed file downloads use `stream_download`, which opens the URL with `urlopen`, reads fixed-size chunks, writes them immediately to disk, reports progress, checks `content-length`, and returns the byte count. At the time of this snapshot, it did not pace reads, sleep between chunks, parse `Retry-After`, retry `429`, or expose response headers on `HttpStatusError`.
 
 `qobuz_dl/downloader.py` is the main media caller. Track, cover, and booklet downloads pass through `download_with_progress`, which calls `http.stream_download` and deletes the partial target on failure. Album downloads are sequential: metadata is fetched, cover and optional booklet are downloaded, then each track URL is fetched and each track is streamed and tagged. There is no visible parallel download expansion in this path.
 
@@ -88,31 +105,36 @@ Qobuz-specific evidence gap: no accessible official source found in this pass st
 
 Target state:
 
-1. Users can optionally cap streamed media download throughput for local-network courtesy.
-2. The default behavior remains uncapped unless stronger Qobuz-specific evidence supports a default cap.
+1. Users can optionally cap audio media download throughput for local-network courtesy.
+2. The default behavior remains unlimited.
 3. `qobuz_dl/http.py` centrally handles explicit rate-limit responses, especially `429` and `Retry-After`, for API and media requests where retry is safe.
 4. Retry behavior is bounded, observable, and avoids retry storms.
 5. Album and playlist downloads remain sequential by default; this work does not introduce parallel media fetching.
 6. Tests stay offline and mock network behavior.
 7. Docs explain the feature as a responsible-use control, not a guarantee of Qobuz approval or official-client parity.
+8. Covers, booklets, API calls, bundle traffic, and Last.fm traffic remain unlimited.
+9. Automatic rate selection is not supported.
 
-## Candidate Feature Shape
+## Approved Feature Shape
 
-Future implementation should evaluate this narrow shape:
+Issue #51 should implement this narrow shape:
 
-- Add a reusable HTTP-layer policy object or focused parameters for optional byte pacing and retry/backoff.
-- Apply byte pacing inside `stream_download`, after each chunk write or read cycle, so all media downloads share the same behavior.
+- Parse `[1-9][0-9]*(KiB/s|MiB/s)` and `off` at the CLI and configuration boundaries.
+- Reject spaces, decimals, signs, SI units, case variants, zero, and missing units.
+- Resolve the CLI value before the configuration value. Treat CLI `off` as an explicit override of a configured cap.
+- Apply pacing only when `stream_download` receives an audio media payload and a positive resolved rate.
+- Pace one bounded application read at a time. Count the read and write time for each chunk, and bank no idle credit.
+- Allow the read size to fall below the existing 64 KiB maximum to keep waits responsive. Do not add application read-ahead or retain more than the current chunk. Document that lower network layers may buffer outside application control.
 - Preserve current progress callbacks and interrupted-download checks.
-- Parse `Retry-After` from `429` responses when available; support seconds and HTTP-date formats if practical.
-- Use bounded retry attempts with a maximum wait cap and clear logging.
-- Avoid retrying unsafe or ambiguous operations unless the operation is known idempotent. Current project calls are GET-based, but the policy should still be explicit.
-- Thread any future CLI/config option through `downloader.py` into `http.stream_download` instead of sleeping in album loops.
-
-Concrete option names, config storage, and default values should be decided in an implementation plan after maintainers choose the UX. The vision only recommends the capability and boundaries.
+- Thread the resolved option through `downloader.py` into `http.stream_download` instead of sleeping in album loops.
+- Keep covers, booklets, API calls, bundle traffic, and Last.fm traffic outside the pacing path.
+- Keep `429` and `Retry-After` behavior separate from this local throughput preference.
 
 ## Anti-Goals
 
 - Do not add a hard default media bandwidth cap based only on intuition.
+- Do not add an `auto` mode or infer a rate from connection speed, media quality, server behavior, or Qobuz behavior.
+- Do not pace covers, booklets, API calls, bundle traffic, or Last.fm traffic.
 - Do not claim the feature makes `qobuz-dl` behave like official Qobuz apps or licensed player devices.
 - Do not infer undocumented Qobuz media byte-rate policy from audio quality labels alone.
 - Do not add parallel downloads, queue workers, async rewrites, or a new HTTP dependency as part of this feature.
@@ -130,18 +152,19 @@ Must be true:
 
 Should be true:
 
-- Users who need this feature are willing to opt in with a clear CLI/config setting.
+- Users who need this feature are willing to opt in with a clear CLI or configuration setting.
 - `429` and `Retry-After` handling can be tested with faked HTTP responses using existing test patterns.
 - A small HTTP-layer policy is simpler and safer than per-call sleeps in `downloader.py`.
 
 Might be true:
 
-- A conservative suggested cap value could be documented later if maintainers gather real-world user evidence.
 - Backoff handling may reduce intermittent failures for large playlist or catalog operations, but this should be measured rather than assumed.
 
 ## Success Signals
 
 - A user can run a large download with an explicit bandwidth cap and see stable progress without saturating their local connection.
+- Invalid rates fail at the CLI or configuration boundary, and CLI `off` disables a configured cap.
+- The same invocation leaves covers, booklets, API calls, bundle traffic, and Last.fm traffic unlimited.
 - A fake `429` with `Retry-After` is handled by one central path and covered by offline tests.
 - Existing tests for streamed downloads, progress logging, cleanup, and content-length mismatch still pass.
 - Maintainers can point to `qobuz_dl/http.py` as the single owner of network pacing and backoff behavior.
@@ -155,21 +178,25 @@ Might be true:
 - Backoff can hide failures if logs are vague. Users need to know when the CLI is waiting because the server asked it to slow down.
 - `Retry-After` can be long or absent. The policy needs maximum attempts, maximum sleep, and clear failure behavior.
 - Media downloads may return rate-limit or transient errors differently from JSON API endpoints. The implementation should avoid assuming all servers emit `429`.
-- Exposing too many knobs can make the CLI harder to understand. Start with the smallest option set that solves the user problem.
+- Application-level pacing cannot control TLS, socket, kernel, proxy, or server buffering. Short wire-rate bursts can exceed the configured average.
+- A bounded application read can create a short wire-rate burst. Lower network layers can also buffer beyond the current application chunk.
+- Exposing too many knobs can make the CLI harder to understand. The approved grammar and `off` token are the complete option set.
 
 ## Recommendation
 
-Revise.
+Approve explicit audio media pacing. Reject automatic rate selection.
 
-One-line reason: the repo already has the right HTTP boundary and the feature has clear user and maintainer value, but the original idea should be narrowed to opt-in pacing and standards-based backoff, not a hard default cap or claims of official Qobuz player equivalence.
+One-line reason: an explicit local preference gives users control without inventing a Qobuz policy or changing default throughput.
 
 ## Current routing
 
-This recommendation is a historical direction from 22 June 2026. Do not use it as an active backlog. [Issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) owns current sequencing.
+The background research and pressure test are historical direction from 22 June 2026. The maintainer decision above is the current policy. [Issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) owns current sequencing.
 
-[Issue #39](https://github.com/pascalandy/qobuz-dl/issues/39) and [issue #40](https://github.com/pascalandy/qobuz-dl/issues/40) own bounded `429` retries for API reads and media acquisition. [Issue #50](https://github.com/pascalandy/qobuz-dl/issues/50) owns recovery and review of the bandwidth-limit vision. [Issue #51](https://github.com/pascalandy/qobuz-dl/issues/51) owns an explicit optional byte-rate limit. [Issue #52](https://github.com/pascalandy/qobuz-dl/issues/52) owns any later automatic mode, only if the maintainer approves its rule.
+[Issue #39](https://github.com/pascalandy/qobuz-dl/issues/39) and [issue #40](https://github.com/pascalandy/qobuz-dl/issues/40) own bounded `429` retries for API reads and media acquisition. [Issue #50](https://github.com/pascalandy/qobuz-dl/issues/50) records the fresh maintainer policy and supersedes recovery of the missing commit as a prerequisite. [Issue #51](https://github.com/pascalandy/qobuz-dl/issues/51) owns implementation of the explicit optional byte-rate limit. [Issue #52](https://github.com/pascalandy/qobuz-dl/issues/52) should be rejected because automatic rate selection is outside the approved policy.
 
-## Verification Log
+This routing is documentation only. It does not claim that the remote issues have changed state.
+
+## Original Verification Log
 
 - Ran `git status --short` first; the worktree was clean.
 - Worked in the isolated branch worktree `codex/fsst-n1-bandwidth-limit-vision`.

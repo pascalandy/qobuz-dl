@@ -35,7 +35,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 
 - [Agent operation design and implementation plan](feat/2026-09-12-agent-ergonomics/design-agent-ergonomics.md) connects inspectable requests, bounded selection, artifact results, and recovery; proposed behavior only
 - [Qobuz API direction](feat/2026-05-26-qobuz-api-direction/vision-qobuz-api-direction.md) keeps read-only source expansion within the downloader mission
-- [Bandwidth limit vision](feat/2026-06-22-bandwidth-limit-vision/vision-bandwidth-limit.md) — direction check for optional download pacing and central rate-limit/backoff handling.
+- [Bandwidth limit vision](feat/2026-06-22-bandwidth-limit-vision/vision-bandwidth-limit.md) — approved policy for optional audio media pacing and central rate-limit/backoff handling.
 - [Download history satisfaction policy](feat/2026-09-12-download-history-policy/plan-download-history-satisfaction.md) defines when history may satisfy a request and records the follow-up implementation slices.
 
 ## Historical design
