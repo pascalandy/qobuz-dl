@@ -1,3 +1,4 @@
+import errno
 import logging
 import os
 import uuid
@@ -7,7 +8,7 @@ from typing import Literal, Tuple
 import qobuz_dl.http as http
 import qobuz_dl.metadata as metadata
 from qobuz_dl.color import CYAN, GREEN, OFF, RED, YELLOW
-from qobuz_dl.sanitize import sanitize_filename, sanitize_filepath
+from qobuz_dl.sanitize import filename_component, sanitize_filename, sanitize_filepath
 
 QL_DOWNGRADE = "FormatRestrictedByFormatAvailability"
 # used in case of error
@@ -25,8 +26,7 @@ DEFAULT_FORMATS = {
 DEFAULT_FOLDER = "{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
 DEFAULT_TRACK = "{tracknumber}. {tracktitle}"
 PROGRESS_MIN_INTERVAL_BYTES = 1024 * 1024
-# Keep generated basenames comfortably below common filesystem limits (255).
-MAX_FILENAME_LENGTH = 250
+DEFAULT_NAME_MAX = 255
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,29 @@ class DownloadResult:
 class _DownloadPreparation:
     directory: str
     is_mp3: bool
+
+
+def _destination_name_max(directory: str) -> int:
+    pathconf = getattr(os, "pathconf", None)
+    if pathconf is None:
+        return DEFAULT_NAME_MAX
+
+    try:
+        name_max = pathconf(directory, "PC_NAME_MAX")
+    except ValueError:
+        return DEFAULT_NAME_MAX
+    except OSError as error:
+        unsupported_errors = {
+            errno.EINVAL,
+            getattr(errno, "ENOSYS", errno.EINVAL),
+            getattr(errno, "ENOTSUP", errno.EINVAL),
+            getattr(errno, "EOPNOTSUPP", errno.EINVAL),
+        }
+        if error.errno in unsupported_errors:
+            return DEFAULT_NAME_MAX
+        raise
+
+    return name_max if name_max > 0 else DEFAULT_NAME_MAX
 
 
 def _aggregate_download_results(results: list[DownloadResult]) -> DownloadResult:
@@ -307,11 +330,12 @@ class Download:
 
         # track_format is a format string
         # e.g. '{tracknumber}. {artist} - {tracktitle}'
-        formatted_path = sanitize_filename(self.track_format.format(**filename_attr))
-        max_basename_length = MAX_FILENAME_LENGTH - len(extension)
-        final_file = os.path.join(
-            root_dir, formatted_path[:max_basename_length] + extension
+        component = filename_component(
+            self.track_format.format(**filename_attr),
+            extension,
+            _destination_name_max(root_dir),
         )
+        final_file = os.path.join(root_dir, component)
 
         if os.path.isfile(final_file):
             logger.info(f"{OFF}{track_title} was already downloaded")

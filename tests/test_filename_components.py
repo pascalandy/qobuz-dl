@@ -106,7 +106,7 @@ def test_distinct_empty_components_create_distinct_stable_final_files(
     temporary_paths = _install_real_file_boundaries(monkeypatch)
     destination = tmp_path / ALBUM_DIRECTORY
     expected_paths = (
-        destination / "track-86ea5b6f5c94b841cbd724807198bde49.flac",
+        destination / "track-86ea5b6f5c94b841cbd724807198bde4.flac",
         destination / "track-cded6afb3aa9d26a4ae0a0ae9234ec24.flac",
     )
 
@@ -134,7 +134,10 @@ def test_distinct_empty_components_create_distinct_stable_final_files(
     ("title", "expected_component"),
     [
         ("CON.txt", "track-515047d8f483c4a6df7f0f8f5e0abc01.flac"),
+        ("CON .txt", "track-3a5adadb4d47a19a1c05b6e4721a3f99.flac"),
+        ("com1 .TXT", "track-ccf7153199fbd2868af3bf2d1e58a0e5.flac"),
         ("com¹.backup", "track-643a6170c8426b482b65614fe2f0af3c.flac"),
+        ("LpT² .backup", "track-a1de16120be105bfca2f48059838648b.flac"),
         ("LPT9.hidden", "track-c2cddc04b91b3ae0bf80ba5fa6705738.flac"),
         ("CONCERT", "CONCERT.flac"),
     ],
