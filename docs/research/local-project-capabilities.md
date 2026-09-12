@@ -1,6 +1,6 @@
 # qobuz-dl local project capabilities
 
-Current-state map of `/Users/andy16/Documents/github_local/qobuz-dl`, updated on 2026-09-11.
+Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026-05-26. Only the authentication and endpoint evidence was updated on 2026-09-11. Other sections retain the original exploration date.
 
 ## Project shape and entry points
 
@@ -46,7 +46,7 @@ Endpoints wired in `qobuz_dl/qopy.py`:
 | Artist metadata with albums | `artist/get`, `extra=albums`, paged 500 | `qobuz_dl/qopy.py:70-71`, `qobuz_dl/qopy.py:103-110`, `qobuz_dl/qopy.py:204-216`, `qobuz_dl/qopy.py:227-228` |
 | Label metadata with albums | `label/get`, `extra=albums`, paged 500 | `qobuz_dl/qopy.py:72-73`, `qobuz_dl/qopy.py:112-118`, `qobuz_dl/qopy.py:204-216`, `qobuz_dl/qopy.py:233-234` |
 | File URL | `track/getFileUrl` with signed `request_sig` and `intent=stream` | `qobuz_dl/qopy.py:76-77`, `qobuz_dl/qopy.py:134-150`, `qobuz_dl/qopy.py:224-225` |
-| Search albums/artists/playlists/tracks | `album/search`, `artist/search`, `playlist/search`, `track/search` | `qobuz_dl/qopy.py:236-246`, used by `qobuz_dl/core.py:313-368` |
+| Search albums/artists/playlists/tracks | `album/search`, `artist/search`, `playlist/search`, `track/search` | `qobuz_dl/qopy.py:236-246`, used by `qobuz_dl/core.py:377-430` |
 | Favorites | `favorite/getUserFavorites` | wrappers exist at `qobuz_dl/qopy.py:248-261`; request behavior is documented below |
 | User playlists | `playlist/getUserPlaylists` | wrapper exists at `qobuz_dl/qopy.py:263-264`, not used by CLI |
 
