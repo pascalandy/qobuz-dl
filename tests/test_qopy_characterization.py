@@ -138,10 +138,14 @@ def test_api_call_endpoint_param_shapes(endpoint, kwargs, expected_params):
 
 
 def test_login_status_mapping_for_invalid_credentials_and_app_id():
-    with pytest.raises(AuthenticationError, match="Invalid credentials"):
+    with pytest.raises(AuthenticationError, match="Invalid credentials") as exc:
         make_client(FakeSession(FakeResponse(status_code=401))).api_call(
             "user/login", email="bad@example.com", pwd="bad"
         )
+    assert (
+        "Reset your credentials with 'uvx --from "
+        "git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -r'" in str(exc.value)
+    )
 
     with pytest.raises(InvalidAppIdError, match="Invalid app id"):
         make_client(FakeSession(FakeResponse(status_code=400))).api_call(
