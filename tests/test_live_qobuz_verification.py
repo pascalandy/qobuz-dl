@@ -94,6 +94,8 @@ class FakeClient:
         self.signed_response = {"url": SIGNED_URL}
         self.searches = []
         self.signed_requests = []
+        self.metadata_requests = []
+        self.metadata_responses = []
 
     def search_tracks(self, query, limit):
         self.searches.append((query, limit))
@@ -104,6 +106,9 @@ class FakeClient:
         return dict(self.signed_response)
 
     def get_track_meta(self, track_id):
+        self.metadata_requests.append(track_id)
+        if self.metadata_responses:
+            return self.metadata_responses.pop(0)
         return _track_metadata(track_id)
 
 
@@ -157,6 +162,26 @@ def _mpeg_audio():
     return frame * 10
 
 
+def _write_tagged_media(path, codec, tags):
+    if codec == "mp3":
+        path.write_bytes(_mpeg_audio())
+        audio = ID3()
+        audio.add(TIT2(encoding=3, text=tags["title"]))
+        audio.add(TPE1(encoding=3, text=tags["artist"]))
+        audio.add(TALB(encoding=3, text=tags["album"]))
+        audio.add(TRCK(encoding=3, text=tags["track"]))
+        audio.save(path)
+        return
+
+    path.write_bytes(PLAYABLE_FLAC)
+    audio = FLAC(path)
+    audio["TITLE"] = tags["title"]
+    audio["ARTIST"] = tags["artist"]
+    audio["ALBUM"] = tags["album"]
+    audio["TRACKNUMBER"] = tags["track"]
+    audio.save()
+
+
 def _track_metadata(track_id=AUTHORIZED_TRACK_ID):
     album = {
         "artist": {"name": "Authorized artist"},
@@ -178,6 +203,12 @@ def _track_metadata(track_id=AUTHORIZED_TRACK_ID):
         "album": album,
         "copyright": "(P) 2026 Authorized label",
     }
+
+
+def _track_metadata_with_album_tracks_count(value):
+    result = _track_metadata()
+    result["album"]["tracks_count"] = value
+    return result
 
 
 def _encoded_secret_chunks(secret):
@@ -427,9 +458,293 @@ def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
     api_calls = [call for call in calls if "/api.json/" in call[0]]
     searches = [call for call in api_calls if call[0].endswith("/track/search")]
     signed = [call for call in api_calls if call[0].endswith("/track/getFileUrl")]
+    metadata_requests = [call for call in api_calls if call[0].endswith("/track/get")]
     assert len(searches) == 1
     assert len(signed) == 3
     assert all(call[1]["track_id"] == [AUTHORIZED_TRACK_ID] for call in signed)
+    assert len(metadata_requests) == 2
+    assert all(
+        call[1]["track_id"] == [AUTHORIZED_TRACK_ID] for call in metadata_requests
+    )
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["user%tag@example.com", "user%%tag@example.com", "user%(app_id)s@example.com"],
+)
+def test_percent_email_survives_private_config_and_exact_login_forwarding(
+    tmp_path, monkeypatch, email
+):
+    calls = _install_full_fake_http(monkeypatch)
+    environment = _live_environment(tmp_path, QOBUZ_DL_LIVE_EMAIL=email)
+
+    assert main([], environ=environment, backend_factory=RealBackend) == 0
+
+    login_calls = [call for call in calls if call[0].endswith("/user/login")]
+    assert len(login_calls) == 1
+    assert login_calls[0][1]["email"] == [email]
+    serialized = json.dumps(_report(tmp_path))
+    assert email not in serialized
+    assert AUTHORIZED_TRACK_ID not in serialized
+
+
+@pytest.mark.parametrize("codec", ["mp3", "flac"])
+@pytest.mark.parametrize("field", ["title", "artist", "album", "track"])
+def test_each_wrong_nonempty_tag_fails_metadata_verification(
+    tmp_path, monkeypatch, capsys, codec, field
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+    observed = {
+        "title": "Authorized track",
+        "artist": "Authorized artist",
+        "album": "Authorized album",
+        "track": "1/1" if codec == "mp3" else "1",
+    }
+    observed[field] = "2/9" if field == "track" else f"Other {field}"
+
+    def wrong_track_download(client, track_id, destination, quality):
+        final = destination / f"track.{codec}"
+        _write_tagged_media(final, codec, observed)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = wrong_track_download
+    environment = _live_environment(
+        tmp_path,
+        QOBUZ_DL_LIVE_QUALITY="5" if codec == "mp3" else "27",
+    )
+
+    assert main([], environ=environment, backend_factory=lambda: backend) == 1
+
+    report = _report(tmp_path)
+    assert report["reason"] == "metadata_mismatch"
+    assert report["phases"]["metadata"] == "failed"
+    output = capsys.readouterr()
+    serialized = json.dumps(report)
+    assert f'"{AUTHORIZED_TRACK_ID}"' not in serialized
+    assert observed[field] not in serialized
+    assert observed[field] not in output.err
+    assert backend.client.metadata_requests == [AUTHORIZED_TRACK_ID]
+
+
+@pytest.mark.parametrize("codec", ["mp3", "flac"])
+def test_metadata_comparison_accepts_nfc_work_version_artist_fallback_and_track_shape(
+    tmp_path, monkeypatch, codec
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+    reference = _track_metadata()
+    reference["title"] = "Cafe\u0301"
+    reference["version"] = "Live"
+    reference["work"] = "Suite"
+    reference["performer"] = {"name": ""}
+    reference["album"]["artist"]["name"] = "Fallback artist"
+    reference["album"]["tracks_count"] = 12
+    backend.client.metadata_responses = [reference]
+
+    def matching_download(client, track_id, destination, quality):
+        final = destination / f"track.{codec}"
+        _write_tagged_media(
+            final,
+            codec,
+            {
+                "title": "Suite: Café (Live)",
+                "artist": "Fallback artist",
+                "album": "Authorized album",
+                "track": "01/12" if codec == "mp3" else "01",
+            },
+        )
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = matching_download
+    environment = _live_environment(
+        tmp_path,
+        QOBUZ_DL_LIVE_QUALITY="5" if codec == "mp3" else "27",
+    )
+
+    assert main([], environ=environment, backend_factory=lambda: backend) == 0
+    assert backend.client.metadata_requests == [AUTHORIZED_TRACK_ID]
+
+
+@pytest.mark.parametrize("codec", ["mp3", "flac"])
+@pytest.mark.parametrize("tracks_count_state", ["missing", "none"])
+@pytest.mark.parametrize(
+    ("observed_track", "expected_exit", "expected_reason"),
+    [("1/999", 1, "metadata_mismatch"), ("01", 0, "ok")],
+)
+def test_track_denominator_requires_an_authoritative_total_but_numerator_does_not(
+    tmp_path,
+    monkeypatch,
+    codec,
+    tracks_count_state,
+    observed_track,
+    expected_exit,
+    expected_reason,
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+    reference = _track_metadata()
+    if tracks_count_state == "missing":
+        reference["album"].pop("tracks_count")
+    else:
+        reference["album"]["tracks_count"] = None
+    backend.client.metadata_responses = [reference]
+
+    def tagged_download(client, track_id, destination, quality):
+        final = destination / f"track.{codec}"
+        _write_tagged_media(
+            final,
+            codec,
+            {
+                "title": "Authorized track",
+                "artist": "Authorized artist",
+                "album": "Authorized album",
+                "track": observed_track,
+            },
+        )
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = tagged_download
+    environment = _live_environment(
+        tmp_path,
+        QOBUZ_DL_LIVE_QUALITY="5" if codec == "mp3" else "27",
+    )
+
+    assert (
+        main([], environ=environment, backend_factory=lambda: backend) == expected_exit
+    )
+    assert _report(tmp_path)["reason"] == expected_reason
+    assert backend.client.metadata_requests == [AUTHORIZED_TRACK_ID]
+
+
+@pytest.mark.parametrize("codec", ["mp3", "flac"])
+def test_additional_tag_values_and_wrong_track_total_are_rejected(
+    tmp_path, monkeypatch, codec
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def extra_value_download(client, track_id, destination, quality):
+        final = destination / f"track.{codec}"
+        _write_tagged_media(
+            final,
+            codec,
+            {
+                "title": ["Authorized track", "Other title"],
+                "artist": "Authorized artist",
+                "album": "Authorized album",
+                "track": "1/9",
+            },
+        )
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = extra_value_download
+    environment = _live_environment(
+        tmp_path,
+        QOBUZ_DL_LIVE_QUALITY="5" if codec == "mp3" else "27",
+    )
+
+    assert main([], environ=environment, backend_factory=lambda: backend) == 1
+    assert _report(tmp_path)["reason"] == "metadata_mismatch"
+
+
+@pytest.mark.parametrize("codec", ["mp3", "flac"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("title", "authorized track"),
+        ("title", "Authorized track "),
+        ("title", "Authorized track!"),
+        ("track", "true"),
+        ("track", "-1"),
+        ("track", "1.5"),
+        ("track", "not-a-track"),
+        ("track", "1/0"),
+        ("track", "1/9"),
+    ],
+)
+def test_metadata_comparison_preserves_text_and_rejects_malformed_track_numbers(
+    tmp_path, monkeypatch, codec, field, value
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+    observed = {
+        "title": "Authorized track",
+        "artist": "Authorized artist",
+        "album": "Authorized album",
+        "track": "1/1",
+    }
+    observed[field] = value
+
+    def altered_download(client, track_id, destination, quality):
+        final = destination / f"track.{codec}"
+        _write_tagged_media(final, codec, observed)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = altered_download
+    environment = _live_environment(
+        tmp_path,
+        QOBUZ_DL_LIVE_QUALITY="5" if codec == "mp3" else "27",
+    )
+
+    assert main([], environ=environment, backend_factory=lambda: backend) == 1
+    assert _report(tmp_path)["reason"] == "metadata_mismatch"
+
+
+def _without_key(mapping, key):
+    result = dict(mapping)
+    result.pop(key)
+    return result
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {**_track_metadata(), "id": "other-track-id"},
+        _without_key(_track_metadata(), "title"),
+        {**_track_metadata(), "track_number": True},
+        {**_track_metadata(), "track_number": -1},
+        {**_track_metadata(), "track_number": 1.5},
+        _track_metadata_with_album_tracks_count(False),
+        _track_metadata_with_album_tracks_count(-1),
+        _track_metadata_with_album_tracks_count(1.5),
+    ],
+)
+def test_invalid_authoritative_metadata_fails_without_value_or_id_leakage(
+    tmp_path, monkeypatch, capsys, reference
+):
+    backend = FakeBackend()
+    backend.client.metadata_responses = [reference]
+    _install_media_only_http(monkeypatch)
+
+    def valid_download(client, track_id, destination, quality):
+        final = destination / "track.mp3"
+        _write_tagged_media(
+            final,
+            "mp3",
+            {
+                "title": "Authorized track",
+                "artist": "Authorized artist",
+                "album": "Authorized album",
+                "track": "1/1",
+            },
+        )
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = valid_download
+
+    assert (
+        main([], environ=_live_environment(tmp_path), backend_factory=lambda: backend)
+        == 1
+    )
+
+    output = capsys.readouterr()
+    report = _report(tmp_path)
+    assert report["reason"] == "metadata_reference_invalid"
+    assert report["phases"]["metadata"] == "failed"
+    assert "other-track-id" not in output.err
+    assert "other-track-id" not in json.dumps(report)
+    assert backend.client.metadata_requests == [AUTHORIZED_TRACK_ID]
 
 
 @pytest.mark.parametrize(
@@ -698,7 +1013,7 @@ def test_finalized_path_must_be_exactly_one_file_inside_destination(
     ("audio_bytes", "expected_phase", "expected_reason"),
     [
         (b"tags only", "media", "final_media_invalid"),
-        (_mpeg_audio(), "metadata", "metadata_invalid"),
+        (_mpeg_audio(), "metadata", "metadata_mismatch"),
     ],
 )
 def test_mp3_requires_playable_audio_and_required_tags(
