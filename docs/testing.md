@@ -63,9 +63,20 @@ just build
 
 GitHub Actions runs the CI gate on pushes to `master` or `main` and on pull requests. Pull requests can target non-default branches, so branch-on-branch pull requests receive the same checks. Generated `graphite-base` branches are excluded. Maintainers can also start the workflow manually with `workflow_dispatch`.
 
-The CI matrix runs the full `scripts/check.py` gate on Python 3.10, the minimum supported runtime, and Python 3.13, the latest project target. Each matrix job installs dependencies with `uv sync --dev --frozen` before it starts the runner.
+The CI matrix configures these hosted GitHub Actions jobs:
 
-The workflow uses read-only repository permissions. The Python 3.13 job uploads the built `dist/` files as the `qobuz-dl-dist` artifact for release/download inspection.
+- Ubuntu with Python 3.10
+- Ubuntu with Python 3.13
+- Windows with Python 3.13
+- macOS with Python 3.13
+
+Python 3.10 is the minimum supported runtime. Each job installs dependencies with `uv sync --dev --frozen` before it runs the full `scripts/check.py` gate.
+
+Windows tests exercise CLI startup when `APPDATA` is absent and create final files for ordinary, reserved, empty, and long Unicode names. The macOS test creates a Unicode path, writes FLAC tags, renames the file, and reads it from the final path. These tests use synthetic local media and do not require Qobuz credentials, a subscription, Qobuz API access, or media network access. Each native test skips explicitly on other operating systems, so a Linux simulation does not count as native verification.
+
+The matrix covers only the listed hosted runner images and Python versions. It does not cover every operating system release, Python version, filesystem, or authenticated download path. A workflow definition states the intended matrix; only completed hosted jobs prove a specific revision on Windows and macOS.
+
+The workflow uses read-only repository permissions. The successful Ubuntu Python 3.13 job uploads the built `dist/` files as the `qobuz-dl-dist` artifact for release and download inspection.
 
 A separate tag-triggered release workflow publishes GitHub releases; see [Packaging — Releases](packaging.md#releases).
 
