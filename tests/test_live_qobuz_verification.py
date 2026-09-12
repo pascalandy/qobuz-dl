@@ -396,7 +396,8 @@ def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
             "live execution belongs to issue #48",
         ],
     }
-    assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
     assert list(tmp_path.glob(".live-report.json.*.tmp")) == []
 
     serialized = report_path.read_text(encoding="utf-8")
@@ -418,7 +419,8 @@ def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
         hashlib.md5(b"plain-text-password", usedforsecurity=False).hexdigest()
         in observations["config"]
     )
-    assert observations["config_mode"] == 0o600
+    if os.name == "posix":
+        assert observations["config_mode"] == 0o600
     assert not observations["config_path"].exists()
     assert not observations["destination"].exists()
 
