@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Mapping
+from typing import Mapping, Protocol, TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -32,11 +32,11 @@ class HttpStatusError(HttpError):
         self.header_items = header_items or tuple(self.headers.items())
 
 
-class HttpRateLimitError(HttpError):
+class HttpRequestError(HttpError):
     pass
 
 
-class HttpRequestError(HttpError):
+class HttpRateLimitError(HttpRequestError):
     pass
 
 
@@ -66,6 +66,21 @@ class HttpResponse:
                 self.headers,
                 self.header_items,
             )
+
+
+class _RateLimitResponse(Protocol):
+    status_code: int
+    header_items: tuple[tuple[str, str], ...]
+
+
+_RateLimitResponseT = TypeVar("_RateLimitResponseT", bound=_RateLimitResponse)
+
+
+@dataclass(frozen=True)
+class _StreamAcquisition:
+    status_code: int
+    header_items: tuple[tuple[str, str], ...]
+    response: object
 
 
 @dataclass(frozen=True)
@@ -160,11 +175,11 @@ def _retry_after_seconds(
 
 
 def retry_rate_limited(
-    operation: Callable[[], HttpResponse],
+    operation: Callable[[], _RateLimitResponseT],
     *,
     wall_time: Callable[[], float] | None = None,
     sleeper: Callable[[float], None] | None = None,
-) -> HttpResponse:
+) -> _RateLimitResponseT:
     wall_time = wall_time or time.time
     sleeper = sleeper or time.sleep
     waited = 0.0
@@ -181,13 +196,13 @@ def retry_rate_limited(
             delay = _QOBUZ_RATE_LIMIT_POLICY.fallback_waits[attempt]
         if delay > _QOBUZ_RATE_LIMIT_POLICY.max_wait_seconds - waited:
             raise HttpRateLimitError(
-                "Qobuz API rate limit retry budget exhausted."
+                "Qobuz rate limit retry budget exhausted."
             ) from None
 
         sleeper(delay)
         waited += delay
 
-    raise HttpRateLimitError("Qobuz API rate limit retry attempts exhausted.") from None
+    raise HttpRateLimitError("Qobuz rate limit retry attempts exhausted.") from None
 
 
 class HttpClient:
@@ -263,6 +278,31 @@ def _consume_http_error(exc: HTTPError) -> tuple[bytes, tuple[tuple[str, str], .
         exc.close()
 
 
+def _acquire_retryable_stream(request: Request, timeout) -> _StreamAcquisition:
+    try:
+        response = urlopen(request, timeout=timeout)
+    except HTTPError as exc:
+        if exc.code != 429:
+            raise
+        header_items = tuple(exc.headers.items()) if exc.headers else ()
+        exc.close()
+        return _StreamAcquisition(exc.code, header_items, exc)
+
+    status = getattr(response, "status", response.getcode())
+    header_items = tuple(response.headers.items())
+    if status == 429:
+        response.close()
+        return _StreamAcquisition(status, header_items, response)
+    return _StreamAcquisition(status, header_items, response)
+
+
+def _open_stream_with_rate_limit_retry(request: Request, timeout):
+    acquisition = retry_rate_limited(
+        lambda: _acquire_retryable_stream(request, timeout)
+    )
+    return acquisition.response
+
+
 def stream_download(
     url: str,
     target,
@@ -271,10 +311,16 @@ def stream_download(
     timeout=DEFAULT_TIMEOUT,
     chunk_size=DEFAULT_CHUNK_SIZE,
     progress=None,
+    retry_rate_limited=False,
 ) -> int:
     try:
         request = Request(url, headers=dict(headers or {}))
-        with urlopen(request, timeout=timeout) as response:
+        response = (
+            _open_stream_with_rate_limit_retry(request, timeout)
+            if retry_rate_limited
+            else urlopen(request, timeout=timeout)
+        )
+        with response:
             status = getattr(response, "status", response.getcode())
             if status >= 400:
                 header_items = tuple(response.headers.items())
