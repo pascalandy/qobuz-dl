@@ -209,7 +209,6 @@ def test_album_download_places_multidisc_tracks_cover_and_booklet(
     ]
     assert client.track_url_calls == [
         ("track-1", 27),
-        ("track-1", 27),
         ("track-2", 27),
     ]
 

@@ -158,8 +158,15 @@ class Download:
 
         album_title = _get_title(meta)
 
+        first_track_url = None
         try:
-            preparation = self._prepare_release_download(meta, album_title)
+            if not self._is_mp3():
+                first_track_url = self.client.get_track_url(
+                    tracks[0]["id"], fmt_id=self.quality
+                )
+            preparation = self._prepare_release_download(
+                meta, album_title, first_track_url
+            )
         except (http.HttpError, ConnectionError) as error:
             logger.error(f"{RED}Error getting release: {error}. Skipping...")
             return DownloadResult("failed", "request_error")
@@ -176,13 +183,30 @@ class Download:
         media_numbers = [track["media_number"] for track in tracks]
         is_multiple = len(set(media_numbers)) > 1
         results = []
-        for track in tracks:
+        for index, track in enumerate(tracks):
             try:
-                parsed_url = self.client.get_track_url(track["id"], fmt_id=self.quality)
+                parsed_url = (
+                    first_track_url
+                    if index == 0 and first_track_url is not None
+                    else self.client.get_track_url(track["id"], fmt_id=self.quality)
+                )
                 if "sample" in parsed_url:
                     logger.info(f"{OFF}Demo. Skipping")
                     results.append(DownloadResult("ignored", "demo"))
                     continue
+                _file_format, quality_met, bit_depth, sampling_rate = self._get_format(
+                    parsed_url
+                )
+                if not self._quality_allows_download(_get_title(track), quality_met):
+                    results.append(DownloadResult("ignored", "quality_filter"))
+                    continue
+                if parsed_url.get("url"):
+                    quality = (
+                        f"{bit_depth}-bit/{sampling_rate} kHz"
+                        if bit_depth is not None and sampling_rate is not None
+                        else "unknown"
+                    )
+                    logger.info(f"{OFF}Track quality: {quality}")
                 result = self._download_prepared_track(
                     preparation,
                     parsed_url,
@@ -232,8 +256,10 @@ class Download:
             logger.info(f"{GREEN}Completed")
         return result
 
-    def _prepare_release_download(self, meta, album_title):
-        file_format, quality_met, bit_depth, sampling_rate = self._get_format(meta)
+    def _prepare_release_download(self, meta, album_title, first_track_url):
+        file_format, quality_met, bit_depth, sampling_rate = self._get_format(
+            first_track_url
+        )
 
         if not self._quality_allows_download(album_title, quality_met):
             return None
@@ -251,7 +277,7 @@ class Download:
 
     def _prepare_track_download(self, meta, track_url_dict, track_title):
         _file_format, quality_met, bit_depth, sampling_rate = self._get_format(
-            meta, is_track_id=True, track_url_dict=track_url_dict
+            track_url_dict
         )
 
         if not self._quality_allows_download(track_title, quality_met):
@@ -425,21 +451,13 @@ class Download:
             "sampling_rate": sampling_rate,
         }
 
-    def _get_format(self, item_dict, is_track_id=False, track_url_dict=None):
+    def _get_format(self, track_url_dict):
         quality_met = True
         if int(self.quality) == 5:
             return ("MP3", quality_met, None, None)
-        track_dict = item_dict
-        if not is_track_id:
-            track_dict = item_dict["tracks"]["items"][0]
 
         try:
-            new_track_dict = (
-                self.client.get_track_url(track_dict["id"], fmt_id=self.quality)
-                if not track_url_dict
-                else track_url_dict
-            )
-            restrictions = new_track_dict.get("restrictions")
+            restrictions = track_url_dict.get("restrictions")
             if isinstance(restrictions, list):
                 if any(
                     restriction.get("code") == QL_DOWNGRADE
@@ -450,8 +468,8 @@ class Download:
             return (
                 "FLAC",
                 quality_met,
-                new_track_dict["bit_depth"],
-                new_track_dict["sampling_rate"],
+                track_url_dict["bit_depth"],
+                track_url_dict["sampling_rate"],
             )
         except KeyError:
             return ("Unknown", quality_met, None, None)
