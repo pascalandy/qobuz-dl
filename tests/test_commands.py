@@ -490,7 +490,6 @@ def test_download_first_run_creates_config_once_then_initializes_client(
     monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
-    monkeypatch.setattr(cli, "_remove_leftovers", lambda directory: None)
 
     cli.main()
 
@@ -587,7 +586,6 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
     monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
     monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
     monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
-    monkeypatch.setattr(cli, "_remove_leftovers", lambda directory: None)
 
     cli.main()
 
