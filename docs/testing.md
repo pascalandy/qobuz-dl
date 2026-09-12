@@ -157,6 +157,70 @@ The package version is identity metadata, not revision evidence. The Git URL and
 
 `just ci` does not run this verifier. Default local and hosted CI remain offline with respect to the fork installation source and do not depend on GitHub availability.
 
+## Prepare the live Qobuz verifier
+
+The live verifier is disabled by default. Ordinary tests and `just ci` do not read Qobuz credentials or start the verifier's network backend. Prove this gate and the rest of the verifier contract with local fakes:
+
+```sh
+uv run --frozen pytest tests/test_live_qobuz_verification.py
+```
+
+Do not run the live procedure as part of verifier preparation. [Issue #48](https://github.com/pascalandy/qobuz-dl/issues/48) owns explicit authorization, the account and track inputs, the live run, and the receipt's publication or disposal.
+
+For an authorized run, use an active Qobuz account and one track that you may download. Choose a search query that returns exactly one match for that track within the first 50 results. Keep the credentials out of the repository, shell history, logs, and issue comments.
+
+Run the verifier from the repository root in a temporary subshell. Enter the account values only at the prompts:
+
+```sh
+bash -eu <<'LIVE_QOBUZ'
+receipt_dir="$(mktemp -d)"
+
+read -r -p 'Qobuz email: ' QOBUZ_DL_LIVE_EMAIL </dev/tty
+read -r -s -p 'Qobuz password: ' QOBUZ_DL_LIVE_PASSWORD </dev/tty
+printf '\n'
+read -r -p 'Authorized Qobuz track ID: ' QOBUZ_DL_LIVE_TRACK_ID </dev/tty
+read -r -p 'Search query: ' QOBUZ_DL_LIVE_SEARCH_QUERY </dev/tty
+read -r -p 'Quality (5, 6, 7, or 27): ' QOBUZ_DL_LIVE_QUALITY </dev/tty
+
+export QOBUZ_DL_LIVE_EMAIL QOBUZ_DL_LIVE_PASSWORD
+export QOBUZ_DL_LIVE_TRACK_ID QOBUZ_DL_LIVE_SEARCH_QUERY QOBUZ_DL_LIVE_QUALITY
+export QOBUZ_DL_LIVE_REPORT="$receipt_dir/live-qobuz.json"
+export QOBUZ_DL_LIVE=I_UNDERSTAND_THIS_USES_QOBUZ
+
+printf 'Sanitized receipt: %s\n' "$QOBUZ_DL_LIVE_REPORT"
+just live-qobuz
+LIVE_QOBUZ
+```
+
+The subshell removes the input variables from your environment when the command ends. The verifier creates a private temporary config and separate temporary destinations for the interruption probe and the complete download. The private config disables interpolation, so it reads credential values literally. The cleanup phase attempts to remove the private config and both destinations. A passed receipt requires a `passed` cleanup status. Any cleanup failure makes the complete run fail. The report path must be an absolute path to a `.json` file in an existing directory.
+
+After activation and input validation, `runtime` is the first receipt phase. The verifier requires its checkout root to be the exact Git top-level and `HEAD` to be a lowercase 40-character hexadecimal SHA. It completes this check before it creates the private config, extracts bundle credentials, or starts network work.
+
+The run checks these phases in order:
+
+1. Verify the runtime and Git provenance.
+2. Extract bundle credentials.
+3. Log in with the supplied account.
+4. Find the authorized track through the supplied search query.
+5. Request one signed media URL at the requested quality.
+6. Call the production `download_with_progress` path, stop from its `after_write` hook after the first written chunk, and require an empty interruption destination.
+7. Download the same track once to the dedicated destination.
+8. Require exactly one non-empty finalized path inside the dedicated destination. Validate media properties with Mutagen. For FLAC, structurally validate the initial frame header and its CRC. Require its sample rate, channel count, and bit depth to agree with `STREAMINFO`. Require the frame block size not to exceed the `STREAMINFO` maximum block size. If `STREAMINFO` has a positive total sample count, require the frame block size not to exceed that count. Require at least three bytes after the header CRC. This check does not decode audio or verify complete-file integrity.
+9. Fetch one authoritative record for the same authorized track. Compare the final MP3 or FLAC title, artist, album, and track number with that record.
+10. Remove the private config and both temporary destinations.
+
+An invalid authoritative record reports `metadata_reference_invalid`. A tag mismatch reports `metadata_mismatch`. These fixed failures do not include the track ID, the reference values, or the final tag values.
+
+A malformed FLAC structure reports the fixed `final_media_invalid` reason without exposing media bytes or paths. Stronger decoder and complete-file integrity evidence belongs to the authorized live run in issue #48.
+
+The JSON receipt contains its schema version, the full Git SHA, the operating system, the machine type, the Python version, and the requested quality. It reads the obtained format and sample rate from the completed media. It also records FLAC bit depth or MP3 bitrate when applicable. The receipt contains the result, a fixed reason code, each phase status from `runtime` through `cleanup`, and the verifier limits.
+
+If the runtime or Git provenance is unavailable, the receipt reports `runtime_unavailable`. Its `sha` and `platform` values are `null`. The `runtime` phase fails and every downstream phase, including `cleanup`, is skipped. The verifier does not create its temporary workspace, write its private config, or start network work. Cancellation during the runtime phase reports `interrupted` with the same null provenance and skipped downstream phases.
+
+During backend work, the verifier captures Python standard output and standard error and disables logging. The command prints only a generic result with a phase and fixed reason code. A `KeyboardInterrupt` during a verification phase becomes an `interrupted` failure. The verifier then attempts cleanup and writes a sanitized receipt. A cleanup failure replaces any earlier result with `cleanup_failed`. Only an exception during atomic receipt persistence reports `report_write_failed`. In that case, the command preserves an existing receipt. The receipt excludes the email, password, password hash, track ID, search query, app credentials, auth token, signed URL, local paths, backend output, and raw exceptions. Inspect the receipt before publication.
+
+An offline test pass proves only that the verifier is prepared and disabled by default. It does not prove that Qobuz accepted the account, found the track, or delivered media. Only the authorized run in issue #48 can provide that evidence.
+
 ## Test boundaries
 
 Default tests must not require:

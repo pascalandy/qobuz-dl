@@ -40,6 +40,7 @@ _RETRYABLE_API_READS = frozenset(
         "track/search",
     }
 )
+_DEFAULT_SECRET_TEST_TRACK_ID = 5966783
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,15 @@ class _ApiRequest:
 
 
 class Client:
-    def __init__(self, email, pwd, app_id, secrets):
+    def __init__(
+        self,
+        email,
+        pwd,
+        app_id,
+        secrets,
+        *,
+        secret_test_track_id=None,
+    ):
         logger.info(f"{YELLOW}Logging in...")
         self.secrets = secrets
         self.id = str(app_id)
@@ -67,7 +76,10 @@ class Client:
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
         self.auth(email, pwd)
-        self.cfg_setup()
+        if secret_test_track_id is None:
+            self.cfg_setup()
+        else:
+            self.cfg_setup(secret_test_track_id)
 
     def api_call(self, epoint, **kwargs):
         def request_once():
@@ -295,20 +307,20 @@ class Client:
     def get_user_playlists(self, limit):
         return self.api_call("playlist/getUserPlaylists", limit=limit)
 
-    def test_secret(self, sec):
+    def test_secret(self, sec, track_id=_DEFAULT_SECRET_TEST_TRACK_ID):
         try:
-            self.api_call("track/getFileUrl", id=5966783, fmt_id=5, sec=sec)
+            self.api_call("track/getFileUrl", id=track_id, fmt_id=5, sec=sec)
             return True
         except InvalidAppSecretError:
             return False
 
-    def cfg_setup(self):
+    def cfg_setup(self, track_id=_DEFAULT_SECRET_TEST_TRACK_ID):
         for secret in self.secrets:
             # Falsy secrets
             if not secret:
                 continue
 
-            if self.test_secret(secret):
+            if self.test_secret(secret, track_id):
                 self.sec = secret
                 break
 
