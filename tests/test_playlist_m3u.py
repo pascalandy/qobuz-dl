@@ -407,8 +407,18 @@ def test_no_m3u_changes_only_the_writer_and_keeps_ordered_outcomes(
     ]
     assert not without_m3u[2].exists()
     expected_artifact_facts = [
-        ("Parity/Album/Track A.flac", "track-a", 6, "flac", 16, 44100),
-        ("Parity/Album/Track B.flac", "track-b", 6, "flac", 16, 44100),
+        (
+            Path(os.path.normcase(path)).as_posix(),
+            track_id,
+            6,
+            "flac",
+            16,
+            44100,
+        )
+        for path, track_id in [
+            ("Parity/Album/Track A.flac", "track-a"),
+            ("Parity/Album/Track B.flac", "track-b"),
+        ]
     ]
     assert [artifact[:6] for artifact in with_m3u[4]] == expected_artifact_facts
     assert [artifact[:6] for artifact in without_m3u[4]] == expected_artifact_facts
