@@ -17,7 +17,7 @@ The CLI can download from direct URLs, local text files, interactive search, or 
 | `-h`, `--help` | Show help and exit. Help is available without creating config. |
 | `--version` | Show the installed package version and exit. |
 | `-r`, `--reset` | Create or reset the config file. |
-| `-p`, `--purge` | Delete the downloaded-IDs database. Previously tracked releases may download again. |
+| `-p`, `--purge` | Delete the downloaded-IDs database. Deleting it exits with status `0` and reports `The database was deleted.` Finding it already absent exits with status `0` and reports `The database is already absent.` A deletion failure exits nonzero, reports the database path, and advises checking its permissions. Purge does not create config or initialize the Qobuz client. Previously tracked releases may download again. |
 | `-sc`, `--show-config` | Show config path, database path, and redacted config values. |
 
 ## Commands

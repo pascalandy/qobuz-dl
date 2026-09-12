@@ -458,6 +458,8 @@ Short form:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -p
 ```
 
+`--purge` is idempotent for scripts. When the database exists, it exits with status `0` and writes `The database was deleted.` to standard error. When the database is already absent, it exits with status `0` and writes `The database is already absent.` to standard error. A deletion failure exits nonzero, reports the database path, and advises checking its permissions. Purge does not create `config.ini` or initialize the Qobuz client.
+
 ### View or edit persistent defaults
 
 Show the config path and redacted settings:
