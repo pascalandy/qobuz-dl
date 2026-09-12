@@ -21,14 +21,6 @@ logging.basicConfig(
     format="%(message)s",
 )
 
-if os.name == "nt":
-    OS_CONFIG = os.environ.get("APPDATA")
-else:
-    OS_CONFIG = os.path.join(os.path.expanduser("~"), ".config")
-
-CONFIG_PATH = os.path.join(OS_CONFIG, "qobuz-dl")
-CONFIG_FILE = os.path.join(CONFIG_PATH, "config.ini")
-QOBUZ_DB = os.path.join(CONFIG_PATH, "qobuz_dl.db")
 SENSITIVE_CONFIG_KEYS = {
     "app_id",
     "email",
@@ -72,6 +64,25 @@ _CONFIG_BOOLEAN_KEYS = (
     "no_database",
     "smart_discography",
 )
+
+
+class _ConfigPathError(Exception):
+    pass
+
+
+def _resolve_config_paths() -> tuple[str, str]:
+    if os.name == "nt":
+        config_root = os.environ.get("APPDATA")
+        if not config_root:
+            raise _ConfigPathError
+    else:
+        config_root = os.path.join(os.path.expanduser("~"), ".config")
+
+    config_path = os.path.join(config_root, "qobuz-dl")
+    return (
+        os.path.join(config_path, "config.ini"),
+        os.path.join(config_path, "qobuz_dl.db"),
+    )
 
 
 def _secure_config_path(config_file: str) -> None:
@@ -292,19 +303,26 @@ def _handle_commands(qobuz, arguments):
 def main():
     parser = qobuz_dl_args()
     arguments = parser.parse_args()
+    try:
+        config_file, database_file = _resolve_config_paths()
+    except _ConfigPathError:
+        sys.exit(
+            "APPDATA is not set. Set APPDATA to your Windows application-data "
+            "directory and retry."
+        )
     startup = _classify_startup(arguments)
 
     config_values = None
     redacted_config = None
     try:
         if arguments.reset:
-            sys.exit(_reset_config(CONFIG_FILE))
+            sys.exit(_reset_config(config_file))
         if startup.needs_config:
-            _ensure_config_exists(CONFIG_FILE)
+            _ensure_config_exists(config_file)
             if startup.needs_auth or arguments.show_config:
-                config_values = _load_config_values(CONFIG_FILE)
+                config_values = _load_config_values(config_file)
         if arguments.show_config:
-            redacted_config = _redacted_config_text(CONFIG_FILE)
+            redacted_config = _redacted_config_text(config_file)
     except _ConfigStorageError:
         sys.exit(
             f"{RED}Unable to access configuration securely. "
@@ -327,18 +345,20 @@ def main():
         sys.exit(0)
 
     if arguments.show_config:
-        print(f"Configuration: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
+        print(f"Configuration: {config_file}\nDatabase: {database_file}\n---")
         print(redacted_config)
         sys.exit()
 
     if arguments.purge:
         try:
-            os.remove(QOBUZ_DB)
+            os.remove(database_file)
         except FileNotFoundError:
             logging.warning(f"{GREEN}The database is already absent.")
             return
         except OSError:
-            sys.exit(f"Unable to delete database at {QOBUZ_DB}. Check its permissions.")
+            sys.exit(
+                f"Unable to delete database at {database_file}. Check its permissions."
+            )
         logging.warning(f"{GREEN}The database was deleted.")
         return
 
@@ -363,7 +383,7 @@ def main():
         no_cover=arguments.no_cover or config_values["no_cover"],
         downloads_db=None
         if config_values["no_database"] or arguments.no_db
-        else QOBUZ_DB,
+        else database_file,
         folder_format=arguments.folder_format or config_values["folder_format"],
         track_format=arguments.track_format or config_values["track_format"],
         smart_discography=(

@@ -40,6 +40,16 @@ def _write_valid_config(config_file):
     )
 
 
+def _stub_config_paths(monkeypatch, config_file, database_file=None):
+    if database_file is None:
+        database_file = config_file.parent / "qobuz_dl.db"
+    monkeypatch.setattr(
+        cli,
+        "_resolve_config_paths",
+        lambda: (str(config_file), str(database_file)),
+    )
+
+
 def _replace_config_value(config_file, key, value):
     contents = config_file.read_text()
     prefix = f"{key} = "
@@ -56,9 +66,7 @@ def _configure_cli_main(monkeypatch, config_file, argv, client):
             pytest.fail("existing config must not construct Bundle")
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", *argv])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_file.parent))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(config_file.parent / "qobuz_dl.db"))
+    _stub_config_paths(monkeypatch, config_file)
     monkeypatch.setattr(cli, "Bundle", UnexpectedBundle)
     monkeypatch.setattr(cli, "QobuzDL", client)
 
@@ -133,8 +141,11 @@ def test_help_and_version_do_not_initialize_config(monkeypatch, tmp_path, argv):
     config_file = tmp_path / "missing-config.ini"
 
     monkeypatch.setattr(sys, "argv", argv)
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+
+    def fail_if_resolved():
+        pytest.fail("help/version must not resolve config paths")
+
+    monkeypatch.setattr(cli, "_resolve_config_paths", fail_if_resolved)
 
     def fail_if_reset(config_file):
         pytest.fail(f"unexpected config reset for {config_file}")
@@ -170,8 +181,7 @@ def test_no_argument_first_run_creates_config_then_prints_help(
         _write_valid_config(Path(target))
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    _stub_config_paths(monkeypatch, config_file)
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
@@ -407,8 +417,7 @@ def test_reset_exits_before_client_initialization(monkeypatch, tmp_path):
         return "reset-complete"
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--reset"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    _stub_config_paths(monkeypatch, config_file)
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
@@ -433,8 +442,7 @@ def test_first_run_reset_only_resets_once(monkeypatch, tmp_path):
         return "reset-complete"
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--reset"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    _stub_config_paths(monkeypatch, config_file)
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
@@ -456,9 +464,7 @@ def test_show_config_exits_before_client_initialization(monkeypatch, tmp_path, c
             pytest.fail("show-config must not initialize the Qobuz client")
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--show-config"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
     with pytest.raises(SystemExit) as exc:
@@ -493,9 +499,7 @@ def test_show_config_with_purge_does_not_initialize_first_run_config(
         pytest.fail(f"purge must not reset config: {target}")
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--show-config", "--purge"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
@@ -544,9 +548,7 @@ def test_download_first_run_creates_config_once_then_initializes_client(
             "https://play.qobuz.com/album/album-1",
         ],
     )
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
 
@@ -597,8 +599,7 @@ def test_download_corrupted_config_reports_recovery_without_client(
             "https://play.qobuz.com/album/album-1",
         ],
     )
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    _stub_config_paths(monkeypatch, config_file)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
     with pytest.raises(SystemExit) as exc:
@@ -943,9 +944,7 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
             "--no-db",
         ],
     )
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
 
     cli.main()
@@ -982,9 +981,7 @@ def test_purge_only_removes_database_and_exits_successfully(
             pytest.fail("purge must not initialize the Qobuz client")
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--purge"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
     result = cli.main()
@@ -1009,9 +1006,7 @@ def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path, caplo
         pytest.fail(f"purge must not reset config: {target}")
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--purge"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
@@ -1094,9 +1089,7 @@ def test_purge_deletion_error_exits_nonzero_without_initialization(
         raise PermissionError(raw_error)
 
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--purge"])
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
     monkeypatch.setattr(cli, "Bundle", UnexpectedBundle)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)

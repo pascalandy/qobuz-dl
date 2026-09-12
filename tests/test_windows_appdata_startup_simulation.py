@@ -18,6 +18,7 @@ APPDATA_DIAGNOSTIC = (
     "APPDATA is not set. Set APPDATA to your Windows application-data "
     "directory and retry."
 )
+ENVIRONMENT_SECRET = "simulated-environment-secret"
 
 SIMULATED_WINDOWS_CHILD = r"""
 import builtins
@@ -95,6 +96,7 @@ def _run_simulated_windows_cli(tmp_path, argv, appdata):
         **os.environ,
         "HOME": str(sandbox),
         "PYTHONDONTWRITEBYTECODE": "1",
+        "QOBUZ_DL_TEST_SECRET": ENVIRONMENT_SECRET,
     }
     if appdata is None:
         environment.pop("APPDATA", None)
@@ -111,6 +113,13 @@ def _run_simulated_windows_cli(tmp_path, argv, appdata):
     )
     side_effects = sorted(str(path.relative_to(sandbox)) for path in sandbox.rglob("*"))
     return result, side_effects
+
+
+def _assert_no_diagnostic_leak(result, tmp_path):
+    output = f"{result.stdout}\n{result.stderr}"
+    assert "Traceback" not in output
+    assert ENVIRONMENT_SECRET not in output
+    assert str(tmp_path) not in output
 
 
 @pytest.mark.parametrize("appdata", [None, ""], ids=["missing", "empty"])
@@ -130,6 +139,7 @@ def test_simulated_windows_metadata_routes_ignore_missing_appdata(
 ):
     result, side_effects = _run_simulated_windows_cli(tmp_path, argv, appdata)
 
+    _assert_no_diagnostic_leak(result, tmp_path)
     assert (
         result.returncode,
         result.stderr,
@@ -139,21 +149,50 @@ def test_simulated_windows_metadata_routes_ignore_missing_appdata(
 
 
 @pytest.mark.parametrize("appdata", [None, ""], ids=["missing", "empty"])
-def test_simulated_windows_continuing_command_reports_missing_appdata_safely(
-    tmp_path, appdata
+@pytest.mark.parametrize(
+    "argv",
+    [
+        pytest.param([], id="no-args"),
+        pytest.param(["--reset"], id="reset"),
+        pytest.param(["--purge"], id="purge"),
+        pytest.param(["--show-config"], id="show-config"),
+        pytest.param(
+            ["dl", "https://play.qobuz.com/album/example"],
+            id="dl",
+        ),
+        pytest.param(["fun"], id="fun"),
+        pytest.param(["lucky", "example"], id="lucky"),
+    ],
+)
+def test_simulated_windows_continuing_routes_report_missing_appdata_safely(
+    tmp_path, appdata, argv
 ):
-    result, side_effects = _run_simulated_windows_cli(
-        tmp_path,
-        ["dl", "https://play.qobuz.com/album/example"],
-        appdata,
-    )
+    result, side_effects = _run_simulated_windows_cli(tmp_path, argv, appdata)
 
+    _assert_no_diagnostic_leak(result, tmp_path)
     assert (
         result.returncode,
         result.stdout,
         result.stderr,
         side_effects,
     ) == (1, "", f"{APPDATA_DIAGNOSTIC}\n", [])
+
+
+@pytest.mark.parametrize("appdata", [None, ""], ids=["missing", "empty"])
+def test_simulated_windows_parser_error_precedes_config_path_resolution(
+    tmp_path, appdata
+):
+    result, side_effects = _run_simulated_windows_cli(
+        tmp_path,
+        ["--not-a-real-option"],
+        appdata,
+    )
+
+    _assert_no_diagnostic_leak(result, tmp_path)
+    assert (result.returncode, result.stdout, side_effects) == (2, "", [])
+    assert "usage: qobuz-dl" in result.stderr
+    assert "error: unrecognized arguments: --not-a-real-option" in result.stderr
+    assert APPDATA_DIAGNOSTIC not in result.stderr
 
 
 def test_simulated_windows_resolver_preserves_present_appdata(monkeypatch):

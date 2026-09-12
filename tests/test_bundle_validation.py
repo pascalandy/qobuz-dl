@@ -273,9 +273,11 @@ def test_three_seed_order_starts_with_second_then_preserves_discovery(monkeypatc
 def configure_cli(monkeypatch, tmp_path, records, arguments):
     config_file = tmp_path / "qobuz-dl" / "config.ini"
     database = config_file.parent / "qobuz_dl.db"
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_file.parent))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(database))
+    monkeypatch.setattr(
+        cli,
+        "_resolve_config_paths",
+        lambda: (str(config_file), str(database)),
+    )
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", *arguments])
     answers = iter(["user@example.com", "My Music", "27"])
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
