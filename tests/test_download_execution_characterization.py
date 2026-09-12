@@ -1,11 +1,16 @@
 import os
+import shutil
 from pathlib import Path
 
 import pytest
+from mutagen.flac import FLAC
+from mutagen.id3 import ID3
 
 from qobuz_dl import downloader
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import Download
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _track(track_id, title, track_number, media_number=1):
@@ -61,6 +66,12 @@ def _track_meta(track_id="track-1", title="Single Track"):
         },
         "copyright": "",
     }
+
+
+def _labeled_track_meta():
+    track_meta = _track_meta()
+    track_meta["album"]["label"] = {"name": "Nested Track Label"}
+    return track_meta
 
 
 def _track_url(track_id, *, restrictions=None):
@@ -138,6 +149,102 @@ def _assert_owned_temporary(path, directory):
     token = temporary.name.removeprefix(".qdl-").removesuffix(".tmp")
     assert len(token) == 32
     int(token, 16)
+
+
+def _download_real_media(
+    monkeypatch,
+    tmp_path,
+    *,
+    quality,
+    track_meta=None,
+    album_meta=None,
+    album=False,
+):
+    extension = "mp3" if quality == 5 else "flac"
+    fixture = FIXTURES / f"synthetic-silence.{extension}"
+
+    def copy_fixture(_url, filename, _description):
+        shutil.copyfile(fixture, filename)
+
+    monkeypatch.setattr(downloader, "download_with_progress", copy_fixture)
+    qdl = QobuzDL(
+        directory=tmp_path,
+        quality=quality,
+        no_cover=True,
+        folder_format="proof",
+        track_format="track",
+    )
+    qdl.client = FakeDownloadClient(track_meta=track_meta, album_meta=album_meta)
+
+    qdl.download_from_id("album-1" if album else "track-1", album=album)
+
+    return tmp_path / "proof" / f"track.{extension}"
+
+
+def test_direct_mp3_download_writes_nested_album_label_to_final_file(
+    tmp_path, monkeypatch
+):
+    final_file = _download_real_media(
+        monkeypatch,
+        tmp_path,
+        quality=5,
+        track_meta=_labeled_track_meta(),
+    )
+
+    assert final_file.exists()
+    assert ID3(final_file, translate=False)["TPUB"].text == ["Nested Track Label"]
+
+
+def test_direct_flac_download_writes_nested_album_label_to_final_file(
+    tmp_path, monkeypatch
+):
+    final_file = _download_real_media(
+        monkeypatch,
+        tmp_path,
+        quality=6,
+        track_meta=_labeled_track_meta(),
+    )
+
+    assert final_file.exists()
+    assert FLAC(final_file)["LABEL"] == ["Nested Track Label"]
+
+
+@pytest.mark.parametrize("quality", [5, 6], ids=["mp3", "flac"])
+def test_direct_download_tolerates_missing_nested_album_label(
+    tmp_path, monkeypatch, quality
+):
+    track_meta = _track_meta()
+
+    final_file = _download_real_media(
+        monkeypatch,
+        tmp_path,
+        quality=quality,
+        track_meta=track_meta,
+    )
+
+    if quality == 5:
+        assert "TPUB" not in ID3(final_file, translate=False)
+    else:
+        assert FLAC(final_file)["LABEL"] == ["n/a"]
+
+
+@pytest.mark.parametrize("quality", [5, 6], ids=["mp3", "flac"])
+def test_album_download_preserves_label_in_final_file(tmp_path, monkeypatch, quality):
+    album_meta = _album_meta(tracks=[_track("track-1", "Opening", 1)])
+    album_meta.pop("goodies")
+
+    final_file = _download_real_media(
+        monkeypatch,
+        tmp_path,
+        quality=quality,
+        album_meta=album_meta,
+        album=True,
+    )
+
+    if quality == 5:
+        assert ID3(final_file, translate=False)["TPUB"].text == ["Label"]
+    else:
+        assert FLAC(final_file)["LABEL"] == ["Label"]
 
 
 def test_download_id_by_type_delegates_to_explicit_methods(monkeypatch, tmp_path):
