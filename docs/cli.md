@@ -87,6 +87,18 @@ Folder and track format patterns may use these keys where available:
 - `tracknumber`
 - `version`
 
+## Final audio filename behavior
+
+`--track-format` produces one final audio filename component. After the existing invalid-character and whitespace cleanup, qobuz-dl keeps an ordinary nonempty name unchanged and appends the audio extension.
+
+If cleanup leaves an empty name or a Windows-reserved first stem, qobuz-dl uses `track-<digest>` plus the original `.flac` or `.mp3` extension. Reserved first stems include `CON`, `PRN`, `AUX`, `NUL`, `COM1` through `COM9`, `LPT1` through `LPT9`, and their recognized superscript variants, with or without another extension. If the complete name is too long, qobuz-dl keeps a whole-character prefix and adds `~<digest>` before the extension. The digest comes from the unmodified formatted name and acts as a deterministic discriminator for repaired and truncated names.
+
+The complete filename, including its extension, stays within the destination filesystem's component-byte limit. qobuz-dl reads that limit from the existing destination directory, including a `Disc N` directory. It uses 255 bytes only when the platform cannot provide a limit. If the required fallback cannot fit, the download fails before writing audio data.
+
+qobuz-dl chooses the final path before checking for an existing file. The same path is used for tagging and is reported by [`DownloadResult.finalized_paths`](module-usage.md#download-results).
+
+This behavior applies only to final audio filename components. It does not repair generated folders or enforce a full-path limit. It also does not prevent collisions caused by general lossy cleanup, an ordinary name that matches a generated repaired name, identical output from a custom format, case folding, Unicode normalization, digest collisions, or concurrent processes that publish the same path. The reserved-name rules are policy checks, not proof on native Windows or macOS. Native platform verification remains tracked in [issue #43](https://github.com/pascalandy/qobuz-dl/issues/43).
+
 ## `fun` examples
 
 ```sh
