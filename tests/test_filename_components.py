@@ -40,12 +40,13 @@ def _track_metadata(track_id, title):
 
 
 class _TrackClient:
-    def __init__(self, track_id, title):
+    def __init__(self, track_id, title, quality=27):
         self.metadata = _track_metadata(track_id, title)
+        self.quality = quality
 
     def get_track_url(self, item_id, fmt_id):
         assert item_id == self.metadata["id"]
-        assert fmt_id == 27
+        assert fmt_id == self.quality
         return {
             "url": f"https://media.example.test/{item_id}.flac",
             "sampling_rate": 96,
@@ -70,6 +71,7 @@ def _install_real_file_boundaries(monkeypatch):
 
     monkeypatch.setattr(downloader.http, "stream_download", fake_stream_download)
     monkeypatch.setattr(downloader.metadata, "tag_flac", fake_tag)
+    monkeypatch.setattr(downloader.metadata, "tag_mp3", fake_tag)
     return temporary_paths
 
 
@@ -93,9 +95,9 @@ def _expected_unicode_component(max_bytes, digest=UNICODE_DIGEST):
 
 def _assert_owned_temporary(path, destination):
     assert path.parent == destination
-    assert path.name.startswith(".qobuz-dl-")
+    assert path.name.startswith(".qdl-")
     assert path.name.endswith(".tmp")
-    token = path.name.removeprefix(".qobuz-dl-").removesuffix(".tmp")
+    token = path.name.removeprefix(".qdl-").removesuffix(".tmp")
     assert len(token) == 32
     int(token, 16)
 
@@ -242,6 +244,54 @@ def test_destination_name_limit_path_errors_propagate(tmp_path, monkeypatch):
         _download(tmp_path, "track-1", "Ordinary title")
 
     assert exc_info.value is path_error
+
+
+@pytest.mark.parametrize(
+    ("quality", "name_max", "extension"),
+    [(5, 42, ".mp3"), (27, 43, ".flac")],
+)
+def test_tight_fallback_limit_allows_owned_temporary_and_stable_final_path(
+    tmp_path, monkeypatch, quality, name_max, extension
+):
+    temporary_paths = _install_real_file_boundaries(monkeypatch)
+    destination = tmp_path / ALBUM_DIRECTORY
+    expected_path = destination / f"track-86ea5b6f5c94b841cbd724807198bde4{extension}"
+    real_open = os.open
+
+    def fake_pathconf(path, name):
+        assert Path(path) == destination
+        assert name == "PC_NAME_MAX"
+        return name_max
+
+    def limit_component_at_open(path, flags, mode=0o777):
+        if len(os.fsencode(Path(path).name)) > name_max:
+            raise OSError(errno.ENAMETOOLONG, "component exceeds name limit", path)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "pathconf", fake_pathconf)
+    monkeypatch.setattr(os, "open", limit_component_at_open)
+    download = Download(
+        _TrackClient("track-tight", "<>", quality),
+        "track-tight",
+        str(tmp_path),
+        quality,
+        no_cover=True,
+        folder_format=ALBUM_DIRECTORY,
+        track_format="{tracktitle}",
+    )
+
+    first = download.download_track()
+    repeated = download.download_track()
+
+    assert first == DownloadResult("finalized", "downloaded", (str(expected_path),))
+    assert repeated == DownloadResult(
+        "finalized", "existing_file", (str(expected_path),)
+    )
+    assert expected_path.read_bytes() == b"audio:track-tight"
+    assert len(temporary_paths) == 1
+    _assert_owned_temporary(temporary_paths[0], destination)
+    assert len(os.fsencode(temporary_paths[0].name)) <= name_max
+    assert not temporary_paths[0].exists()
 
 
 def test_name_limit_smaller_than_complete_fallback_fails_clearly(tmp_path, monkeypatch):
