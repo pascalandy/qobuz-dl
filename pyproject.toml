@@ -47,6 +47,7 @@ qdl = "qobuz_dl:main"
 [dependency-groups]
 dev = [
   "pytest>=8.3.5",
+  "pytest-cov>=7.1,<8",
   "ruff>=0.12.0",
 ]
 

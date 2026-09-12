@@ -59,6 +59,16 @@ just smoke
 just build
 ```
 
+## Measure coverage
+
+Run the ordinary offline test suite with line and branch coverage:
+
+```sh
+just coverage
+```
+
+This optional command prints the current coverage and missing lines for `qobuz_dl`. It does not enforce a minimum or run as part of `just ci` or GitHub Actions.
+
 ## GitHub Actions CI/CD
 
 GitHub Actions runs the CI gate on pushes to `master` or `main` and on pull requests. Pull requests can target non-default branches, so branch-on-branch pull requests receive the same checks. Generated `graphite-base` branches are excluded. Maintainers can also start the workflow manually with `workflow_dispatch`.
