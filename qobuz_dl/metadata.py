@@ -88,9 +88,9 @@ def _build_metadata_payload(d: dict, album: dict, istrack=True):
     except KeyError:
         composer = _MISSING
 
-    flac_label = album.get("label", {}).get("name", "n/a")
+    flac_label = album_data.get("label", {}).get("name", "n/a")
     try:
-        mp3_label = album["label"]["name"]
+        mp3_label = album_data["label"]["name"]
     except KeyError:
         mp3_label = _MISSING
 
