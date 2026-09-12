@@ -15,7 +15,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 
 ## User documentation
 
-- [Installation](installation.md) — requirements, uvx no-install usage, optional persistent install, first run, and reset instructions.
+- [Installation](installation.md): explicit fork source, no-install and persistent usage, reproducible revisions, config persistence, and install verification.
 - [Examples](examples.md) — download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate tracking.
 - [Use cases](use-cases.md) — goal-oriented local-library workflows for account setup, hi-res downloads, discovery, organization, duplicate tracking, and maintenance.
 - [CLI reference](cli.md) — top-level CLI usage and command overview.
@@ -26,7 +26,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 - [Dependencies](dependencies.md) — dependency policy, runtime inventory, usage sites, and update rules.
 - [Development](development.md) — local fork workflow, global CLI separation, `qdl-dev`, and Chezmoi-managed shell config.
 - [Packaging](packaging.md) — Python packaging metadata, dependency locking, build-file ownership, and the release process.
-- [Testing](testing.md) — uv-based linting, formatting, tests, smoke checks, and GitHub Actions CI/CD.
+- [Testing](testing.md): uv-based checks, isolated package tests, opt-in Git install verification, and GitHub Actions CI/CD.
 - [Changelog](../CHANGELOG.md) — notable changes per release.
 - [Contributing](../CONTRIBUTING.md) — setup, workflow, ground rules, and release steps.
 

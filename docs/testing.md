@@ -108,6 +108,32 @@ uv run qobuz-dl lucky --help
 
 This focused check does not prove the built wheel. Run `just ci` for the installed-wheel proof, including isolated imports and the `qobuz-dl` and `qdl` entry points.
 
+## Verify the public Git install
+
+The install verifier checks the same Git source that the public no-install and persistent-install instructions use. This check requires network access and is opt-in:
+
+```sh
+just verify-install
+```
+
+To verify an exact revision, pass a full 40-character hexadecimal commit SHA:
+
+```sh
+just verify-install-revision FULL_40_CHARACTER_COMMIT_SHA
+```
+
+The verifier uses temporary uv cache, tool, bin, managed-Python, work, and temp locations. It disables uv config discovery and preserves `HOME`. It scopes `APPDATA`, `LOCALAPPDATA`, and XDG paths to temporary locations for software that honors them.
+
+The actual qobuz-dl probes are limited to `--help` and `--version`. Startup tests prove that these commands do not initialize or write qobuz-dl config. On POSIX systems, qobuz-dl resolves its config from `HOME/.config`, so the verifier does not claim a temporary POSIX qobuz-dl config directory or isolation for stateful qobuz-dl commands.
+
+The floating check resolves the current fork source, records its full commit SHA from `direct_url.json`, and pins the temporary persistent install to that commit. The revision form also confirms that the source resolves to the requested SHA.
+
+The JSON result records the source URL, resolved commit, package and Python versions, console entry points, runtime requirements, install locations, uv versions, and command outcomes. The verifier requires package version `1.0.0`, the `qobuz-dl` and `qdl` entry points, and `mutagen>=1.47,<2` as the only runtime dependency. It also confirms that both temporary environments report the same Git provenance.
+
+The package version is identity metadata, not revision evidence. The Git URL and resolved commit establish provenance.
+
+`just ci` does not run this verifier. Default local and hosted CI remain offline with respect to the fork installation source and do not depend on GitHub availability.
+
 ## Test boundaries
 
 Default tests must not require:

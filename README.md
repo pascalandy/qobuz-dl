@@ -26,33 +26,33 @@ It is made for people who care about managing their own files: pull a new hi-res
 
 ## Quick start
 
-You'll need an **active Qobuz subscription**. Run with `uvx`; no app install is required:
+You'll need Git, `uv`, and an **active Qobuz subscription**. Run this fork without installing the app:
 
 ```sh
-uvx qobuz-dl
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl
 ```
 
 For a persistent CLI, optionally install the tool and run `qobuz-dl` directly:
 
 ```sh
-uv tool install qobuz-dl
+uv tool install git+https://github.com/pascalandy/qobuz-dl.git
 qobuz-dl
 ```
 
-Use `uv` for user-facing and local project commands. See [Installation](docs/installation.md) for requirements, first-run setup, optional persistent install, and reset instructions.
+See [Installation](docs/installation.md) for source selection, reproducible revisions, first-run setup, reinstall instructions, and the install verifier.
 
 ## Examples
 
 Download an album while requesting the highest hi-res tier the CLI supports:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 27
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 27
 ```
 
 Download an album into a library-friendly folder layout with embedded original-quality artwork:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb \
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb \
   --quality 27 \
   --folder-format "{albumartist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]" \
   --track-format "{tracknumber}. {tracktitle}" \
@@ -63,13 +63,13 @@ uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb \
 Run interactive mode with a limit of 10 results:
 
 ```sh
-uvx qobuz-dl fun -l 10
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun -l 10
 ```
 
 Download the first album result for a search:
 
 ```sh
-uvx qobuz-dl lucky playboi carti die lit
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky playboi carti die lit
 ```
 
 See [Use cases](docs/use-cases.md) for library-building workflows, and [Examples](docs/examples.md) for download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate-tracking behavior.
@@ -77,7 +77,7 @@ See [Use cases](docs/use-cases.md) for library-building workflows, and [Examples
 ## Usage
 
 ```text
-uvx qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
 ```
 
 Commands:
@@ -89,7 +89,7 @@ Commands:
 Run command-level help for detailed options:
 
 ```sh
-uvx qobuz-dl <command> --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --help
 ```
 
 See the [CLI reference](docs/cli.md) for global options and command descriptions.
