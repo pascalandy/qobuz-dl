@@ -4,6 +4,7 @@ import shutil
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -147,9 +148,7 @@ def _install_fixture_download(monkeypatch, *, failing_track=None):
         _description,
         *,
         retry_rate_limited=False,
-        bandwidth_limit=None,
     ):
-        assert bandwidth_limit is None
         shutil.copyfile(FIXTURES / "synthetic-silence.flac", filename)
 
     def rename(filename, _root, final_path, track, *_args):
@@ -453,6 +452,41 @@ def test_unstable_file_is_rejected(tmp_path, monkeypatch):
         is None
     )
     assert _rows(tmp_path / "history.sqlite", "SELECT * FROM artifacts") == []
+
+
+def test_stable_file_accepts_source_specific_ctime_semantics(tmp_path, monkeypatch):
+    media_path = _copy_fixture(tmp_path, "flac")
+    history = DownloadHistory.open(tmp_path / "history.sqlite")
+    real_fstat = db.os.fstat
+    real_lstat = db.os.lstat
+
+    def with_ctime(metadata, ctime_ns):
+        return SimpleNamespace(
+            st_dev=metadata.st_dev,
+            st_ino=metadata.st_ino,
+            st_mode=metadata.st_mode,
+            st_size=metadata.st_size,
+            st_mtime_ns=metadata.st_mtime_ns,
+            st_ctime_ns=ctime_ns,
+        )
+
+    monkeypatch.setattr(
+        db.os,
+        "fstat",
+        lambda descriptor: with_ctime(real_fstat(descriptor), 2_000_000_000),
+    )
+    monkeypatch.setattr(
+        db.os,
+        "lstat",
+        lambda path: with_ctime(real_lstat(path), 1_000_000_000),
+    )
+
+    artifact = history.record_finalized(
+        track_id="track-1", path=media_path, requested_quality=6
+    )
+
+    assert artifact is not None
+    assert artifact.path == os.path.normcase(os.path.abspath(media_path))
 
 
 @pytest.mark.parametrize("kind", ["nonregular", "malformed", "unsupported"])

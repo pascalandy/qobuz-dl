@@ -125,7 +125,7 @@ def _inspect_artifact(
                 _file_snapshot(before) != _file_snapshot(after)
                 or stat.S_ISLNK(path_after.st_mode)
                 or not os.path.samestat(after, path_after)
-                or _file_snapshot(after) != _file_snapshot(path_after)
+                or _file_snapshot(path_before) != _file_snapshot(path_after)
             ):
                 return None
     except (OSError, MutagenError, EOFError, TypeError, ValueError):
