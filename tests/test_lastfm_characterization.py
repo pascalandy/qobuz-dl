@@ -19,7 +19,7 @@ def test_lastfm_playlist_keeps_complete_rows_and_fragment_order(tmp_path, monkey
 
     def fake_search(query, item_type, limit=10, lucky=False):
         queries.append((query, item_type, limit, lucky))
-        return [f"https://play.qobuz.com/track/row-{len(queries)}"]
+        return [f"https://play.qobuz.com/track/row{len(queries)}"]
 
     qdl.search_by_type = fake_search
     qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloads.append(
@@ -36,10 +36,10 @@ def test_lastfm_playlist_keeps_complete_rows_and_fragment_order(tmp_path, monkey
         ("Gamma Artist Third Song", "track", 1, True),
     ]
     assert downloads == [
-        ("row-1", False, playlist_path),
-        ("row-2", False, playlist_path),
-        ("row-3", False, playlist_path),
-        ("row-4", False, playlist_path),
+        ("row1", False, playlist_path),
+        ("row2", False, playlist_path),
+        ("row3", False, playlist_path),
+        ("row4", False, playlist_path),
     ]
 
 
@@ -63,7 +63,7 @@ def test_lastfm_playlist_ignores_valueless_class_attributes(tmp_path, monkeypatc
 
     def fake_search(query, item_type, limit=10, lucky=False):
         queries.append((query, item_type, limit, lucky))
-        return ["https://play.qobuz.com/track/valid-id"]
+        return ["https://play.qobuz.com/track/validid"]
 
     qdl.search_by_type = fake_search
     qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloads.append(
@@ -74,7 +74,7 @@ def test_lastfm_playlist_ignores_valueless_class_attributes(tmp_path, monkeypatc
 
     playlist_path = str(tmp_path / "Valueless Class")
     assert queries == [("Valid Artist Valid Song", "track", 1, True)]
-    assert downloads == [("valid-id", False, playlist_path)]
+    assert downloads == [("validid", False, playlist_path)]
 
 
 @pytest.mark.parametrize(

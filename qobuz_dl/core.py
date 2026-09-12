@@ -44,6 +44,12 @@ class _CollectionDownloadPlan:
     create_m3u: bool = False
 
 
+@dataclass(frozen=True)
+class LastFmTrack:
+    artist: str
+    title: str
+
+
 def _normalize_search_query(query):
     if not isinstance(query, str):
         return ""
@@ -54,47 +60,70 @@ class LastFmPlaylistParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.title = ""
-        self.artists = []
-        self.titles = []
+        self.tracks: list[LastFmTrack] = []
+        self._artist_fragments: list[str] | None = None
+        self._title_fragments: list[str] | None = None
+        self._cell = None
         self._capture = None
+        self._anchor_seen = False
         self._in_h1 = False
 
     def handle_starttag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        classes = attrs_dict.get("class", "").split()
-        if tag == "h1":
+        if tag == "tr":
+            self._reset_row(active=True)
+        elif tag == "h1":
             self._in_h1 = True
-            self._capture = "h1"
-        elif tag == "td" and "chartlist-artist" in classes:
-            self._capture = "artist-container"
-        elif tag == "td" and "chartlist-name" in classes:
-            self._capture = "title-container"
-        elif tag == "a" and self._capture == "artist-container":
-            self._capture = "artist"
-        elif tag == "a" and self._capture == "title-container":
-            self._capture = "track"
+        elif tag == "td":
+            self._clear_cell()
+            if self._artist_fragments is None:
+                return
+            attrs_dict = dict(attrs)
+            classes = (attrs_dict.get("class") or "").split()
+            if "chartlist-artist" in classes:
+                self._cell = "artist"
+            elif "chartlist-name" in classes:
+                self._cell = "title"
+        elif tag == "a" and self._cell is not None and not self._anchor_seen:
+            self._capture = self._cell
+            self._anchor_seen = True
 
     def handle_endtag(self, tag):
-        if tag == "h1" and self._in_h1:
+        if tag == "tr":
+            self._finish_row()
+        elif tag == "h1" and self._in_h1:
             self._in_h1 = False
-            self._capture = None
-        elif tag == "td" and self._capture in {"artist-container", "artist"}:
-            self._capture = None
-        elif tag == "td" and self._capture in {"title-container", "track"}:
-            self._capture = None
-        elif tag == "a" and self._capture in {"artist", "track"}:
+        elif tag == "td":
+            self._clear_cell()
+        elif tag == "a" and self._capture is not None:
             self._capture = None
 
     def handle_data(self, data):
-        text = data.strip()
-        if not text:
-            return
-        if self._capture == "h1" and not self.title:
-            self.title = text
+        if self._in_h1 and not self.title:
+            text = data.strip()
+            if text:
+                self.title = text
         elif self._capture == "artist":
-            self.artists.append(text)
-        elif self._capture == "track":
-            self.titles.append(text)
+            self._artist_fragments.append(data)
+        elif self._capture == "title":
+            self._title_fragments.append(data)
+
+    def _clear_cell(self):
+        self._cell = None
+        self._capture = None
+        self._anchor_seen = False
+
+    def _reset_row(self, *, active):
+        self._clear_cell()
+        self._artist_fragments = [] if active else None
+        self._title_fragments = [] if active else None
+
+    def _finish_row(self):
+        if self._artist_fragments is not None:
+            artist = " ".join("".join(self._artist_fragments).split())
+            title = " ".join("".join(self._title_fragments).split())
+            if artist and title:
+                self.tracks.append(LastFmTrack(artist=artist, title=title))
+        self._reset_row(active=False)
 
 
 def _select_one(options, prompt, *, label=str, default_index=None):
@@ -518,26 +547,19 @@ class QobuzDL:
             return
         parser = LastFmPlaylistParser()
         parser.feed(html)
-        artists = parser.artists
-        titles = parser.titles
 
-        track_list = []
-        if len(artists) == len(titles) and artists:
-            track_list = [
-                artist + " " + title for artist, title in zip(artists, titles)
-            ]
-
-        if not track_list:
+        if not parser.tracks:
             logger.info(f"{OFF}Nothing found")
             return
 
         pl_title = sanitize_filename(parser.title)
         pl_directory = os.path.join(self.directory, pl_title)
         logger.info(
-            f"{YELLOW}Downloading playlist: {pl_title} ({len(track_list)} tracks)"
+            f"{YELLOW}Downloading playlist: {pl_title} ({len(parser.tracks)} tracks)"
         )
 
-        for query in track_list:
+        for track in parser.tracks:
+            query = f"{track.artist} {track.title}"
             results = self.search_by_type(query, "track", 1, lucky=True)
             if not results:
                 logger.info(f'{OFF}No Qobuz match for "{query}". Skipping')
