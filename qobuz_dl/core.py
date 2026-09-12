@@ -6,7 +6,7 @@ from html.parser import HTMLParser
 from qobuz_dl import downloader, http, qopy
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import CYAN, OFF, RED, RESET, YELLOW
-from qobuz_dl.db import create_db, handle_download_id
+from qobuz_dl.db import DownloadHistory
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.sanitize import sanitize_filename
 from qobuz_dl.utils import (
@@ -221,7 +221,7 @@ class QobuzDL:
         self.quality_fallback = quality_fallback
         self.cover_og_quality = cover_og_quality
         self.no_cover = no_cover
-        self.downloads_db = create_db(downloads_db) if downloads_db else None
+        self.download_history = DownloadHistory.open(downloads_db)
         self.folder_format = folder_format
         self.track_format = track_format
         self.smart_discography = smart_discography
@@ -229,6 +229,10 @@ class QobuzDL:
     def initialize_client(self, email, pwd, app_id, secrets):
         self.client = qopy.Client(email, pwd, app_id, secrets)
         logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}\n")
+
+    @property
+    def downloads_db(self):
+        return self.download_history.path
 
     def get_tokens(self):
         bundle = Bundle()
@@ -238,7 +242,7 @@ class QobuzDL:
         ]  # avoid empty fields
 
     def download_from_id(self, item_id, album=True, alt_path=None):
-        if handle_download_id(self.downloads_db, item_id, add_id=False):
+        if self.download_history.contains_legacy_id(item_id):
             logger.info(
                 f"{OFF}This release ID ({item_id}) was already downloaded "
                 "according to the local database.\nUse the '--no-db' flag "
@@ -257,7 +261,7 @@ class QobuzDL:
             result = downloader.DownloadResult("failed", "not_streamable")
 
         if result.state == "finalized":
-            handle_download_id(self.downloads_db, item_id, add_id=True)
+            self.download_history.record_legacy_id(item_id)
         return result
 
     def _new_downloader(self, item_id, alt_path=None):
@@ -273,6 +277,7 @@ class QobuzDL:
             self.no_cover,
             self.folder_format,
             self.track_format,
+            download_history=self.download_history,
         )
 
     def _resolve_url_download_plan(self, url):

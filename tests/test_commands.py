@@ -999,7 +999,10 @@ def test_purge_only_removes_database_and_exits_successfully(
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
     database_file = config_path / "qobuz_dl.db"
+    media_file = tmp_path / "music" / "kept.flac"
     _write_valid_config(config_file)
+    media_file.parent.mkdir()
+    media_file.write_bytes(b"local media")
     if database_exists:
         database_file.write_text("local duplicate tracking state")
 
@@ -1015,6 +1018,7 @@ def test_purge_only_removes_database_and_exits_successfully(
 
     assert result is None
     assert not database_file.exists()
+    assert media_file.read_bytes() == b"local media"
     assert caplog.messages == [f"{GREEN}{message}{RESET}"]
 
 

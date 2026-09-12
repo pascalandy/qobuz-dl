@@ -8,6 +8,7 @@ from typing import Literal, Tuple
 import qobuz_dl.http as http
 import qobuz_dl.metadata as metadata
 from qobuz_dl.color import CYAN, GREEN, OFF, RED, YELLOW
+from qobuz_dl.db import DownloadHistory
 from qobuz_dl.sanitize import filename_component, sanitize_filename, sanitize_filepath
 
 QL_DOWNGRADE = "FormatRestrictedByFormatAvailability"
@@ -122,6 +123,7 @@ class Download:
         no_cover: bool = False,
         folder_format=None,
         track_format=None,
+        download_history: DownloadHistory | None = None,
     ):
         validate_cover_options(embed_art, no_cover)
         self.client = client
@@ -135,6 +137,7 @@ class Download:
         self.no_cover = no_cover
         self.folder_format = folder_format or DEFAULT_FOLDER
         self.track_format = track_format or DEFAULT_TRACK
+        self.download_history = download_history
 
     def download_id_by_type(self, track=True):
         if track:
@@ -410,6 +413,12 @@ class Download:
             if not os.path.isfile(final_file):
                 logger.error(f"{RED}Error tagging the file: no final file produced")
                 return DownloadResult("failed", "tagging_error")
+            if self.download_history is not None:
+                self.download_history.record_finalized(
+                    track_id=track_metadata["id"],
+                    path=final_file,
+                    requested_quality=int(self.quality),
+                )
             return DownloadResult("finalized", "downloaded", (final_file,))
         finally:
             try:
