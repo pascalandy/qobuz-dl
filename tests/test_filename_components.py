@@ -61,7 +61,9 @@ class _TrackClient:
 def _install_real_file_boundaries(monkeypatch):
     temporary_paths = []
 
-    def fake_stream_download(url, target_path, *, progress=None):
+    def fake_stream_download(
+        url, target_path, *, progress=None, retry_rate_limited=False
+    ):
         temporary_path = Path(target_path)
         temporary_paths.append(temporary_path)
         temporary_path.write_bytes(f"audio:{Path(url).stem}".encode())

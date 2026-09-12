@@ -385,7 +385,12 @@ class Download:
         )
         try:
             os.close(descriptor)
-            download_with_progress(url, filename, filename)
+            download_with_progress(
+                url,
+                filename,
+                filename,
+                retry_rate_limited=True,
+            )
             tag_function = metadata.tag_mp3 if preparation.is_mp3 else metadata.tag_flac
             try:
                 tag_function(
@@ -499,7 +504,7 @@ class Download:
             return ("Unknown", quality_met, None, None)
 
 
-def download_with_progress(url, fname, desc):
+def download_with_progress(url, fname, desc, *, retry_rate_limited=False):
     """Stream ``url`` to ``fname``, logging throttled progress updates."""
     next_report = PROGRESS_MIN_INTERVAL_BYTES
 
@@ -514,7 +519,12 @@ def download_with_progress(url, fname, desc):
                 next_report += report_interval
 
     try:
-        http.stream_download(url, fname, progress=show_progress)
+        http.stream_download(
+            url,
+            fname,
+            progress=show_progress,
+            retry_rate_limited=retry_rate_limited,
+        )
     except BaseException:
         try:
             os.remove(fname)

@@ -149,7 +149,7 @@ def test_rfc850_two_digit_year_uses_the_fifty_year_rule():
         response(body=b'{"should_not": "run"}'),
     )
 
-    with pytest.raises(HttpRateLimitError, match="API rate limit retry budget"):
+    with pytest.raises(HttpRateLimitError, match="Qobuz rate limit retry budget"):
         run_with_clock(operation, clock)
 
     assert operation.calls == 1
@@ -235,7 +235,7 @@ def test_retry_wait_above_remaining_budget_stops_without_another_request():
         response(body=b'{"should_not": "run"}'),
     )
 
-    with pytest.raises(HttpRateLimitError, match="API rate limit retry budget"):
+    with pytest.raises(HttpRateLimitError, match="Qobuz rate limit retry budget"):
         run_with_clock(operation, clock)
 
     assert operation.calls == 2
@@ -289,7 +289,7 @@ def test_three_rate_limited_responses_raise_a_sanitized_error():
     with pytest.raises(HttpRateLimitError) as exc_info:
         run_with_clock(operation, clock)
 
-    assert str(exc_info.value) == "Qobuz API rate limit retry attempts exhausted."
+    assert str(exc_info.value) == "Qobuz rate limit retry attempts exhausted."
     assert sentinel not in str(exc_info.value)
     assert operation.calls == 3
     assert clock.sleeps == [1, 2]

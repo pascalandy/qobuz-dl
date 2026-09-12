@@ -1,5 +1,4 @@
 import os
-from inspect import signature
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -95,9 +94,7 @@ def _install_urlopen_sequence(monkeypatch, outcomes):
 
 
 def _stream_media(url, target, **kwargs):
-    if "retry_rate_limited" in signature(http.stream_download).parameters:
-        kwargs["retry_rate_limited"] = True
-    return http.stream_download(url, target, **kwargs)
+    return http.stream_download(url, target, retry_rate_limited=True, **kwargs)
 
 
 def _track(track_id="track-1", title="Single Track", track_number=1):
@@ -460,8 +457,13 @@ def test_media_retry_cancellation_leaves_no_final_or_temporary_file(
     tmp_path, monkeypatch
 ):
     rejected, resource = _returned_429()
-    interrupt = KeyboardInterrupt("retry cancelled")
-    requests, remaining = _install_urlopen_sequence(monkeypatch, [rejected, interrupt])
+    requests, remaining = _install_urlopen_sequence(monkeypatch, [rejected])
+
+    def cancel_wait(seconds):
+        assert seconds == 0
+        raise KeyboardInterrupt("retry cancelled")
+
+    monkeypatch.setattr(http.time, "sleep", cancel_wait)
     database = tmp_path / "downloads.sqlite"
     qdl = QobuzDL(
         directory=tmp_path / "music",
@@ -475,7 +477,7 @@ def test_media_retry_cancellation_leaves_no_final_or_temporary_file(
         qdl.download_from_id("track-1", album=False)
 
     directory = _track_directory(tmp_path / "music")
-    assert len(requests) == 2
+    assert len(requests) == 1
     assert remaining == []
     assert not list(directory.glob(".*.tmp"))
     assert not list(directory.glob("*.flac"))
@@ -497,6 +499,7 @@ def test_media_acquisition_failure_preserves_a_preexisting_direct_target(
         _stream_media("https://media.example.test/track.flac", target)
 
     assert exc_info.type.__name__ == "HttpRateLimitError"
+    assert isinstance(exc_info.value, http.HttpRequestError)
     assert "media.example.test" not in str(exc_info.value)
     assert target.read_bytes() == b"existing complete bytes"
     assert len(requests) == 3

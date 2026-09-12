@@ -93,7 +93,9 @@ def _install_file_boundaries(monkeypatch, *, tagging_fails=None):
     transferred = []
     tagging_fails = tagging_fails if tagging_fails is not None else set()
 
-    def fake_stream_download(url, target_path, *, progress=None):
+    def fake_stream_download(
+        url, target_path, *, progress=None, retry_rate_limited=False
+    ):
         track_id = Path(url).stem
         transferred.append(track_id)
         Path(target_path).write_bytes(f"audio:{track_id}".encode())
@@ -278,7 +280,9 @@ def test_partial_album_request_failure_retains_paths_and_stops(
     client.get_track_url = failing_track_url
     if failure_point == "media_stream":
 
-        def failing_stream(url, target_path, *, progress=None):
+        def failing_stream(
+            url, target_path, *, progress=None, retry_rate_limited=False
+        ):
             track_id = Path(url).stem
             transferred.append(track_id)
             Path(target_path).write_bytes(f"audio:{track_id}".encode())
