@@ -29,11 +29,25 @@ just sync
 
 ## Quality checks
 
-Run the full local gate:
+`just ci` is the canonical full gate. It runs `uv run --frozen python scripts/check.py`, the same repository check that GitHub Actions uses.
+
+Run it locally:
 
 ```sh
 just ci
 ```
+
+The runner performs these checks in order:
+
+1. Check Ruff formatting.
+2. Run Ruff linting.
+3. Run the pytest suite.
+4. From the checkout, run `qobuz-dl --help`, `qobuz-dl --version`, `qobuz-dl dl --help`, `qobuz-dl fun --help`, `qobuz-dl lucky --help`, `qdl --help`, and `qdl --version`.
+5. Build exactly one wheel and one source distribution in a temporary directory.
+6. Create a temporary virtual environment and install the exact wheel by its absolute path.
+7. From an empty directory outside the checkout, verify that `qobuz_dl` imports from the temporary environment.
+8. Repeat the seven CLI probes with the installed `qobuz-dl` and `qdl` entry points. Both version commands must print the exact package version.
+9. Print the verified wheel's SHA-256 digest and copy the verified wheel and source distribution to `dist/`.
 
 Run individual checks:
 
@@ -47,9 +61,9 @@ just build
 
 ## GitHub Actions CI/CD
 
-GitHub Actions runs the CI gate on pushes and pull requests to `master`/`main`. Maintainers can also start the workflow manually with `workflow_dispatch`.
+GitHub Actions runs the CI gate on pushes to `master` or `main` and on pull requests. Pull requests can target non-default branches, so branch-on-branch pull requests receive the same checks. Generated `graphite-base` branches are excluded. Maintainers can also start the workflow manually with `workflow_dispatch`.
 
-The CI matrix runs on Python 3.10, the minimum supported runtime, and Python 3.13, the latest target currently used by the project. Each matrix job installs dependencies with `uv sync --dev --frozen`, then runs formatting, linting, tests, CLI smoke checks (`--help` and `--version` for the top-level command and each subcommand), and the package build.
+The CI matrix runs the full `scripts/check.py` gate on Python 3.10, the minimum supported runtime, and Python 3.13, the latest project target. Each matrix job installs dependencies with `uv sync --dev --frozen` before it starts the runner.
 
 The workflow uses read-only repository permissions. The Python 3.13 job uploads the built `dist/` files as the `qobuz-dl-dist` artifact for release/download inspection.
 
@@ -69,15 +83,15 @@ just lint-fix
 
 ## Build testing
 
-The build check verifies that the source distribution and wheel can be built from `pyproject.toml`:
+The focused build command verifies that the source distribution and wheel can be built from `pyproject.toml`:
 
 ```sh
 just build
 ```
 
-## Smoke testing
+## Focused source smoke testing
 
-The smoke test verifies that the installed CLI starts and exposes help for each command:
+The focused smoke command checks the source environment. It verifies that `qobuz-dl` starts and exposes help for each subcommand:
 
 ```sh
 just smoke
@@ -91,6 +105,8 @@ uv run qobuz-dl dl --help
 uv run qobuz-dl fun --help
 uv run qobuz-dl lucky --help
 ```
+
+This focused check does not prove the built wheel. Run `just ci` for the installed-wheel proof, including isolated imports and the `qobuz-dl` and `qdl` entry points.
 
 ## Test boundaries
 
@@ -110,7 +126,7 @@ Small readable static fixtures live under `tests/fixtures/`. Characterization te
 
 HTTP-adjacent tests should prefer local fake response/session classes that implement only the behavior under test, such as `json()`, `raise_for_status()`, `headers`, `read()`, or context-manager entry and exit. Interactive tests should use built-in prompt/input fakes instead of requiring a real terminal or manual input.
 
-The CI and local `just ci` gate also build the package. This catches packaging metadata errors that import and CLI tests can miss.
+The CI and local `just ci` gate build and install the exact wheel before testing its imports and entry points. This catches packaging metadata errors that source checks can miss.
 
 ## Good next tests
 
