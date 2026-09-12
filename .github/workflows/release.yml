@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
 
@@ -33,10 +33,7 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Quality gates
-        run: |
-          uv run ruff format --check .
-          uv run ruff check .
-          uv run pytest
+        run: uv run --frozen python scripts/check.py
 
       - name: Verify tag matches package version
         run: |
@@ -47,11 +44,8 @@ jobs:
             exit 1
           fi
 
-      - name: Build package
-        run: uv build
-
       - name: Upload package artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qobuz-dl-dist
           path: dist/*
@@ -68,7 +62,7 @@ jobs:
 
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: qobuz-dl-dist
           path: dist

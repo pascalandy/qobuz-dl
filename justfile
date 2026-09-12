@@ -42,14 +42,7 @@ smoke:
 
 # Run all local quality gates
 check:
-    uv run ruff format --check .
-    uv run ruff check .
-    uv run pytest
-    uv run qobuz-dl --help
-    uv run qobuz-dl dl --help
-    uv run qobuz-dl fun --help
-    uv run qobuz-dl lucky --help
-    uv build
+    uv run --frozen python scripts/check.py
 
 # Alias for CI
 ci: check
