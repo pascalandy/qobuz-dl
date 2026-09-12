@@ -1,5 +1,7 @@
 # Dependency Hardening Vision
 
+> Historical plan, 26 May 2026. Commit [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08) implemented this dependency-hardening program. Unchecked planning items below remain part of the original record. They are not active work. See [Dependencies](../../dependencies.md) for the current policy and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for active work.
+
 ## Request / Decision
 
 Move `qobuz-dl` toward a smaller, safer dependency surface because the upstream project is not maintained and unbounded dependency updates can break compatibility or introduce vulnerabilities.
@@ -224,15 +226,6 @@ Not in scope for the first dependency-hardening cycle:
 - **HTTP subtlety:** `requests` replacement must preserve timeout, redirect, streaming, header, params, JSON, and error behavior that the current code assumes.
 - **Licensing/provenance:** any vendored code must preserve licenses and record modifications.
 
-## Recommended Next Phase
+## Current routing
 
-`pa-plan-slicer` should convert this vision into small implementation slices.
-
-Recommended first implementation slice:
-
-1. Add/update dependency policy documentation.
-2. Change Python support from `>=3.8` to `>=3.10` across metadata, CI, and docs.
-3. Update lockfile with `uv`.
-4. Run `just ci`.
-
-Then continue with separate slices for characterization tests, low-risk removals, optional feature simplification, HTTP replacement, and retained `mutagen` audit policy.
+The planned phases are complete in [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08). Use [Dependencies](../../dependencies.md) for current policy and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for remaining work.

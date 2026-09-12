@@ -24,7 +24,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 ## Maintainer documentation
 
 - [Dependencies](dependencies.md) — dependency policy, runtime inventory, usage sites, and update rules.
-- [Development](development.md) — local fork workflow, global CLI separation, `qdl-dev`, and Chezmoi-managed shell config.
+- [Development](development.md) covers the reusable local workflow, global CLI separation, and Pascal's optional `qdl-dev` setup.
 - [Packaging](packaging.md) — Python packaging metadata, dependency locking, build-file ownership, and the release process.
 - [Testing](testing.md): uv-based checks, isolated package tests, opt-in Git install and live Qobuz verification, and GitHub Actions CI/CD.
 - [Changelog](../CHANGELOG.md) — notable changes per release.
@@ -45,4 +45,4 @@ Source in the named checkout owns current behavior. Feature documents label futu
 - [Authentication credential and transport evidence](research/authentication-transport.md). Local credential representations, current request placement, dated public-client observations, and server-contract limits.
 - [Qobuz official API and SDK research](research/qobuz-official-api.md) — official-source findings, missing developer docs, community substitutes, endpoint confidence, and gaps.
 - [go-qobuz unofficial client reference](research/go-qobuz-reference.md) — notes on the Go implementation's auth flow, endpoint surface, signing behavior, and future-use boundaries.
-- [Local project capability map](research/local-project-capabilities.md) — current CLI/API coverage, auth behavior, tests/docs constraints, and likely integration points.
+- [Local project capability map](research/local-project-capabilities.md) is the 26 May 2026 project snapshot with dated corrections and current-source anchors.

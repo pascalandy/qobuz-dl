@@ -2,9 +2,11 @@
 
 ## Status and current owners
 
-This is the historical roadmap for the completed May 2026 dependency-hardening cycle. Its phase plans and unchecked planning boxes preserve the original execution design; they are not a current task queue. The checkout now uses Python 3.10 or newer and retains only `mutagen` as a runtime dependency.
+This historical roadmap dates from 26 May 2026 and records the completed dependency-hardening cycle.
 
-[Dependencies](../../dependencies.md) owns current policy. [Architecture](../../architecture.md) owns the current module and execution map. The [agent operation design](../2026-09-12-agent-ergonomics/design-agent-ergonomics.md) builds on these boundaries without reopening the dependency removals or introducing a new runtime framework. Read the remaining sections as the pre-migration design.
+Commit [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08) implemented this architecture. Its phase plans and unchecked planning boxes preserve the original execution design. They are not a current task queue. The checkout now uses Python 3.10 or newer and retains only `mutagen` as a runtime dependency.
+
+[Dependencies](../../dependencies.md) owns current policy. [Architecture](../../architecture.md) owns the current module and execution map. [Issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) owns active work. The [agent operation design](../2026-09-12-agent-ergonomics/design-agent-ergonomics.md) is a proposed contract that builds on these boundaries without reopening the dependency removals or introducing a new runtime framework. Read the remaining sections as the pre-migration design.
 
 Historical execution plans remain beside this roadmap:
 
@@ -227,8 +229,6 @@ Relevant stress-test lenses:
 - Approve the HTTP boundary shape before removing `requests`.
 - Reconfirm that `mutagen` remains pinned/audited rather than forked after the rest of the dependency surface is reduced.
 
-## Recommended Next Phase
+## Current routing
 
-Run `pa-plan-slicer` against Phase 1 first.
-
-The first implementation plan should stay narrow: policy documentation, Python `>=3.10` alignment, CI/doc/metadata updates, lockfile refresh, and `just ci`. Later phases should be sliced one dependency or boundary at a time.
+The architecture has been implemented in [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08). Use [Dependencies](../../dependencies.md) for the maintained design and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for remaining work.

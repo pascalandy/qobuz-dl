@@ -1,5 +1,7 @@
 # Dependency Hardening Phase 1 Scope Pass
 
+> Historical scope record, 26 May 2026. Commit [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08) completed Phase 1. The status below records the pre-implementation inspection. It is not active work. See [Dependencies](../../docs/dependencies.md) for the current policy and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for active work.
+
 ## Current status vs Phase 1 plan
 
 - Phase 1 is planned but not implemented yet.
@@ -21,7 +23,7 @@ Current non-SDLC stale references to update:
 - `.github/workflows/ci.yml:21` — matrix includes `"3.8"`.
 - `AGENTS.md:37` — CI described as Python `3.8` and `3.13`.
 - `AGENTS.md:42-43` — instructs Python 3.8 compatibility verification.
-- `AGENTS.md:68` — setuptools range described as Python 3.8-compatible.
+- `AGENTS.md` — the historical setuptools range note no longer exists in the current instructions.
 - `docs/installation.md:6` — Python 3.8 or newer.
 - `docs/packaging.md:10` — license metadata accepted for Python 3.8 builds.
 - `uv.lock:3` — `requires-python = ">=3.8"` plus Python 3.8/3.9 resolution markers and wheels.

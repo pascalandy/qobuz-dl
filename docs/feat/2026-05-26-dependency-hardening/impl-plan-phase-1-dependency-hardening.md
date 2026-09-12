@@ -1,13 +1,15 @@
 # Implementation Plan: Dependency Hardening Phase 1
 
+> Historical plan, 26 May 2026. Commit [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08) completed this phase. Unchecked boxes below preserve the original plan. They are not active work. See [Dependencies](../../dependencies.md) and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for current state.
+
 ## Overview
 
 Implement Phase 1 of dependency hardening: create the dependency policy baseline and modernize the project runtime target to Python `>=3.10`. This slice does not remove runtime dependencies yet. It makes the project metadata, CI, lockfile, docs, and maintainer instructions agree before later dependency replacement work begins.
 
 ## Source Inputs
 
-- `docs/sdlc/2026-05-26-dependency-hardening/vision-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/architecture-dependency-hardening.md`
+- [Dependency hardening vision](vision-dependency-hardening.md)
+- [Dependency hardening architecture](architecture-dependency-hardening.md)
 - Current `pyproject.toml`
 - Current `.github/workflows/ci.yml`
 - Current dependency docs under `docs/`
@@ -211,6 +213,6 @@ Implement Phase 1 of dependency hardening: create the dependency policy baseline
 
 - None blocking for Phase 1. The user has already accepted Python `>=3.10` and retaining `mutagen` as pinned/audited.
 
-## Recommended Next Phase
+## Current routing
 
-`pa-tdd` for Task 1 first, then continue through Tasks 2–5 sequentially. Do not parallelize Tasks 2–5 because metadata, CI, docs, and lockfile changes depend on the same Python baseline contract.
+This phase is complete in [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08). Use [Dependencies](../../dependencies.md) for current policy and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for remaining work.

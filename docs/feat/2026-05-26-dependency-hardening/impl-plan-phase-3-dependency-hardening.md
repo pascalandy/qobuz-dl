@@ -1,5 +1,7 @@
 # Implementation Plan: Dependency Hardening Phase 3
 
+> Historical plan, 26 May 2026. Commit [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08) completed this phase. Unchecked boxes below preserve the original plan. They are not active work. See [Dependencies](../../dependencies.md) and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for current state.
+
 ## Overview
 
 Implement Phase 3 of dependency hardening: remove the low-risk utility dependencies whose used behavior is small enough for this project to own directly.
@@ -14,10 +16,10 @@ This phase should not change the downloader's core behavior. It should replace e
 
 ## Source Inputs
 
-- `docs/sdlc/2026-05-26-dependency-hardening/vision-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/architecture-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/impl-plan-phase-2-dependency-hardening.md`
-- `docs/dependencies.md`
+- [Dependency hardening vision](vision-dependency-hardening.md)
+- [Dependency hardening architecture](architecture-dependency-hardening.md)
+- [Phase 2 plan](impl-plan-phase-2-dependency-hardening.md)
+- [Dependencies](../../dependencies.md)
 - Phase 2 characterization tests under `tests/`
 - Current implementation in `qobuz_dl/color.py`, `qobuz_dl/core.py`, and `qobuz_dl/downloader.py`
 - Current dependency declarations in `pyproject.toml`, `requirements.txt`, and `uv.lock`
@@ -307,6 +309,6 @@ This phase should not change the downloader's core behavior. It should replace e
 - None blocking if Phase 2 characterization tests exist and pass.
 - If Phase 2 tests are incomplete, the blocker is not a Phase 3 design question; finish the missing tests first.
 
-## Recommended Next Phase
+## Current routing
 
-`pa-tdd` for Task 1 first. Continue one dependency at a time: `colorama`, then `pathvalidate`, then `tqdm`. After Phase 3 passes `just ci` and `pa-code-review`, create a new `pa-plan-slicer` plan for Phase 4: secondary feature simplification around `pick` and `beautifulsoup4`.
+This phase is complete in [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08). Use [Dependencies](../../dependencies.md) for current policy and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for remaining work.
