@@ -1,5 +1,11 @@
 # Vision: Qobuz API direction
 
+## Relationship to agent operation
+
+This May 2026 direction remains a constraint on the [agent operation design](../2026-09-12-agent-ergonomics/design-agent-ergonomics.md). Improve inspection, bounded catalog selection, and download evidence within the downloader mission. Broader favorites, purchases, or user-playlist sources remain separate work and must use those same contracts if added.
+
+The [current architecture](../../architecture.md) describes the local runtime at its named revision. The provider observations below are dated research, not fresh endpoint verification. Current client construction authenticates and tests a file-signing secret through `track/getFileUrl`. A future catalog-only command must separate that effect before claiming it only reads catalog metadata. The [implementation plan](../2026-09-12-agent-ergonomics/impl-plan-agent-ergonomics.md) maps the existing auth, access, and diagnostics work.
+
 ## Request / decision
 
 Decide whether this fork should evolve from a Qobuz downloader into a broader Qobuz API/SDK client, and define the safest direction before planning implementation.

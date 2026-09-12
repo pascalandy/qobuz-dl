@@ -1,5 +1,13 @@
 # Bandwidth Limit Vision
 
+## Relationship to agent operation
+
+This June 2026 vision supplies the network-policy boundary for the [agent operation design](../2026-09-12-agent-ergonomics/design-agent-ergonomics.md). Media byte pacing and API/media retries remain separate controls. Keep transfers sequential, default pacing disabled, and network policy inside `qobuz_dl/http.py`.
+
+At the baseline recorded in the [implementation plan](../2026-09-12-agent-ergonomics/impl-plan-agent-ergonomics.md), retries are proposed in [PR #73](https://github.com/pascalandy/qobuz-dl/pull/73) and [PR #74](https://github.com/pascalandy/qobuz-dl/pull/74). Issues [#50](https://github.com/pascalandy/qobuz-dl/issues/50) and [#51](https://github.com/pascalandy/qobuz-dl/issues/51) own the pacing decision and implementation. Refresh those owners before choosing option names or units. Pacing does not depend on retry delivery.
+
+An agent result must distinguish bytes transferred, time spent honoring provider delays, and an applied local byte cap. A whole-run deadline includes retry waits. If a provider delay exceeds the remaining budget, stop with an explicit outcome instead of retrying early. The historical evidence and recommendations below do not establish an official Qobuz throughput limit.
+
 ## Request Or Decision
 
 Decide whether `qobuz-dl` should add bandwidth limiting or other polite download controls so the CLI does not consume unbounded Qobuz/media bandwidth and behaves more responsibly during large downloads.

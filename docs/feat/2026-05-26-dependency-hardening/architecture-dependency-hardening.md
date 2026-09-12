@@ -1,5 +1,20 @@
 # Dependency Hardening Architecture
 
+## Status and current owners
+
+This is the historical roadmap for the completed May 2026 dependency-hardening cycle. Its phase plans and unchecked planning boxes preserve the original execution design; they are not a current task queue. The checkout now uses Python 3.10 or newer and retains only `mutagen` as a runtime dependency.
+
+[Dependencies](../../dependencies.md) owns current policy. [Architecture](../../architecture.md) owns the current module and execution map. The [agent operation design](../2026-09-12-agent-ergonomics/design-agent-ergonomics.md) builds on these boundaries without reopening the dependency removals or introducing a new runtime framework. Read the remaining sections as the pre-migration design.
+
+Historical execution plans remain beside this roadmap:
+
+- [Phase 1](impl-plan-phase-1-dependency-hardening.md)
+- [Phase 2](impl-plan-phase-2-dependency-hardening.md)
+- [Phase 3](impl-plan-phase-3-dependency-hardening.md)
+- [Phases 4 through 6](impl-plan-phases-4-6-dependency-hardening.md)
+
+Their original `docs/sdlc/` source references predate the move to `docs/feat/`. Use the current owners above for new implementation work.
+
 ## Request Or Framing Goal
 
 Design the macro execution roadmap for hardening `qobuz-dl` dependencies after the direction has been settled in `vision-dependency-hardening.md`.

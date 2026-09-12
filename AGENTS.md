@@ -1,10 +1,4 @@
-# AGENTS.md — qobuz-dl fork
-
-Local fork:
-
-```text
-/Users/andy16/Documents/github_local/qobuz-dl
-```
+# AGENTS.md: qobuz-dl fork
 
 ## Agent operating contract
 
@@ -12,17 +6,24 @@ Local fork:
 - Use `uv` by default for Python/project cmds
 - Do not doc/default to `pip`, `pip3`, bare `python`/`python3` outside `uv`
 - Run local entry pts via `uv run ...`, esp. `uv run qobuz-dl ...`
-- Global/prod CLI may exist at `/Users/andy16/.local/bin/qobuz-dl`; do not confuse w/ checkout
+- A globally installed CLI can differ from this checkout; verify imported source before testing behavior
 - Before finishing impl/tooling/packaging/docs changes, run `just ci` unless blocked
 
 ## Local development pointers
 
 Canonical details: [`docs/development.md`](docs/development.md)
 
-- Local fork cmd: `uv run qobuz-dl ...`
-- Optional shell alias: `qdl-dev`
-- `qdl-dev` alias + shell config are Chezmoi-managed
-- Do not edit `~/.zshrc` directly; edit `/Users/andy16/.local/share/chezmoi/dot_zshrc` if shell config changes needed
+- Use the current worktree, not a hard-coded machine path or the `qdl-dev` alias that changes directories
+- Shell aliases are Chezmoi-managed; follow the source paths in the development guide instead of editing applied shell config
+
+## Find the owner before changing behavior
+
+- For cross-module work, read [Architecture](docs/architecture.md) for data flow, side effects, failure semantics, and the owner/test map
+- For automation contracts, read the [agent operation design](docs/feat/2026-09-12-agent-ergonomics/design-agent-ergonomics.md) and its linked implementation plan; proposed commands are not available until implemented
+- For current work, query [epic #20](https://github.com/pascalandy/qobuz-dl/issues/20) and open PRs with `gh`; verify base/head commits and distinguish accepted policy, open implementation, and code in this checkout
+- Keep discoveries in their owning test or canonical document; use GitHub for live work status and dated artifacts for historical evidence
+- Default investigation to help, source, and offline fixtures; bare startup and `--show-config` can initialize missing config, while `QobuzDL` construction creates output/state
+- Independent experiments use separate temporary state and output paths through test fixtures; the current CLI has no `--state-dir` flag and concurrent library writers are not supported
 
 ## Testing and quality rules
 

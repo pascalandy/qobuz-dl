@@ -2,6 +2,17 @@
 
 Project documentation lives here when it is too detailed for the README.
 
+## Start with the question
+
+| Question | Read next |
+| --- | --- |
+| How does the checked-out system work, and where should a change go? | [Architecture](architecture.md), including the owner and proof map |
+| Which checkout and command am I testing? | [Development](development.md#identify-the-checkout-and-current-work) |
+| What would make the CLI reliable for agents? | [Agent operation design](feat/2026-09-12-agent-ergonomics/design-agent-ergonomics.md) |
+| What is the proposed delivery order and how does it fit open PRs? | [Agent operation implementation plan](feat/2026-09-12-agent-ergonomics/impl-plan-agent-ergonomics.md) |
+
+Source in the named checkout owns current behavior. Feature documents label future contracts. [Epic #20](https://github.com/pascalandy/qobuz-dl/issues/20) and its child issues own live work status. Research and audit artifacts retain their observation dates; confirm their claims against current source before acting.
+
 ## User documentation
 
 - [Installation](installation.md) — requirements, uvx no-install usage, optional persistent install, first run, and reset instructions.
@@ -21,7 +32,13 @@ Project documentation lives here when it is too detailed for the README.
 
 ## Feature direction
 
+- [Agent operation design and implementation plan](feat/2026-09-12-agent-ergonomics/design-agent-ergonomics.md) connects inspectable requests, bounded selection, artifact results, and recovery; proposed behavior only
+- [Qobuz API direction](feat/2026-05-26-qobuz-api-direction/vision-qobuz-api-direction.md) keeps read-only source expansion within the downloader mission
 - [Bandwidth limit vision](feat/2026-06-22-bandwidth-limit-vision/vision-bandwidth-limit.md) — direction check for optional download pacing and central rate-limit/backoff handling.
+
+## Historical design
+
+- [Dependency hardening architecture](feat/2026-05-26-dependency-hardening/architecture-dependency-hardening.md) records the completed migration and links its historical plans; [Dependencies](dependencies.md) owns current policy
 
 ## Research
 
