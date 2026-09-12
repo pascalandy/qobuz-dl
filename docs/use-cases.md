@@ -20,6 +20,8 @@ This guide organizes `qobuz-dl` by local-library goal. Examples use `uvx --from 
 
 You need an active Qobuz subscription. `qobuz-dl` creates a local config on first use and stores the account details needed for later commands.
 
+During command startup, `Logged: OK` means the login response supplied a usable token and eligible membership data, and the token was installed for the session. Free accounts and malformed login responses fail before this message; `qobuz-dl` does not print the membership label returned by Qobuz.
+
 ### Log in / create the first config
 
 Run any command that requires config, or explicitly reset/create config:
