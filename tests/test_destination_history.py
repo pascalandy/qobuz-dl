@@ -107,7 +107,6 @@ def _install_real_flac_download(monkeypatch):
         _description,
         *,
         retry_rate_limited=False,
-        bandwidth_limit=None,
     ):
         transfers.append(url)
         if "hires" not in url:

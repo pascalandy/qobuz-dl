@@ -840,7 +840,6 @@ class Download:
                 transaction.staged_path,
                 transaction.staged_path,
                 retry_rate_limited=True,
-                bandwidth_limit=self.bandwidth_limit,
             )
             tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
             try:
