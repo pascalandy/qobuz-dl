@@ -38,7 +38,7 @@ Runtime dependencies are declared in `pyproject.toml`. The default runtime depen
 
 `requirements.txt` still lists the same runtime dependency for compatibility with workflows that install from requirements files. Keep it synchronized when runtime dependencies change. Project-owned replacements now cover terminal colors, generated-name sanitization, interactive prompts, Last.fm fixture parsing, progress reporting, and HTTP calls.
 
-The supported runtime baseline is Python 3.10 or newer. Keep `requires-python`, the CI matrix, documentation, and `uv.lock` aligned when the baseline changes.
+The supported runtime baseline is Python 3.10 or newer. The maintained operating-system scope is Linux, Windows, and macOS. The hosted CI matrix runs Python 3.10 and 3.13 on Ubuntu, plus Python 3.13 on Windows and macOS. This matrix does not claim every operating system release, Python version, or filesystem combination. Keep `requires-python`, the platform classifiers, the CI matrix, the documentation, and `uv.lock` aligned when support changes.
 
 ## Local artifacts
 
