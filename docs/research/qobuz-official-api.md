@@ -5,6 +5,12 @@ Officially accessible Qobuz API documentation appears limited from the provided 
 
 > Note: This document combines parent-session web research, a read-only repository exploration pass, and clearly labeled community evidence. Official endpoint-level documentation was not accessible during the research pass.
 
+## Authentication transport addendum, 2026-09-12
+
+A credential-free retrieval of the public Qobuz web client found bundle `8.2.0-b034`. The only traced `postForm("user/login", ...)` caller passes `extra=partner` through a requester that already carries a user token. The form helper URL-encodes a string body without setting an explicit `Content-Type` on that path. This is not evidence that the server accepts an email and MD5 password through POST.
+
+The public Favorites wrapper uses GET through a requester with authentication headers. That code does not prove that the server accepts the user token only in the header. [Authentication credential and transport evidence](authentication-transport.md) records the URLs, full SHA-256 digests, safe byte offsets, local behavior, and unsupported server inferences. [Issue #63](https://github.com/pascalandy/qobuz-dl/issues/63) tracks the missing primary contract or explicitly authorized server verification.
+
 ## Findings
 1. **Official developer portal currently unavailable in the research pass** — `https://developer.qobuz.com` returned HTTP 503 via the parent’s Exa fetch, so endpoint-level official documentation could not be verified from the portal. [Source](https://developer.qobuz.com)
 

@@ -42,6 +42,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 
 ## Research
 
+- [Authentication credential and transport evidence](research/authentication-transport.md). Local credential representations, current request placement, dated public-client observations, and server-contract limits.
 - [Qobuz official API and SDK research](research/qobuz-official-api.md) — official-source findings, missing developer docs, community substitutes, endpoint confidence, and gaps.
 - [go-qobuz unofficial client reference](research/go-qobuz-reference.md) — notes on the Go implementation's auth flow, endpoint surface, signing behavior, and future-use boundaries.
 - [Local project capability map](research/local-project-capabilities.md) — current CLI/API coverage, auth behavior, tests/docs constraints, and likely integration points.
