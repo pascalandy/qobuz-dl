@@ -4,6 +4,8 @@
 
 `qobuz-dl` uses modern Python packaging metadata in `pyproject.toml` and uses `uv` as the default project workflow.
 
+Users currently install this maintained fork from its Git repository. The recommended commands name `git+https://github.com/pascalandy/qobuz-dl.git` explicitly. The project does not rely on a PyPI publication of this fork, and the package name or version alone does not establish source provenance. See [Installation](installation.md) for the public commands and verification model.
+
 - Build backend: `setuptools.build_meta`
 - Build requirements: `setuptools>=61,<77` and `wheel`
 - Project metadata source: `[project]` in `pyproject.toml`
@@ -62,4 +64,4 @@ Release steps:
 3. Run `just ci` locally and commit.
 4. Tag the commit `vX.Y.Z` (the tag must match the package version) and push the tag.
 
-The release build job runs the same full `scripts/check.py` gate as local `just ci` and normal CI. That gate builds the wheel and source distribution, verifies the wheel, and copies both artifacts to `dist/`. The release job then verifies that the tag matches the package version and uploads the artifacts. The publish job attaches them to a GitHub release with generated release notes.
+The release build job runs the same full `scripts/check.py` gate as local `just ci` and normal CI. That gate builds the wheel and source distribution, verifies the wheel, and copies both artifacts to `dist/`. The release job then verifies that the tag matches the package version and uploads the artifacts. The publish job attaches them to a GitHub release with generated release notes. This process does not imply publication of the fork to PyPI.

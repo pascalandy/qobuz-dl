@@ -1,11 +1,11 @@
 # CLI reference
 
-Use `uvx qobuz-dl` as the default no-install workflow. If you installed the optional persistent tool with `uv tool install qobuz-dl`, you may replace `uvx qobuz-dl` with `qobuz-dl`. From a local checkout, keep using `uv run qobuz-dl ...`.
+Use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl` as the default no-install workflow. If you installed the optional persistent tool with `uv tool install git+https://github.com/pascalandy/qobuz-dl.git`, you may replace `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl` with `qobuz-dl`. From a local checkout, keep using `uv run qobuz-dl ...`.
 
 ## Usage
 
 ```text
-uvx qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
 ```
 
 The CLI can download from direct URLs, local text files, interactive search, or best-match search.
@@ -31,12 +31,12 @@ The CLI can download from direct URLs, local text files, interactive search, or 
 Run command-level help for detailed options:
 
 ```sh
-uvx qobuz-dl <command> --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --help
 ```
 
 ## `dl` sources
 
-`uvx qobuz-dl dl SOURCE...` accepts:
+`uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl SOURCE...` accepts:
 
 - Qobuz album URLs
 - Qobuz track URLs
@@ -49,9 +49,9 @@ uvx qobuz-dl <command> --help
 Examples:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7
-uvx qobuz-dl dl urls.txt --directory Music --no-cover
-uvx qobuz-dl dl https://www.last.fm/user/example/playlists/123 --quality 6
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl urls.txt --directory Music --no-cover
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://www.last.fm/user/example/playlists/123 --quality 6
 ```
 
 ## Common download options
@@ -90,8 +90,8 @@ Folder and track format patterns may use these keys where available:
 ## `fun` examples
 
 ```sh
-uvx qobuz-dl fun
-uvx qobuz-dl fun --limit 10
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun --limit 10
 ```
 
 Interactive selection accepts comma-separated numbers and ranges, for example `1,3-5`.
@@ -99,9 +99,9 @@ Interactive selection accepts comma-separated numbers and ranges, for example `1
 ## `lucky` examples
 
 ```sh
-uvx qobuz-dl lucky "playboi carti die lit"
-uvx qobuz-dl lucky --type track --number 3 "artist song"
-uvx qobuz-dl lucky --type playlist --number 1 "jazz classics"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky "playboi carti die lit"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type track --number 3 "artist song"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type playlist --number 1 "jazz classics"
 ```
 
 `--type` accepts `artist`, `album`, `track`, or `playlist`.
