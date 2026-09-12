@@ -1,3 +1,5 @@
+import os
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -6,6 +8,7 @@ import pytest
 
 import qobuz_dl.cli as cli
 from qobuz_dl.cli import _quality_fallback_enabled, _redacted_config_text
+from qobuz_dl.color import GREEN, RESET
 from qobuz_dl.commands import QUALITY_CHOICES, qobuz_dl_args
 
 
@@ -957,8 +960,16 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
     assert downloaded == [["https://play.qobuz.com/album/album-1"]]
 
 
-@pytest.mark.parametrize("database_exists", [True, False])
-def test_purge_only_removes_database_and_exits(monkeypatch, tmp_path, database_exists):
+@pytest.mark.parametrize(
+    ("database_exists", "message"),
+    [
+        (True, "The database was deleted."),
+        (False, "The database is already absent."),
+    ],
+)
+def test_purge_only_removes_database_and_exits_successfully(
+    monkeypatch, tmp_path, caplog, database_exists, message
+):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
     database_file = config_path / "qobuz_dl.db"
@@ -976,14 +987,14 @@ def test_purge_only_removes_database_and_exits(monkeypatch, tmp_path, database_e
     monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    result = cli.main()
 
+    assert result is None
     assert not database_file.exists()
-    assert "The database was deleted." in str(exc.value)
+    assert caplog.messages == [f"{GREEN}{message}{RESET}"]
 
 
-def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path):
+def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path, caplog):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
     database_file = config_path / "qobuz_dl.db"
@@ -1004,11 +1015,103 @@ def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
+    result = cli.main()
+
+    assert result is None
+    assert not config_file.exists()
+    assert not database_file.exists()
+    assert caplog.messages == [f"{GREEN}The database was deleted.{RESET}"]
+
+
+def test_real_console_script_purge_is_idempotent_success_without_config(tmp_path):
+    script_suffix = ".exe" if os.name == "nt" else ""
+    console_script = Path(sys.executable).with_name(f"qobuz-dl{script_suffix}")
+    assert console_script.is_file()
+
+    if os.name == "nt":
+        config_root = tmp_path / "appdata"
+        environment = {**os.environ, "APPDATA": str(config_root)}
+    else:
+        config_root = tmp_path / ".config"
+        environment = {**os.environ, "HOME": str(tmp_path)}
+
+    config_path = config_root / "qobuz-dl"
+    config_file = config_path / "config.ini"
+    database_file = config_path / "qobuz_dl.db"
+    database_file.parent.mkdir(parents=True)
+    database_file.write_text("local duplicate tracking state")
+
+    present = subprocess.run(
+        [str(console_script), "--purge"],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert present.returncode == 0
+    assert present.stdout == ""
+    assert "The database was deleted." in present.stderr
+    assert not database_file.exists()
+    assert not config_file.exists()
+
+    absent = subprocess.run(
+        [str(console_script), "--purge"],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert absent.returncode == 0
+    assert absent.stdout == ""
+    assert "The database is already absent." in absent.stderr
+    assert not database_file.exists()
+    assert not config_file.exists()
+
+
+def test_purge_deletion_error_exits_nonzero_without_initialization(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "missing-config"
+    config_file = config_path / "config.ini"
+    database_file = config_path / "qobuz_dl.db"
+    raw_error = "synthetic private operating-system detail"
+
+    class UnexpectedBundle:
+        def __init__(self):
+            pytest.fail("purge must not initialize Bundle")
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("purge must not initialize the Qobuz client")
+
+    def fail_if_reset(target):
+        pytest.fail(f"purge must not reset config: {target}")
+
+    def deny_removal(target):
+        assert target == str(database_file)
+        raise PermissionError(raw_error)
+
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--purge"])
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
+    monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
+    monkeypatch.setattr(cli, "Bundle", UnexpectedBundle)
+    monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
+    monkeypatch.setattr(cli.os, "remove", deny_removal)
+
     with pytest.raises(SystemExit) as exc:
         cli.main()
 
-    assert not database_file.exists()
-    assert "The database was deleted." in str(exc.value)
+    assert exc.value.code == (
+        f"Unable to delete database at {database_file}. Check its permissions."
+    )
+    assert exc.value.code != 0
+    assert raw_error not in str(exc.value)
+    assert not config_path.exists()
+    assert not config_file.exists()
 
 
 @pytest.mark.parametrize(
