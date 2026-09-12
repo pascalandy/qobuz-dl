@@ -105,7 +105,7 @@ class RecordingClient:
 def _install_media_boundaries(monkeypatch):
     transferred = []
 
-    def stream_download(url, target_path, *, progress=None):
+    def stream_download(url, target_path, *, progress=None, retry_rate_limited=False):
         track_id = Path(url).stem
         transferred.append(track_id)
         Path(target_path).write_bytes(f"audio:{track_id}".encode())

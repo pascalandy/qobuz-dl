@@ -163,7 +163,7 @@ def _download_real_media(
     extension = "mp3" if quality == 5 else "flac"
     fixture = FIXTURES / f"synthetic-silence.{extension}"
 
-    def copy_fixture(_url, filename, _description):
+    def copy_fixture(_url, filename, _description, *, retry_rate_limited=False):
         shutil.copyfile(fixture, filename)
 
     monkeypatch.setattr(downloader, "download_with_progress", copy_fixture)
