@@ -290,6 +290,37 @@ class Download:
         self._download_cover(meta["album"]["image"]["large"], preparation.directory)
         return preparation
 
+    def existing_track_path(self):
+        track_url = self.client.get_track_url(self.item_id, fmt_id=self.quality)
+        if "sample" in track_url:
+            return None
+
+        metadata = self.client.get_track_meta(self.item_id)
+        track_title = _get_title(metadata)
+        directory, quality_met, track_format = self._track_destination(
+            metadata, track_url, track_title
+        )
+        if not (self.downgrade_quality or quality_met) or not os.path.isdir(directory):
+            return None
+
+        final_file = self._track_final_path(
+            directory, metadata, self._is_mp3(), track_format
+        )
+        return final_file if os.path.isfile(final_file) else None
+
+    def _track_destination(self, meta, track_url_dict, track_title):
+        file_format, quality_met, bit_depth, sampling_rate = self._get_format(
+            track_url_dict
+        )
+        track_attr = self._get_track_attr(meta, track_title, bit_depth, sampling_rate)
+        folder_format, track_format = _clean_format_str(
+            self.folder_format, self.track_format, file_format
+        )
+        directory = os.path.join(
+            self.path, sanitize_filepath(folder_format.format(**track_attr))
+        )
+        return directory, quality_met, track_format
+
     def _quality_allows_download(self, item_title, quality_met):
         if self.downgrade_quality or quality_met:
             return True
@@ -327,22 +358,15 @@ class Download:
         multiple=None,
     ):
         root_dir = preparation.directory
-        extension = ".mp3" if preparation.is_mp3 else ".flac"
 
         if multiple:
             root_dir = os.path.join(root_dir, f"Disc {multiple}")
             os.makedirs(root_dir, exist_ok=True)
 
         track_title = track_metadata.get("title")
-        artist = _safe_get(track_metadata, "performer", "name")
-        filename_attr = self._get_filename_attr(artist, track_metadata, track_title)
-
-        component = filename_component(
-            preparation.track_format.format(**filename_attr),
-            extension,
-            _destination_name_max(root_dir),
+        final_file = self._track_final_path(
+            root_dir, track_metadata, preparation.is_mp3, preparation.track_format
         )
-        final_file = os.path.join(root_dir, component)
 
         if os.path.isfile(final_file):
             logger.info(f"{OFF}{track_title} was already downloaded")
@@ -394,6 +418,22 @@ class Download:
 
     def _is_mp3(self):
         return int(self.quality) == 5
+
+    def _track_final_path(self, root_dir, track_metadata, is_mp3, track_format=None):
+        extension = ".mp3" if is_mp3 else ".flac"
+        track_title = track_metadata.get("title")
+        artist = _safe_get(track_metadata, "performer", "name")
+        filename_attr = self._get_filename_attr(artist, track_metadata, track_title)
+        if track_format is None:
+            _folder_format, track_format = _clean_format_str(
+                self.folder_format, self.track_format, "MP3" if is_mp3 else "FLAC"
+            )
+        component = filename_component(
+            track_format.format(**filename_attr),
+            extension,
+            _destination_name_max(root_dir),
+        )
+        return os.path.join(root_dir, component)
 
     @staticmethod
     def _get_filename_attr(artist, track_metadata, track_title):

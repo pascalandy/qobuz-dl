@@ -9,8 +9,6 @@ from mutagen.mp3 import EasyMP3
 
 logger = logging.getLogger(__name__)
 
-EXTENSIONS = (".mp3", ".flac")
-
 
 class PartialFormatter(string.Formatter):
     def __init__(self, missing="n/a", bad_fmt="n/a"):
@@ -34,40 +32,45 @@ class PartialFormatter(string.Formatter):
             raise
 
 
-def make_m3u(pl_directory):
+def make_m3u(pl_directory, finalized_paths):
     track_list = ["#EXTM3U"]
     rel_folder = os.path.basename(os.path.normpath(pl_directory))
     pl_name = rel_folder + ".m3u"
-    for local, dirs, files in os.walk(pl_directory):
-        dirs.sort()
-        audio_files = [
-            os.path.abspath(os.path.join(local, file_))
-            for file_ in sorted(files)
-            if os.path.splitext(file_)[-1] in EXTENSIONS
-        ]
-        if not audio_files:
+    for finalized_path in finalized_paths:
+        audio_file = os.path.abspath(os.fspath(finalized_path))
+        if not os.path.isfile(audio_file):
+            logger.warning("Skipping %s in m3u: file is not readable", finalized_path)
             continue
 
-        for audio_file in audio_files:
-            audio_rel_file = os.path.relpath(audio_file, pl_directory)
-            try:
-                pl_item = (
-                    EasyMP3(audio_file) if ".mp3" in audio_file else FLAC(audio_file)
-                )
-                title = pl_item["TITLE"][0]
-                artist = pl_item["ARTIST"][0]
-                length = int(pl_item.info.length)
-                index = "#EXTINF:{}, {} - {}\n{}".format(
-                    length, artist, title, audio_rel_file
-                )
-            except Exception as error:
-                logger.debug("Skipping %s in m3u: %s", audio_rel_file, error)
-                continue
-            track_list.append(index)
+        suffix = os.path.splitext(audio_file)[1].lower()
+        if suffix == ".mp3":
+            reader = EasyMP3
+        elif suffix == ".flac":
+            reader = FLAC
+        else:
+            logger.warning(
+                "Skipping %s in m3u: unsupported media suffix %s",
+                finalized_path,
+                suffix or "<none>",
+            )
+            continue
 
-    if len(track_list) > 1:
-        with open(os.path.join(pl_directory, pl_name), "w", encoding="utf-8") as pl:
-            pl.write("\n\n".join(track_list))
+        audio_rel_file = os.path.relpath(audio_file, pl_directory).replace(os.sep, "/")
+        try:
+            pl_item = reader(audio_file)
+            title = pl_item["TITLE"][0]
+            artist = pl_item["ARTIST"][0]
+            length = int(pl_item.info.length)
+            index = "#EXTINF:{}, {} - {}\n{}".format(
+                length, artist, title, audio_rel_file
+            )
+        except Exception as error:
+            logger.warning("Skipping %s in m3u: %s", finalized_path, error)
+            continue
+        track_list.append(index)
+
+    with open(os.path.join(pl_directory, pl_name), "w", encoding="utf-8") as pl:
+        pl.write("\n\n".join(track_list))
 
 
 def smart_discography_filter(
