@@ -170,7 +170,7 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
     temporary_path = Path(temporary)
     assert url == "https://example.invalid/audio.flac"
     assert temporary_path.parent == Path(expected_dir)
-    assert temporary_path.name.startswith(".qobuz-dl-")
+    assert temporary_path.name.startswith(".qdl-")
     assert temporary_path.name.endswith(".tmp")
     assert description == temporary
     assert tagged[0][0] == temporary

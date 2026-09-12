@@ -133,9 +133,9 @@ def _recording_tag(monkeypatch, tagged):
 def _assert_owned_temporary(path, directory):
     temporary = Path(path)
     assert temporary.parent == Path(directory)
-    assert temporary.name.startswith(".qobuz-dl-")
+    assert temporary.name.startswith(".qdl-")
     assert temporary.name.endswith(".tmp")
-    token = temporary.name.removeprefix(".qobuz-dl-").removesuffix(".tmp")
+    token = temporary.name.removeprefix(".qdl-").removesuffix(".tmp")
     assert len(token) == 32
     int(token, 16)
 

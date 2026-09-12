@@ -346,7 +346,7 @@ class Download:
             logger.info(f"{OFF}Track not available for download")
             return DownloadResult("failed", "missing_url")
 
-        filename = os.path.join(root_dir, f".qobuz-dl-{uuid.uuid4().hex}.tmp")
+        filename = os.path.join(root_dir, f".qdl-{uuid.uuid4().hex}.tmp")
         descriptor = os.open(
             filename,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
