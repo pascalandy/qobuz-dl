@@ -158,6 +158,9 @@ def test_windows_reserved_stems_are_repaired_without_changing_ordinary_names(
     assert expected_path.read_bytes() == b"audio:track-1"
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "pathconf"), reason="os.pathconf is unavailable on this platform"
+)
 def test_long_unicode_component_fits_actual_destination_name_limit_by_bytes(
     tmp_path, monkeypatch
 ):
@@ -178,6 +181,9 @@ def test_long_unicode_component_fits_actual_destination_name_limit_by_bytes(
     assert not temporary_paths[0].exists()
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "pathconf"), reason="os.pathconf is unavailable on this platform"
+)
 def test_long_unicode_titles_with_the_same_prefix_create_distinct_final_files(
     tmp_path, monkeypatch
 ):
@@ -224,7 +230,7 @@ def test_unsupported_or_indeterminate_name_limit_uses_255_byte_fallback(
             raise unsupported_limit
         return unsupported_limit
 
-    monkeypatch.setattr(os, "pathconf", fake_pathconf)
+    monkeypatch.setattr(os, "pathconf", fake_pathconf, raising=False)
 
     result = _download(tmp_path, "track-unicode", UNICODE_TITLE)
 
@@ -240,7 +246,7 @@ def test_destination_name_limit_path_errors_propagate(tmp_path, monkeypatch):
     def fail_pathconf(path, name):
         raise path_error
 
-    monkeypatch.setattr(os, "pathconf", fail_pathconf)
+    monkeypatch.setattr(os, "pathconf", fail_pathconf, raising=False)
 
     with pytest.raises(FileNotFoundError) as exc_info:
         _download(tmp_path, "track-1", "Ordinary title")
@@ -270,7 +276,7 @@ def test_tight_fallback_limit_allows_owned_temporary_and_stable_final_path(
             raise OSError(errno.ENAMETOOLONG, "component exceeds name limit", path)
         return real_open(path, flags, mode)
 
-    monkeypatch.setattr(os, "pathconf", fake_pathconf)
+    monkeypatch.setattr(os, "pathconf", fake_pathconf, raising=False)
     monkeypatch.setattr(os, "open", limit_component_at_open)
     download = Download(
         _TrackClient("track-tight", "<>", quality),
@@ -298,7 +304,7 @@ def test_tight_fallback_limit_allows_owned_temporary_and_stable_final_path(
 
 def test_name_limit_smaller_than_complete_fallback_fails_clearly(tmp_path, monkeypatch):
     temporary_paths = _install_real_file_boundaries(monkeypatch)
-    monkeypatch.setattr(os, "pathconf", lambda path, name: 42)
+    monkeypatch.setattr(os, "pathconf", lambda path, name: 42, raising=False)
 
     with pytest.raises(ValueError) as exc_info:
         _download(tmp_path, "track-empty", "<>")
