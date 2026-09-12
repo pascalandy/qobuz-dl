@@ -122,26 +122,29 @@ def smart_discography_filter(
 
     items = []
     for albums in title_grouped.values():
-        best_bit_depth = max(a["maximum_bit_depth"] for a in albums)
+        admissible = [
+            album for album in albums if not (skip_extras and is_type("extra", album))
+        ]
+        if not admissible:
+            continue
+
+        best_bit_depth = max(a["maximum_bit_depth"] for a in admissible)
         get_best = min if save_space else max
         best_sampling_rate = get_best(
             a["maximum_sampling_rate"]
-            for a in albums
+            for a in admissible
             if a["maximum_bit_depth"] == best_bit_depth
         )
-        remaster_exists = any(is_type("remaster", a) for a in albums)
+        remaster_exists = any(is_type("remaster", a) for a in admissible)
 
         def is_valid(album: dict) -> bool:
             return (
                 album["maximum_bit_depth"] == best_bit_depth
                 and album["maximum_sampling_rate"] == best_sampling_rate
-                and not (  # states that are not allowed
-                    (remaster_exists and not is_type("remaster", album))
-                    or (skip_extras and is_type("extra", album))
-                )
+                and not (remaster_exists and not is_type("remaster", album))
             )
 
-        filtered = tuple(filter(is_valid, albums))
+        filtered = tuple(filter(is_valid, admissible))
         # most of the time, len is 0 or 1.
         # if greater, it is a complete duplicate,
         # so it doesn't matter which is chosen

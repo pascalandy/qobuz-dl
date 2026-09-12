@@ -9,13 +9,21 @@ from qobuz_dl.core import QobuzDL
 from qobuz_dl.utils import get_url_info, smart_discography_filter
 
 
-def _album(title, artist, bit_depth=16, sampling_rate=44.1, album_id="a-1"):
+def _album(
+    title,
+    artist,
+    bit_depth=16,
+    sampling_rate=44.1,
+    album_id="a-1",
+    version="",
+):
     return {
         "title": title,
         "artist": {"name": artist},
         "maximum_bit_depth": bit_depth,
         "maximum_sampling_rate": sampling_rate,
         "id": album_id,
+        "version": version,
     }
 
 
@@ -433,6 +441,45 @@ def test_artist_download_plan_applies_smart_discography_across_every_page(tmp_pa
     assert plan.item_ids == ("hi-res", "second")
 
 
+def test_artist_download_plan_keeps_standard_album_when_deluxe_has_better_quality(
+    tmp_path,
+):
+    qdl = QobuzDL(directory=tmp_path, smart_discography=True)
+
+    def artist_meta(self, item_id):
+        return iter(
+            [
+                {
+                    "name": "Artist",
+                    "albums": {
+                        "items": [
+                            _album(
+                                "Great Album",
+                                "Artist",
+                                16,
+                                44.1,
+                                "standard",
+                            ),
+                            _album(
+                                "Great Album (Deluxe Edition)",
+                                "Artist",
+                                24,
+                                192,
+                                "deluxe",
+                            ),
+                        ]
+                    },
+                }
+            ]
+        )
+
+    qdl.client = type("Client", (), {"get_artist_meta": artist_meta})()
+
+    plan = qdl._resolve_url_download_plan("https://play.qobuz.com/artist/artist1")
+
+    assert plan.item_ids == ("standard",)
+
+
 def test_label_download_plan_does_not_apply_smart_discography(tmp_path):
     qdl = QobuzDL(directory=tmp_path, smart_discography=True)
     metadata_item_ids = []
@@ -523,6 +570,55 @@ def test_smart_discography_filter_ignores_other_artists_before_quality_choice():
     filtered = smart_discography_filter(contents)
 
     assert [album["id"] for album in filtered] == ["requested-artist"]
+
+
+def test_smart_discography_filter_ignores_title_extra_before_quality_choice():
+    contents = [
+        {
+            "name": "Artist",
+            "albums": {
+                "items": [
+                    _album("Great Album", "Artist", 16, 44.1, "standard"),
+                    _album(
+                        "Great Album (Deluxe Edition)",
+                        "Artist",
+                        24,
+                        192,
+                        "deluxe",
+                    ),
+                ]
+            },
+        }
+    ]
+
+    filtered = smart_discography_filter(contents, skip_extras=True)
+
+    assert [album["id"] for album in filtered] == ["standard"]
+
+
+def test_smart_discography_filter_ignores_version_extra_before_remaster_choice():
+    contents = [
+        {
+            "name": "Artist",
+            "albums": {
+                "items": [
+                    _album("Great Album", "Artist", 24, 96, "standard"),
+                    _album(
+                        "Great Album",
+                        "Artist",
+                        24,
+                        96,
+                        "deluxe-remaster",
+                        version="Deluxe Remastered",
+                    ),
+                ]
+            },
+        }
+    ]
+
+    filtered = smart_discography_filter(contents, skip_extras=True)
+
+    assert [album["id"] for album in filtered] == ["standard"]
 
 
 def test_lastfm_playlist_skips_tracks_without_qobuz_matches(tmp_path, monkeypatch):
