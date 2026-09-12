@@ -4,8 +4,10 @@ import json
 import logging
 import os
 import platform
+import shutil
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -23,6 +25,7 @@ from qobuz_dl.live_verification import (
     BundleCredentials,
     RealBackend,
     RuntimeFacts,
+    _flac_frame_offset,
     main,
 )
 
@@ -33,6 +36,9 @@ PLAYABLE_FLAC = base64.b64decode(
     "ZkxhQwAAACIAoACgAAAAAAFVAfQA8AAAAKAAAAAAAAAAAAAAAAAAAAAAhAAALAwAAABM"
     "YXZmNjMuMS4xMDEBAAAAFAAAAGVuY29kZXI9TGF2ZjYzLjEuMTAx//hkCACfNwAAAEEt"
 )
+PLAYABLE_FLAC_METADATA = PLAYABLE_FLAC[:-12]
+PLAYABLE_FLAC_FRAME = PLAYABLE_FLAC[-12:]
+PLAYABLE_FLAC_HEADER = PLAYABLE_FLAC_FRAME[:7]
 
 
 @pytest.fixture(autouse=True)
@@ -180,6 +186,113 @@ def _write_tagged_media(path, codec, tags):
     audio["ALBUM"] = tags["album"]
     audio["TRACKNUMBER"] = tags["track"]
     audio.save()
+
+
+def _write_tagged_flac_payload(path, payload):
+    path.write_bytes(PLAYABLE_FLAC_METADATA + payload)
+    audio = FLAC(path)
+    audio["TITLE"] = "Authorized track"
+    audio["ARTIST"] = "Authorized artist"
+    audio["ALBUM"] = "Authorized album"
+    audio["TRACKNUMBER"] = "1"
+    audio.save()
+
+
+def _set_flac_streaminfo(
+    path, *, min_blocksize=None, max_blocksize=None, total_samples=None
+):
+    raw = bytearray(path.read_bytes())
+    if min_blocksize is not None:
+        raw[8:10] = min_blocksize.to_bytes(2, "big")
+    if max_blocksize is not None:
+        raw[10:12] = max_blocksize.to_bytes(2, "big")
+    if total_samples is not None:
+        stream_parameters = int.from_bytes(raw[18:26], "big")
+        stream_parameters &= ~((1 << 36) - 1)
+        stream_parameters |= total_samples
+        raw[18:26] = stream_parameters.to_bytes(8, "big")
+    path.write_bytes(raw)
+
+
+def _rewrite_flac_metadata_block_count(path, count):
+    raw = path.read_bytes()
+    blocks = []
+    offset = 4
+    while True:
+        header = raw[offset : offset + 4]
+        block_length = int.from_bytes(header[1:4], "big")
+        end = offset + 4 + block_length
+        blocks.append(bytes((header[0] & 0x7F,)) + raw[offset + 1 : end])
+        offset = end
+        if header[0] & 0x80:
+            break
+    while len(blocks) < count:
+        blocks.insert(-1, b"\x01\x00\x00\x00")
+    blocks[-1] = bytes((blocks[-1][0] | 0x80,)) + blocks[-1][1:]
+    path.write_bytes(b"fLaC" + b"".join(blocks) + raw[offset:])
+
+
+def _duplicate_flac_streaminfo(path):
+    raw = path.read_bytes()
+    streaminfo_end = 4 + 4 + 34
+    streaminfo = bytes((raw[4] & 0x7F,)) + raw[5:streaminfo_end]
+    path.write_bytes(raw[:streaminfo_end] + streaminfo + raw[streaminfo_end:])
+
+
+def _raw_flac_with_metadata_blocks(block_count, trailing=PLAYABLE_FLAC_FRAME):
+    streaminfo = PLAYABLE_FLAC[8:42]
+    if block_count == 1:
+        blocks = [b"\x80\x00\x00\x22" + streaminfo]
+    else:
+        blocks = [b"\x00\x00\x00\x22" + streaminfo]
+        blocks.extend(b"\x01\x00\x00\x00" for _ in range(block_count - 2))
+        blocks.append(b"\x81\x00\x00\x00")
+    return b"fLaC" + b"".join(blocks) + trailing
+
+
+def _test_flac_crc8(data):
+    crc = 0
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    return crc
+
+
+def _test_flac_frame(
+    *,
+    first=0xFF,
+    second=0xF8,
+    block_size_code=6,
+    sample_rate_code=4,
+    channel_code=0,
+    bit_depth_code=4,
+    reserved_bit=0,
+    coded_number=b"\x00",
+    block_extension=None,
+    sample_rate_extension=None,
+    corrupt_crc=False,
+    body=b"\x00\x00\x00\x41\x2d",
+):
+    if block_extension is None:
+        block_extension = b"\x9f" if block_size_code == 6 else b""
+    if sample_rate_extension is None:
+        sample_rate_extension = {
+            12: b"\x08",
+            13: b"\x1f\x40",
+            14: b"\x03\x20",
+        }.get(sample_rate_code, b"")
+    header = bytes(
+        (
+            first,
+            second,
+            (block_size_code << 4) | sample_rate_code,
+            (channel_code << 4) | (bit_depth_code << 1) | reserved_bit,
+        )
+    )
+    header += coded_number + block_extension + sample_rate_extension
+    crc = _test_flac_crc8(header) ^ int(corrupt_crc)
+    return header + bytes((crc,)) + body
 
 
 def _track_metadata(track_id=AUTHORIZED_TRACK_ID):
@@ -424,6 +537,8 @@ def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
             "one explicitly authorized Qobuz track",
             "temporary config and download destination removed after verification",
             "no Last.fm requests",
+            "FLAC checks cover only the initial frame header, STREAMINFO consistency, and remaining bytes",
+            "FLAC audio is not decoded and complete-file integrity is not verified",
             "live execution belongs to issue #48",
         ],
     }
@@ -1077,6 +1192,87 @@ def test_flac_quality_comes_from_the_completed_media(tmp_path, monkeypatch):
     }
 
 
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not installed")
+def test_playable_flac_fixture_decodes_independently():
+    completed = subprocess.run(
+        (
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-f",
+            "null",
+            "-",
+        ),
+        input=PLAYABLE_FLAC,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+
+
+def test_flac_metadata_traversal_stops_at_the_last_block(tmp_path):
+    trailing = b"not-another-metadata-block"
+    raw = _raw_flac_with_metadata_blocks(2, trailing=trailing)
+    path = tmp_path / "last-block.flac"
+    path.write_bytes(raw)
+
+    offset, file_size = _flac_frame_offset(path)
+
+    assert raw[offset:] == trailing
+    assert file_size == len(raw)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param(b"\x81\x00", id="truncated-header"),
+        pytest.param(b"\x81\x00\x00\x04\x00\x00", id="overrunning-length"),
+    ],
+)
+def test_flac_metadata_traversal_rejects_truncated_blocks(tmp_path, tail):
+    raw = _raw_flac_with_metadata_blocks(1)
+    first_block = bytes((raw[4] & 0x7F,)) + raw[5:42]
+    path = tmp_path / "truncated-metadata.flac"
+    path.write_bytes(b"fLaC" + first_block + tail)
+
+    with pytest.raises(ValueError):
+        _flac_frame_offset(path)
+
+
+def test_flac_metadata_traversal_rejects_duplicate_streaminfo(tmp_path):
+    streaminfo = PLAYABLE_FLAC[8:42]
+    path = tmp_path / "duplicate-streaminfo.flac"
+    path.write_bytes(
+        b"fLaC"
+        + b"\x00\x00\x00\x22"
+        + streaminfo
+        + b"\x80\x00\x00\x22"
+        + streaminfo
+        + PLAYABLE_FLAC_FRAME
+    )
+
+    with pytest.raises(ValueError):
+        _flac_frame_offset(path)
+
+
+def test_flac_metadata_traversal_accepts_128_blocks_and_rejects_129(tmp_path):
+    accepted = tmp_path / "128-blocks.flac"
+    accepted.write_bytes(_raw_flac_with_metadata_blocks(128))
+    rejected = tmp_path / "129-blocks.flac"
+    rejected.write_bytes(_raw_flac_with_metadata_blocks(129))
+
+    offset, file_size = _flac_frame_offset(accepted)
+
+    assert accepted.read_bytes()[offset:] == PLAYABLE_FLAC_FRAME
+    assert file_size == accepted.stat().st_size
+    with pytest.raises(ValueError):
+        _flac_frame_offset(rejected)
+
+
 def test_flac_with_declared_samples_but_no_audio_payload_is_rejected(
     tmp_path, monkeypatch
 ):
@@ -1109,6 +1305,354 @@ def test_flac_with_declared_samples_but_no_audio_payload_is_rejected(
     report = _report(tmp_path)
     assert report["reason"] == "final_media_invalid"
     assert report["phases"]["media"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("max_blocksize", "total_samples"),
+    [
+        pytest.param(160, 40_000, id="maximum-block-size"),
+        pytest.param(32_768, 160, id="total-samples"),
+    ],
+)
+def test_flac_rejects_frame_block_larger_than_streaminfo_bounds(
+    tmp_path, monkeypatch, max_blocksize, total_samples
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def contradictory_flac_download(client, track_id, destination, quality):
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, _test_flac_frame(block_size_code=15))
+        _set_flac_streaminfo(
+            final,
+            max_blocksize=max_blocksize,
+            total_samples=total_samples,
+        )
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = contradictory_flac_download
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path, QOBUZ_DL_LIVE_QUALITY="27"),
+            backend_factory=lambda: backend,
+        )
+        == 1
+    )
+    report = _report(tmp_path)
+    assert report["reason"] == "final_media_invalid"
+    assert report["phases"]["media"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("block_count", "expected_status"),
+    [
+        pytest.param(128, 0, id="maximum-accepted"),
+        pytest.param(129, 1, id="first-rejected"),
+    ],
+)
+def test_flac_metadata_block_limit_is_enforced_by_the_verifier(
+    tmp_path, monkeypatch, block_count, expected_status
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def many_metadata_blocks_download(client, track_id, destination, quality):
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, PLAYABLE_FLAC_FRAME)
+        _rewrite_flac_metadata_block_count(final, block_count)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = many_metadata_blocks_download
+
+    status = main(
+        [],
+        environ=_live_environment(tmp_path, QOBUZ_DL_LIVE_QUALITY="27"),
+        backend_factory=lambda: backend,
+    )
+
+    assert status == expected_status
+    report = _report(tmp_path)
+    if expected_status:
+        assert report["reason"] == "final_media_invalid"
+        assert report["phases"]["media"] == "failed"
+    else:
+        assert report["result"] == "passed"
+
+
+def test_flac_duplicate_streaminfo_is_rejected_by_the_verifier(tmp_path, monkeypatch):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def duplicate_streaminfo_download(client, track_id, destination, quality):
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, PLAYABLE_FLAC_FRAME)
+        _duplicate_flac_streaminfo(final)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = duplicate_streaminfo_download
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path, QOBUZ_DL_LIVE_QUALITY="27"),
+            backend_factory=lambda: backend,
+        )
+        == 1
+    )
+    report = _report(tmp_path)
+    assert report["reason"] == "final_media_invalid"
+    assert report["phases"]["media"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"\xff",
+        b"not-a-frame" * 4,
+        b"prefix" + PLAYABLE_FLAC_FRAME,
+        PLAYABLE_FLAC_HEADER,
+    ],
+)
+def test_flac_requires_a_complete_initial_frame_header_and_remaining_frame_bytes(
+    tmp_path, monkeypatch, payload
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def malformed_flac_download(client, track_id, destination, quality):
+        backend.download_destination = destination
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, payload)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = malformed_flac_download
+    environment = _live_environment(tmp_path, QOBUZ_DL_LIVE_QUALITY="27")
+
+    assert main([], environ=environment, backend_factory=lambda: backend) == 1
+
+    report = _report(tmp_path)
+    assert report["reason"] == "final_media_invalid"
+    assert report["phases"]["media"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(_test_flac_frame(first=0xFE), id="sync-first-byte"),
+        pytest.param(_test_flac_frame(second=0xFA), id="sync-reserved-bit"),
+        pytest.param(_test_flac_frame(block_size_code=0), id="reserved-block-size"),
+        pytest.param(_test_flac_frame(sample_rate_code=15), id="reserved-sample-rate"),
+        pytest.param(_test_flac_frame(channel_code=11), id="reserved-channel"),
+        pytest.param(_test_flac_frame(bit_depth_code=3), id="reserved-bit-depth"),
+        pytest.param(_test_flac_frame(reserved_bit=1), id="reserved-header-bit"),
+        pytest.param(_test_flac_frame(coded_number=b"\x80"), id="invalid-number-lead"),
+        pytest.param(
+            _test_flac_frame(coded_number=b"\xc2A"),
+            id="invalid-number-continuation",
+        ),
+        pytest.param(_test_flac_frame(coded_number=b"\xc0\x80"), id="overlong-number"),
+        pytest.param(
+            _test_flac_frame(coded_number=b"\x01"), id="nonzero-initial-number"
+        ),
+        pytest.param(
+            _test_flac_frame(block_size_code=7, block_extension=b"\xff\xff"),
+            id="forbidden-65536-block-size",
+        ),
+        pytest.param(
+            _test_flac_frame(sample_rate_code=12, sample_rate_extension=b"\x00"),
+            id="zero-khz-sample-rate",
+        ),
+        pytest.param(
+            _test_flac_frame(sample_rate_code=13, sample_rate_extension=b"\x00\x00"),
+            id="zero-hz-sample-rate",
+        ),
+        pytest.param(
+            _test_flac_frame(sample_rate_code=14, sample_rate_extension=b"\x00\x00"),
+            id="zero-tens-hz-sample-rate",
+        ),
+        pytest.param(_test_flac_frame(corrupt_crc=True), id="invalid-crc"),
+        pytest.param(
+            _test_flac_frame(sample_rate_code=9),
+            id="streaminfo-sample-rate-mismatch",
+        ),
+        pytest.param(
+            _test_flac_frame(channel_code=1), id="streaminfo-channel-mismatch"
+        ),
+        pytest.param(
+            _test_flac_frame(bit_depth_code=6), id="streaminfo-bit-depth-mismatch"
+        ),
+        pytest.param(_test_flac_frame(body=b"\x00"), id="header-with-one-body-byte"),
+        pytest.param(
+            _test_flac_frame(body=b"\x00\x00"), id="header-with-two-body-bytes"
+        ),
+    ],
+)
+def test_flac_rejects_malformed_initial_frame_fields(
+    tmp_path, monkeypatch, capsys, payload
+):
+    private_track_id = "private-track-id-47"
+    backend = FakeBackend(private_track_id)
+    _install_media_only_http(monkeypatch)
+
+    def malformed_flac_download(client, track_id, destination, quality):
+        backend.download_destination = destination
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, payload)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = malformed_flac_download
+    environment = _live_environment(
+        tmp_path,
+        QOBUZ_DL_LIVE_QUALITY="27",
+        QOBUZ_DL_LIVE_TRACK_ID=private_track_id,
+    )
+
+    assert main([], environ=environment, backend_factory=lambda: backend) == 1
+
+    report = _report(tmp_path)
+    assert report["reason"] == "final_media_invalid"
+    assert report["phases"]["media"] == "failed"
+    assert backend.download_destination is not None
+    assert not backend.download_destination.exists()
+    sanitized = capsys.readouterr().err + json.dumps(report)
+    assert SENTINEL not in sanitized
+    assert SIGNED_URL not in sanitized
+    assert private_track_id not in sanitized
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(b"\xff", id="sync"),
+        pytest.param(b"\xff\xf8", id="sync-fields"),
+        pytest.param(b"\xff\xf8\x64", id="coded-fields"),
+        pytest.param(b"\xff\xf8\x64\x08", id="coded-number"),
+        pytest.param(b"\xff\xf8\x64\x08\xc2", id="number-continuation"),
+        pytest.param(b"\xff\xf8\x64\x08\x00", id="block-size-extension"),
+        pytest.param(b"\xff\xf8\x74\x08\x00\x00", id="two-byte-block-size-extension"),
+        pytest.param(b"\xff\xf8\x6c\x08\x00\x9f", id="khz-sample-rate-extension"),
+        pytest.param(b"\xff\xf8\x6d\x08\x00\x9f\x1f", id="hz-sample-rate-extension"),
+        pytest.param(
+            b"\xff\xf8\x6e\x08\x00\x9f\x03", id="tens-hz-sample-rate-extension"
+        ),
+        pytest.param(PLAYABLE_FLAC_HEADER[:-1], id="header-crc"),
+    ],
+)
+def test_flac_rejects_each_truncated_initial_frame_field(
+    tmp_path, monkeypatch, payload
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def truncated_flac_download(client, track_id, destination, quality):
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, payload)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = truncated_flac_download
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path, QOBUZ_DL_LIVE_QUALITY="27"),
+            backend_factory=lambda: backend,
+        )
+        == 1
+    )
+    assert _report(tmp_path)["reason"] == "final_media_invalid"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(_test_flac_frame(body=b"\x00\x00\x00"), id="minimum-body"),
+        pytest.param(
+            _test_flac_frame(block_size_code=7, block_extension=b"\x00\x9f"),
+            id="two-byte-block-size",
+        ),
+        pytest.param(_test_flac_frame(sample_rate_code=0), id="streaminfo-sample-rate"),
+        pytest.param(_test_flac_frame(sample_rate_code=12), id="khz-sample-rate"),
+        pytest.param(_test_flac_frame(sample_rate_code=13), id="hz-sample-rate"),
+        pytest.param(_test_flac_frame(sample_rate_code=14), id="tens-hz-sample-rate"),
+        pytest.param(_test_flac_frame(bit_depth_code=0), id="streaminfo-bit-depth"),
+        pytest.param(_test_flac_frame(second=0xF9), id="variable-block-strategy"),
+    ],
+)
+def test_flac_accepts_structurally_valid_initial_frame_headers(
+    tmp_path, monkeypatch, payload
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def minimal_structural_flac_download(client, track_id, destination, quality):
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, payload)
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = minimal_structural_flac_download
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path, QOBUZ_DL_LIVE_QUALITY="27"),
+            backend_factory=lambda: backend,
+        )
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "max_blocksize", "total_samples"),
+    [
+        pytest.param(
+            _test_flac_frame(block_size_code=6, block_extension=b"\x9f"),
+            160,
+            1_000,
+            id="equal-maximum-block-size",
+        ),
+        pytest.param(
+            _test_flac_frame(block_size_code=6, block_extension=b"\x9f"),
+            1_000,
+            160,
+            id="equal-total-samples",
+        ),
+        pytest.param(
+            _test_flac_frame(block_size_code=6, block_extension=b"\x00"),
+            160,
+            160,
+            id="shorter-than-streaminfo-minimum",
+        ),
+    ],
+)
+def test_flac_accepts_frame_block_size_boundaries(
+    tmp_path, monkeypatch, payload, max_blocksize, total_samples
+):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+
+    def boundary_flac_download(client, track_id, destination, quality):
+        final = destination / "track.flac"
+        _write_tagged_flac_payload(final, payload)
+        _set_flac_streaminfo(
+            final,
+            min_blocksize=160,
+            max_blocksize=max_blocksize,
+            total_samples=total_samples,
+        )
+        return DownloadResult("finalized", "downloaded", (str(final),))
+
+    backend.download_track = boundary_flac_download
+
+    assert (
+        main(
+            [],
+            environ=_live_environment(tmp_path, QOBUZ_DL_LIVE_QUALITY="27"),
+            backend_factory=lambda: backend,
+        )
+        == 0
+    )
 
 
 def test_cleanup_failure_overrides_success_and_writes_failed_report(

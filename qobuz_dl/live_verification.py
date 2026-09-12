@@ -53,8 +53,26 @@ _LIMITS = (
     "one explicitly authorized Qobuz track",
     "temporary config and download destination removed after verification",
     "no Last.fm requests",
+    "FLAC checks cover only the initial frame header, STREAMINFO consistency, and remaining bytes",
+    "FLAC audio is not decoded and complete-file integrity is not verified",
     "live execution belongs to issue #48",
 )
+_MAX_FLAC_METADATA_BLOCKS = 128
+_MAX_FLAC_FRAME_HEADER_BYTES = 10
+_FLAC_SAMPLE_RATES = {
+    1: 88200,
+    2: 176400,
+    3: 192000,
+    4: 8000,
+    5: 16000,
+    6: 22050,
+    7: 24000,
+    8: 32000,
+    9: 44100,
+    10: 48000,
+    11: 96000,
+}
+_FLAC_BIT_DEPTHS = {1: 8, 2: 12, 4: 16, 5: 20, 6: 24, 7: 32}
 
 
 @dataclass(frozen=True)
@@ -316,23 +334,133 @@ def _validated_final_path(result, destination: Path) -> Path:
     return final_path
 
 
-def _flac_has_audio_payload(path: Path) -> bool:
+def _flac_frame_offset(path: Path) -> tuple[int, int]:
     file_size = path.stat().st_size
     with path.open("rb") as stream:
         if stream.read(4) != b"fLaC":
-            return False
+            raise ValueError
         offset = 4
-        while True:
+        for block_index in range(_MAX_FLAC_METADATA_BLOCKS):
             header = stream.read(4)
             if len(header) != 4:
-                return False
+                raise ValueError
+            block_type = header[0] & 0x7F
             block_length = int.from_bytes(header[1:4], "big")
+            if block_type == 127:
+                raise ValueError
+            if block_index == 0 and (block_type != 0 or block_length != 34):
+                raise ValueError
+            if block_index > 0 and block_type == 0:
+                raise ValueError
             offset += 4 + block_length
             if offset > file_size:
-                return False
+                raise ValueError
             stream.seek(block_length, os.SEEK_CUR)
             if header[0] & 0x80:
-                return offset < file_size
+                return offset, file_size
+    raise ValueError
+
+
+def _flac_crc8(data: bytes) -> int:
+    crc = 0
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    return crc
+
+
+def _read_flac_uint(data: bytes, offset: int, length: int) -> tuple[int, int]:
+    end = offset + length
+    if end > len(data):
+        raise ValueError
+    return int.from_bytes(data[offset:end], "big"), end
+
+
+def _flac_block_size(code: int, data: bytes, offset: int) -> tuple[int, int]:
+    if code == 0:
+        raise ValueError
+    if code == 1:
+        return 192, offset
+    if 2 <= code <= 5:
+        return 576 << (code - 2), offset
+    if code == 6:
+        stored, offset = _read_flac_uint(data, offset, 1)
+        return stored + 1, offset
+    if code == 7:
+        stored, offset = _read_flac_uint(data, offset, 2)
+        if stored == 0xFFFF:
+            raise ValueError
+        return stored + 1, offset
+    return 256 << (code - 8), offset
+
+
+def _flac_sample_rate(
+    code: int, data: bytes, offset: int, stream_rate: int
+) -> tuple[int, int]:
+    if code == 0:
+        return stream_rate, offset
+    if code in _FLAC_SAMPLE_RATES:
+        return _FLAC_SAMPLE_RATES[code], offset
+    if code == 15:
+        raise ValueError
+    length = 1 if code == 12 else 2
+    stored, offset = _read_flac_uint(data, offset, length)
+    if stored == 0:
+        raise ValueError
+    if code == 12:
+        return stored * 1000, offset
+    if code == 14:
+        return stored * 10, offset
+    return stored, offset
+
+
+def _flac_frame_header_valid(path: Path, stream_info) -> bool:
+    try:
+        frame_offset, file_size = _flac_frame_offset(path)
+        remaining = file_size - frame_offset
+        with path.open("rb") as stream:
+            stream.seek(frame_offset)
+            data = stream.read(min(remaining, _MAX_FLAC_FRAME_HEADER_BYTES))
+
+        if len(data) < 4 or data[0] != 0xFF or (data[1] & 0xFE) != 0xF8:
+            raise ValueError
+        block_size_code = data[2] >> 4
+        sample_rate_code = data[2] & 0x0F
+        channel_code = data[3] >> 4
+        bit_depth_code = (data[3] >> 1) & 0x07
+        if data[3] & 0x01 or channel_code > 10 or bit_depth_code == 3:
+            raise ValueError
+
+        if len(data) < 5 or data[4] != 0:
+            raise ValueError
+        block_size, offset = _flac_block_size(block_size_code, data, 5)
+        if block_size > stream_info.max_blocksize or (
+            stream_info.total_samples > 0 and block_size > stream_info.total_samples
+        ):
+            raise ValueError
+        sample_rate, offset = _flac_sample_rate(
+            sample_rate_code, data, offset, stream_info.sample_rate
+        )
+        channel_count = channel_code + 1 if channel_code <= 7 else 2
+        bit_depth = (
+            stream_info.bits_per_sample
+            if bit_depth_code == 0
+            else _FLAC_BIT_DEPTHS[bit_depth_code]
+        )
+        if (
+            sample_rate != stream_info.sample_rate
+            or channel_count != stream_info.channels
+            or bit_depth != stream_info.bits_per_sample
+        ):
+            raise ValueError
+
+        stored_crc, crc_offset = _read_flac_uint(data, offset, 1)
+        if stored_crc != _flac_crc8(data[:offset]):
+            raise ValueError
+        return file_size - (frame_offset + crc_offset) >= 3
+    except (KeyError, OSError, ValueError):
+        return False
 
 
 def _media_quality(path: Path) -> tuple[ObtainedQuality, object]:
@@ -344,7 +472,7 @@ def _media_quality(path: Path) -> tuple[ObtainedQuality, object]:
             bit_depth <= 0
             or sampling_rate <= 0
             or audio.info.length <= 0
-            or not _flac_has_audio_payload(path)
+            or not _flac_frame_header_valid(path, audio.info)
         ):
             raise VerificationFailure("media", "final_media_invalid")
         return (
