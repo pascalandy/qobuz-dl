@@ -20,4 +20,25 @@ qobuz.initialize_client(email, password, qobuz.app_id, qobuz.secrets)
 qobuz.handle_url("https://play.qobuz.com/album/va4j3hdlwaubc")
 ```
 
+## Download results
+
+`QobuzDL.download_from_id(item_id, album=True, alt_path=None)` returns an immutable `DownloadResult` with three fields:
+
+| Field | Meaning |
+|---|---|
+| `state` | `finalized` when the top-level request completed, `ignored` when it was deliberately skipped or contained an ignored item, or `failed` when it could not complete |
+| `reason` | Representative outcome: `downloaded`, `existing_file`, `database_duplicate`, `type_filter`, `quality_filter`, `demo`, `missing_url`, `not_streamable`, `request_error`, `tagging_error`, or `empty_release` |
+| `finalized_paths` | Ordered tuple of final audio path strings confirmed during this attempt; partial albums may return paths even when their overall state is `ignored` or `failed` |
+
+Only a `finalized` result is added to duplicate history. A database duplicate returns `ignored` with reason `database_duplicate` and an empty `finalized_paths` tuple because the database check does not inspect the filesystem.
+
+```python
+result = qobuz.download_from_id("va4j3hdlwaubc", album=True)
+
+if result.state == "finalized":
+    print(*result.finalized_paths, sep="\n")
+else:
+    print(f"{result.state}: {result.reason}")
+```
+
 Attributes, methods, and parameters are named to describe their purpose.
