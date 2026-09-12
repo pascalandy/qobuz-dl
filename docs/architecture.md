@@ -1,10 +1,26 @@
 # qobuz-dl architecture
 
-This page describes the current `qobuz-dl` runtime for maintainers and agents. The source baseline is `master` at `1ef6f5b2cdd741b5bb816bffdf2fad786c56dbff`, observed on 2026-09-12.
+This page separates the stacked download and playlist implementation in this checkout from a historical snapshot of `master` at `1ef6f5b2cdd741b5bb816bffdf2fad786c56dbff`, observed on 2026-09-12. The stack is not claimed as merged into `master`.
+
+## Stacked download and playlist runtime
+
+The stacked runtime evaluates whether the requested destination contains an artifact with the expected track identity and effective media properties. A global item ID no longer suppresses a request before destination resolution.
+
+[`DownloadResult`](../qobuz_dl/downloader.py) is immutable. Its `state`, `reason`, and ordered `finalized_paths` describe one album or track attempt. A partial album can retain paths finalized before an ignored or failed child. This result does not provide a CLI-wide machine-readable summary. See [Download results](module-usage.md#download-results).
+
+Verified artifact evidence records the track ID, normalized path, requested quality, codec, bit depth, sample rate, bitrate, file size, and SHA-256 digest. Each request revalidates that evidence at the exact requested destination. With `--no-db`, the runtime skips SQLite but can use verified evidence created earlier in the same process.
+
+New and replacement media use a private `.qdl-*` directory beside the destination for staging, tagging, and inspection. The runtime proves the published file before it accepts the result. An occupied path without matching evidence produces `path_conflict` and remains unchanged. Handled failures or interruptions after displacement retain a logged private recovery directory. The exclusive-copy fallback can expose the destination before the copy completes, so it does not provide crash-atomic publication.
+
+Qobuz playlists and matched Last.fm playlist rows send every source occurrence through the same direct-track path. The ordered occurrence list preserves repeats. Different track IDs that resolve to one sanitized path produce a conflict instead of overwriting or adopting the first artifact. M3U generation projects only finalized paths from ordered outcomes. It does not scan or sort the playlist directory. `--no-m3u` disables only M3U writing. See [Playlist file behavior](use-cases.md#playlist-file-behavior) and the [download history satisfaction policy](feat/2026-09-12-download-history-policy/plan-download-history-satisfaction.md).
+
+Focused proof lives in [`test_download_results.py`](../tests/test_download_results.py), [`test_artifact_history.py`](../tests/test_artifact_history.py), [`test_destination_history.py`](../tests/test_destination_history.py), and [`test_playlist_m3u.py`](../tests/test_playlist_m3u.py).
+
+## Historical master snapshot
 
 The CLI coordinates a sequential pipeline. It turns command arguments, saved configuration, URLs, and search results into Qobuz item IDs. It fetches metadata and media, writes library artifacts, and records downloaded IDs in SQLite. The runtime favors human terminal output and best-effort batch progress over a caller-readable execution result.
 
-## The CLI owns process setup and cleanup
+### The CLI owns process setup and cleanup
 
 [`cli.main`](../qobuz_dl/cli.py) is the console entry point for both `qobuz-dl` and `qdl`. [`commands.qobuz_dl_args`](../qobuz_dl/commands.py) defines `dl`, `fun`, and `lucky`.
 
@@ -18,7 +34,7 @@ Help and version normally exit before config setup. A bare invocation or `--show
 
 After dispatch, `cli._handle_commands` calls `cli._remove_leftovers` in a `finally` block. The cleanup recursively removes hidden `.*.tmp` files below the download root. Direct Python consumers of `QobuzDL` do not receive this cleanup.
 
-## Requests become direct or collection plans
+### Requests become direct or collection plans
 
 [`core.QobuzDL`](../qobuz_dl/core.py) owns run options, source dispatch, search, collection expansion, duplicate checks, and downloader construction.
 
@@ -52,7 +68,7 @@ flowchart TD
 
 Collection execution creates a sanitized directory and calls `QobuzDL.download_from_id` once per item. Qobuz and Last.fm playlists then call [`utils.make_m3u`](../qobuz_dl/utils.py), which scans readable FLAC and MP3 files in that directory and writes sorted relative entries.
 
-## A download moves bytes through a temporary artifact
+### A download moves bytes through a temporary artifact
 
 [`downloader.Download`](../qobuz_dl/downloader.py) owns the file lifecycle. Album execution fetches album metadata and checks streamability. It uses the first track response to resolve the album directory and quality fallback decision. Direct track execution resolves its own response and directory.
 
@@ -73,7 +89,7 @@ Format IDs `5`, `6`, `7`, and `27` request MP3 320, CD-quality FLAC, hi-res up t
 
 For albums, only the first track controls the no-fallback decision. Later track responses do not repeat the check. The album directory uses the first resolved response's bit depth and sample rate. A custom track filename uses maximum quality fields from track metadata, so the directory and filename can describe different qualities after fallback.
 
-## Filesystem and database writes are process effects
+### Filesystem and database writes are process effects
 
 The runtime performs one request and one download at a time within a process. It has no thread pool, async scheduler, retry policy, total item limit, media byte budget, or free-space guard.
 
@@ -81,7 +97,7 @@ Separate processes have no shared artifact ownership protocol. Two processes can
 
 [`sanitize_filename`](../qobuz_dl/sanitize.py) removes control characters, cross-platform reserved characters, trailing dots, and reserved Windows names. It can return an empty string. The write path does not replace or reject an empty directory or track name. Final basenames are truncated to 250 characters, so two long names can collapse onto one pathname.
 
-## Normal return does not prove completion
+### Normal return does not prove completion
 
 `Download.download_release` and `Download.download_track` do not return a result. They log `Completed` after reaching the end of the method. `QobuzDL.download_from_id` records history whenever the method returns normally.
 
@@ -93,7 +109,7 @@ HTTP, connection, and non-streamable failures are logged and suppressed at the p
 
 The strongest proofs are [`test_download_execution_characterization.py`](../tests/test_download_execution_characterization.py), [`test_duplicate_tracking.py`](../tests/test_duplicate_tracking.py), [`test_metadata_characterization.py`](../tests/test_metadata_characterization.py), and [`test_http.py`](../tests/test_http.py). They cover successful layout and tags, stream cleanup, repeated IDs, and HTTP boundaries. They do not assert a structured result, partial album history, mixed-quality albums, or separate-process ownership.
 
-## Change ownership and proof
+### Change ownership and proof
 
 | Change area | Primary owner | Minimum focused proof |
 | --- | --- | --- |
@@ -106,8 +122,8 @@ The strongest proofs are [`test_download_execution_characterization.py`](../test
 
 Run `just ci` before finalizing code, tooling, packaging, or documentation changes. At this baseline the gate checks Ruff formatting and lint, pytest, CLI help, and package builds. Hosted CI also checks `--version` and runs Python 3.10 and 3.13. Neither gate runs the built wheel outside the source checkout here. Default tests use fakes and local fixtures. They must not require Qobuz credentials, a subscription, live network access, or real media downloads. See [`testing.md`](testing.md).
 
-## Future contracts live outside this baseline
+### Future contracts live outside this baseline
 
-This page remains the source for current `master` behavior. Accepted decisions and open proposals for agent-readable results, artifact history, reuse, and playlist semantics belong in the [`agent ergonomics design`](feat/2026-09-12-agent-ergonomics/design-agent-ergonomics.md). Delivery order and proof gates belong in the [`agent ergonomics implementation plan`](feat/2026-09-12-agent-ergonomics/impl-plan-agent-ergonomics.md).
+This historical section remains the source for behavior at `master` revision `1ef6f5b2cdd741b5bb816bffdf2fad786c56dbff`. Accepted decisions and open proposals for agent-readable results, artifact history, reuse, and playlist semantics belong in the [`agent ergonomics design`](feat/2026-09-12-agent-ergonomics/design-agent-ergonomics.md). Delivery order and proof gates belong in the [`agent ergonomics implementation plan`](feat/2026-09-12-agent-ergonomics/impl-plan-agent-ergonomics.md).
 
-Until those changes land, the current limitations above remain authoritative.
+The limitations in this historical section apply only to that revision. For behavior in this checkout, use the stacked runtime section and its linked current documentation.

@@ -352,22 +352,6 @@ def test_empty_album_is_ignored_without_history_or_completed_message(tmp_path, c
     assert _completed_messages(caplog) == []
 
 
-def test_database_duplicate_is_ignored_without_fabricated_paths(tmp_path, caplog):
-    db_path = tmp_path / "downloads.sqlite"
-    qdl = QobuzDL(
-        directory=tmp_path / "music",
-        downloads_db=db_path,
-    )
-    handle_download_id(db_path, "album-1", add_id=True)
-    qdl.client = object()
-    caplog.set_level("INFO")
-
-    result = qdl.download_from_id("album-1", album=True, legacy_destination=True)
-
-    _assert_result(result, "ignored", "database_duplicate")
-    assert _completed_messages(caplog) == []
-
-
 def test_download_from_id_preserves_non_streamable_result(tmp_path):
     qdl = QobuzDL(directory=tmp_path)
     qdl.client = object()

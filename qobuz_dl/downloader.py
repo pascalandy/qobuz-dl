@@ -46,7 +46,6 @@ class DownloadResult:
         "downloaded",
         "verified_artifact",
         "existing_file",
-        "database_duplicate",
         "type_filter",
         "quality_filter",
         "demo",
@@ -535,37 +534,6 @@ class Download:
         preparation = self._prepare_destination(track_attr, file_format)
         self._download_cover(meta["album"]["image"]["large"], preparation.directory)
         return preparation
-
-    def existing_track_path(self):
-        track_url = self.client.get_track_url(self.item_id, fmt_id=self.quality)
-        if "sample" in track_url:
-            return None
-
-        metadata = self.client.get_track_meta(self.item_id)
-        track_title = _get_title(metadata)
-        directory, quality_met, track_format = self._track_destination(
-            metadata, track_url, track_title
-        )
-        if not (self.downgrade_quality or quality_met) or not os.path.isdir(directory):
-            return None
-
-        final_file = self._track_final_path(
-            directory, metadata, self._is_mp3(), track_format
-        )
-        return final_file if os.path.isfile(final_file) else None
-
-    def _track_destination(self, meta, track_url_dict, track_title):
-        file_format, quality_met, bit_depth, sampling_rate = self._get_format(
-            track_url_dict
-        )
-        track_attr = self._get_track_attr(meta, track_title, bit_depth, sampling_rate)
-        folder_format, track_format = _clean_format_str(
-            self.folder_format, self.track_format, file_format
-        )
-        directory = os.path.join(
-            self.path, sanitize_filepath(folder_format.format(**track_attr))
-        )
-        return directory, quality_met, track_format
 
     def _quality_allows_download(self, item_title, quality_met):
         if self.downgrade_quality or quality_met:
