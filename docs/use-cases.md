@@ -68,6 +68,8 @@ The config file stores:
 - `folder_format`
 - `track_format`
 
+Before a command starts authentication or initializes the Qobuz client, the CLI parses and validates the existing config. The configured `default_quality` must be `5`, `6`, `7`, or `27`. `default_limit` must be an integer. Boolean preferences use ConfigParser's standard forms. `1`, `yes`, `true`, and `on` mean true. `0`, `no`, `false`, and `off` mean false. Explicit CLI options still override valid config defaults.
+
 Treat the config file as a secret. The saved password is hashed, not plaintext, but that hash is still used for the tool's login flow. `--show-config` redacts `email`, `password`, `app_id`, `secrets`, `private_key`, and `user_auth_token` if those keys are present, but the actual config file contains the saved values. The current config creator does not write `user_auth_token`; Qobuz login returns that token when a command initializes, and the process keeps it in memory for that run.
 
 On POSIX systems, config creation and reset set the `qobuz-dl` directory to `0700` and `config.ini` to `0600`. Commands that load config also repair these permissions before reading it, without changing the file's contents.
@@ -507,6 +509,8 @@ uvx qobuz-dl --show-config
 ```
 
 ### Recover from a corrupted config
+
+If the config is unreadable, malformed, incomplete, or contains an invalid typed value, the CLI refuses it before authentication and client initialization. The diagnostic identifies the requirement when possible and gives the reset command, but does not echo malformed values or config contents.
 
 ```sh
 uvx qobuz-dl --reset
