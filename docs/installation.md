@@ -60,7 +60,11 @@ qobuz-dl -r
 
 ## Choose a moving source or an exact revision
 
-The recommended commands use the repository URL without a revision. This moving source follows the current default branch and is suitable when you want the latest fork code.
+The recommended commands use the repository URL without a revision. This moving source follows the current default branch and may resolve a newer commit. `uv` can reuse cached data. To refresh the cached data before a one-shot run, use:
+
+```sh
+uvx --refresh --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl
+```
 
 For a reproducible install, append a full 40-character commit SHA to the source:
 
