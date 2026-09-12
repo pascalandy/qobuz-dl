@@ -14,6 +14,7 @@ from qobuz_dl.color import GREEN, RED, YELLOW
 from qobuz_dl.commands import QUALITY_CHOICES, RESET_COMMAND, qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
+from qobuz_dl.exceptions import BundleError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -308,6 +309,11 @@ def main():
         sys.exit(
             f"{RED}Unable to access configuration securely. "
             "Check its directory permissions and available disk space."
+        )
+    except BundleError as error:
+        sys.exit(
+            f"{RED}Unable to create configuration from the Qobuz web bundle: "
+            f"{error}. Configuration was not saved."
         )
     except _ConfigValidationError as error:
         sys.exit(
