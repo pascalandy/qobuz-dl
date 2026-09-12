@@ -444,17 +444,19 @@ MP3 and FLAC files use the same best-effort artwork policy. With `--embed-art`, 
 
 ### Playlist file behavior
 
-By default, a playlist download rewrites its `.m3u` file from the current source selection and the final audio paths available for that run. The file keeps the source order and repeated tracks. A repeated track appears more than once in the `.m3u`, but `qobuz-dl` transfers it at most once during that playlist run.
+By default, a playlist download rewrites its `.m3u` file from the ordered finalized outcomes of the current run. The file keeps the source order and repeated tracks. Each successful repeated occurrence appears in the `.m3u`. Later occurrences reuse an earlier artifact only while its destination and verified media facts still satisfy the request.
 
-The rewrite excludes audio files that are present in the playlist directory but absent from the source. It also excludes failed items without a readable final MP3 or FLAC path. Removing a source entry removes it from the next `.m3u` without deleting its audio file.
+The rewrite excludes audio files that are present in the playlist directory but absent from the source. It omits unmatched Last.fm rows and every unavailable, refused, failed, or conflicted outcome. Later successful occurrences keep their source positions. Removing a source entry removes it from the next `.m3u` without deleting its audio file.
 
-Qobuz and Last.fm playlist downloads retain the legacy duplicate behavior. A history row can let a playlist rerun reuse the expected file at the same playlist destination without transferring it again. Playlist artifact verification and repeat handling remain pending in [issue #81](https://github.com/pascalandy/qobuz-dl/issues/81).
+Qobuz playlist occurrences and matched Last.fm playlist occurrences use the same verified direct-track path. A verified artifact can satisfy an occurrence only at its expected playlist destination and effective quality. A different Qobuz track ID that resolves to the same sanitized path causes a conflict. `qobuz-dl` preserves the existing file and omits the conflicted occurrence.
 
 Disable `.m3u` creation and leave an existing playlist file unchanged:
 
 ```sh
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID --no-m3u
 ```
+
+`--no-m3u` changes only `.m3u` writing. It does not change downloads, artifact reuse, conflicts, history records, source order, or repeated occurrence handling.
 
 ### Duplicate tracking
 
@@ -470,7 +472,7 @@ Bypass duplicate tracking for one run:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-db
 ```
 
-`--no-db` makes no persistent database reads or writes. Evidence created earlier in the same process can satisfy a later occurrence. For direct track and album requests, an unexplained path that existed before the run still causes a conflict.
+`--no-db` makes no persistent database reads or writes. Verified evidence created earlier in the same process can satisfy a later direct or playlist occurrence. An unexplained path that existed before the run still causes a conflict.
 
 If a handled failure or interruption occurs after displacement, `qobuz-dl` retains a logged private `.qdl-*` recovery directory beside the destination. It retains that directory even when it restores the prior artifact. Recovery assumes that the destination parent stays stable and no other process modifies the private directory.
 

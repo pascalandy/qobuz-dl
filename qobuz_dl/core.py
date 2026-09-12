@@ -241,25 +241,9 @@ class QobuzDL:
             secret for secret in bundle.get_secrets().values() if secret
         ]  # avoid empty fields
 
-    def download_from_id(
-        self, item_id, album=True, alt_path=None, *, legacy_destination=False
-    ):
-        if legacy_destination and self.download_history.contains_legacy_id(item_id):
-            logger.info(
-                f"{OFF}This release ID ({item_id}) was already downloaded "
-                "according to the local database.\nUse the '--no-db' flag "
-                "to bypass this."
-            )
-            return downloader.DownloadResult("ignored", "database_duplicate")
+    def download_from_id(self, item_id, album=True, alt_path=None):
         try:
-            if legacy_destination:
-                dloader = self._new_downloader(
-                    item_id,
-                    alt_path,
-                    verified_destinations=False,
-                )
-            else:
-                dloader = self._new_downloader(item_id, alt_path)
+            dloader = self._new_downloader(item_id, alt_path)
             if album:
                 result = dloader.download_release()
             else:
@@ -373,11 +357,7 @@ class QobuzDL:
 
         logger.info(f"{YELLOW}{len(plan.item_ids)} downloads in queue")
         if plan.url_type == "playlist":
-            occurrences = self._download_playlist_occurrences(
-                plan.item_ids,
-                new_path,
-                recover_existing=plan.create_m3u,
-            )
+            occurrences = self._download_playlist_occurrences(plan.item_ids, new_path)
             if plan.create_m3u:
                 make_m3u(new_path, self._playlist_finalized_paths(occurrences))
             return occurrences
@@ -385,59 +365,23 @@ class QobuzDL:
         for item_id in plan.item_ids:
             self.download_from_id(item_id, plan.album, new_path)
 
-    def _download_playlist_occurrences(
-        self, item_ids, destination, *, recover_existing
-    ):
-        results_by_id = {}
-        occurrences = []
-        for item_id in item_ids:
-            if item_id not in results_by_id:
-                result = self.download_from_id(
-                    item_id,
-                    False,
-                    destination,
-                    legacy_destination=True,
-                )
-                if recover_existing and result.reason == "database_duplicate":
-                    result = self._reuse_playlist_destination(
-                        item_id, destination, result
-                    )
-                results_by_id[item_id] = result
-            occurrences.append(_PlaylistOccurrence(item_id, results_by_id[item_id]))
-        return tuple(occurrences)
-
-    def _reuse_playlist_destination(self, item_id, destination, duplicate_result):
-        try:
-            final_path = self._new_downloader(
+    def _download_playlist_occurrences(self, item_ids, destination):
+        return tuple(
+            _PlaylistOccurrence(
                 item_id,
-                destination,
-                verified_destinations=False,
-            ).existing_track_path()
-        except (http.HttpError, ConnectionError):
-            return duplicate_result
-        if final_path:
-            return downloader.DownloadResult(
-                "finalized", "existing_file", (final_path,)
+                self.download_from_id(item_id, False, destination),
             )
-        return duplicate_result
+            for item_id in item_ids
+        )
 
     @staticmethod
     def _playlist_finalized_paths(occurrences):
-        claimed_paths = {}
-        finalized_paths = []
-        for occurrence in occurrences:
-            for path in occurrence.result.finalized_paths:
-                path_key = os.path.normcase(os.path.abspath(path))
-                existing_owner = claimed_paths.setdefault(path_key, occurrence.item_id)
-                if existing_owner != occurrence.item_id:
-                    logger.warning(
-                        "%s and %s resolved to the same playlist file: %s",
-                        existing_owner,
-                        occurrence.item_id,
-                        path,
-                    )
-                finalized_paths.append(path)
-        return tuple(finalized_paths)
+        return tuple(
+            path
+            for occurrence in occurrences
+            if occurrence.result.state == "finalized"
+            for path in occurrence.result.finalized_paths
+        )
 
     def handle_url(self, url):
         plan = self._resolve_url_download_plan(url)
@@ -655,11 +599,7 @@ class QobuzDL:
             if track_id:
                 track_ids.append(track_id)
 
-        occurrences = self._download_playlist_occurrences(
-            track_ids,
-            pl_directory,
-            recover_existing=not self.no_m3u_for_playlists,
-        )
+        occurrences = self._download_playlist_occurrences(track_ids, pl_directory)
         if not self.no_m3u_for_playlists:
             create_and_return_dir(pl_directory)
             make_m3u(pl_directory, self._playlist_finalized_paths(occurrences))
