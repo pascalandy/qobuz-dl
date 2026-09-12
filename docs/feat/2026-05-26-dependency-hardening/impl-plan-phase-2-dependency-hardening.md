@@ -1,5 +1,7 @@
 # Implementation Plan: Dependency Hardening Phase 2
 
+> Historical plan, 26 May 2026. Commit [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08) completed this phase. Unchecked boxes below preserve the original plan. They are not active work. See [Dependencies](../../dependencies.md) and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for current state.
+
 ## Overview
 
 Implement Phase 2 of dependency hardening: add characterization tests around dependency-owned behavior before removing or replacing dependencies. This phase should make current behavior observable and reproducible without changing runtime dependency choices yet.
@@ -8,10 +10,10 @@ The goal is not broad coverage. The goal is a focused test net that makes later 
 
 ## Source Inputs
 
-- `docs/sdlc/2026-05-26-dependency-hardening/vision-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/architecture-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/impl-plan-phase-1-dependency-hardening.md`
-- `docs/dependencies.md`
+- [Dependency hardening vision](vision-dependency-hardening.md)
+- [Dependency hardening architecture](architecture-dependency-hardening.md)
+- [Phase 1 plan](impl-plan-phase-1-dependency-hardening.md)
+- [Dependencies](../../dependencies.md)
 - Existing tests under `tests/`
 - Current implementation in `qobuz_dl/core.py`, `qobuz_dl/downloader.py`, `qobuz_dl/qopy.py`, `qobuz_dl/bundle.py`, `qobuz_dl/color.py`, `qobuz_dl/metadata.py`, and `qobuz_dl/utils.py`
 
@@ -297,6 +299,6 @@ The goal is not broad coverage. The goal is a focused test net that makes later 
 - Whether interactive multiselect behavior can be tested cleanly without brittle terminal simulation. This does not block Phase 2; if it is awkward, document it as a Phase 4 review point.
 - Whether bundle secret extraction can be represented with a compact fixture. This does not block Phase 2 if app ID extraction is covered and secret extraction is explicitly marked as a targeted follow-up before Phase 5.
 
-## Recommended Next Phase
+## Current routing
 
-`pa-tdd` for Task 1 first, then continue through the characterization surfaces in risk order. After Phase 2 passes `just ci` and review, move to a new `pa-plan-slicer` plan for Phase 3: low-risk utility dependency removals.
+This phase is complete in [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08). Use [Dependencies](../../dependencies.md) for current policy and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for remaining work.

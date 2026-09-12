@@ -69,9 +69,9 @@ This fork now removes every item in that list except `mutagen`. The net effect i
 
 ### Upstream release watch
 
-The latest published Mutagen release on PyPI and GitHub Releases is `1.47.0`, published on 2023-09-03. That is why the current lockfile resolves `mutagen 1.47.0`.
+The committed lockfile resolves `mutagen 1.47.0`, published on 2023-09-03. The declared `mutagen>=1.47,<2` range can resolve a newer 1.x release when an install does not use `uv.lock`. Do not treat the locked version as a claim about the latest published release.
 
-Mutagen's upstream `main` branch has continued receiving maintenance after `1.47.0`. As of the last review, upstream `main` includes post-release work for packaging, CI, Python-version support, documentation, and audio-format fixes such as ID3, MP3, Ogg, and Ogg Opus changes. Its `NEWS` file starts an unreleased `1.48.0` section, while `pyproject.toml` currently reports `version = "1.47.1"`; verify the final release number from GitHub Releases and PyPI when upstream publishes the next package.
+An earlier review found post-`1.47.0` work on Mutagen's upstream `main` branch. That observation is historical and does not identify the current release. Check PyPI, GitHub Releases, and the upstream changelog during each dependency audit.
 
 The next Mutagen release should be treated as an intentional audit point, not an automatic background update:
 

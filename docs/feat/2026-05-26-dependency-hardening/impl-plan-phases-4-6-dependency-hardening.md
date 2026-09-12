@@ -1,5 +1,7 @@
 # Implementation Plan: Dependency Hardening Phases 4-6
 
+> Historical plan, 26 May 2026. Commit [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08) completed these phases. Unchecked boxes below preserve the original plan. They are not active work. See [Dependencies](../../dependencies.md) and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for current state.
+
 ## Overview
 
 Implement the remaining dependency-hardening phases after Phase 3 removes the low-risk utility dependencies.
@@ -14,11 +16,11 @@ This plan is sequential. Phase 4 removes secondary-feature dependency risk first
 
 ## Source Inputs
 
-- `docs/sdlc/2026-05-26-dependency-hardening/vision-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/architecture-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/impl-plan-phase-2-dependency-hardening.md`
-- `docs/sdlc/2026-05-26-dependency-hardening/impl-plan-phase-3-dependency-hardening.md`
-- `docs/dependencies.md`
+- [Dependency hardening vision](vision-dependency-hardening.md)
+- [Dependency hardening architecture](architecture-dependency-hardening.md)
+- [Phase 2 plan](impl-plan-phase-2-dependency-hardening.md)
+- [Phase 3 plan](impl-plan-phase-3-dependency-hardening.md)
+- [Dependencies](../../dependencies.md)
 - Phase 2 characterization tests, especially Last.fm, interactive, Qobuz API, bundle, and streamed-download tests
 - Current implementation in `qobuz_dl/core.py`, `qobuz_dl/qopy.py`, `qobuz_dl/bundle.py`, `qobuz_dl/downloader.py`, `qobuz_dl/metadata.py`, and `qobuz_dl/utils.py`
 - Current dependency declarations in `pyproject.toml`, `requirements.txt`, and `uv.lock`
@@ -443,6 +445,6 @@ This plan is sequential. Phase 4 removes secondary-feature dependency risk first
 - HTTP backend shape: whether stdlib-only is sufficient or the boundary should allow a future optional backend. Review after Task 5.
 - `mutagen` version policy: exact pin versus bounded range. Decide before Task 10.
 
-## Recommended Next Phase
+## Current routing
 
-After Phase 3 is complete and reviewed, run `pa-tdd` for Task 1 of this plan. Continue checkpoint-by-checkpoint: Phase 4 decisions first, then HTTP boundary review before Phase 5 migration, then `mutagen` governance for Phase 6.
+These phases are complete in [`a81fbe4`](https://github.com/pascalandy/qobuz-dl/commit/a81fbe45704e140dcf64ade036f1e8965c0e6b08). Use [Dependencies](../../dependencies.md) for current policy and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for remaining work.
