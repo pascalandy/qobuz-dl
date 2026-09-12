@@ -1,6 +1,6 @@
 # Use cases
 
-This guide organizes `qobuz-dl` by local-library goal. Examples use `uvx qobuz-dl`, the recommended no-install workflow. If you installed the optional persistent tool with `uv tool install qobuz-dl`, you may replace `uvx qobuz-dl` with `qobuz-dl`. From a local checkout, use `uv run qobuz-dl ...`.
+This guide organizes `qobuz-dl` by local-library goal. Examples use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl`, the recommended no-install workflow. If you installed the optional persistent tool with `uv tool install git+https://github.com/pascalandy/qobuz-dl.git`, you may replace `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl` with `qobuz-dl`. From a local checkout, use `uv run qobuz-dl ...`.
 
 ## Library-building workflows for collectors
 
@@ -8,13 +8,13 @@ This guide organizes `qobuz-dl` by local-library goal. Examples use `uvx qobuz-d
 
 | Goal | Workflow | Start with |
 |---|---|---|
-| Add a hi-res album to a local library | Download the album URL with `--quality 27` to request the highest hi-res tier supported by the CLI. Leave fallback enabled to accept a lower available tier, or add `--no-fallback` when you only want the requested quality. | `uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27` |
-| Keep clean folder names | Use `--folder-format` and `--track-format` with metadata such as album artist, album, year, bit depth, sample rate, track number, and title. | `uvx qobuz-dl dl ALBUM_URL -ff "{albumartist} - {album} ({year})" -tf "{tracknumber}. {tracktitle}"` |
-| Intake an artist catalog | Download an artist URL. Add `--albums-only` to skip singles, EPs, and Various Artists releases where applicable; add `--smart-discography` to reduce likely spam/extras and prefer practical remaster/quality choices. | `uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography` |
-| Capture a label or playlist | Download label URLs, Qobuz playlist URLs, Last.fm playlist URLs, or a text file of saved URLs. Playlist downloads can create `.m3u` files unless you pass `--no-m3u`. | `uvx qobuz-dl dl urls.txt` |
-| Avoid duplicate downloads | Let the local downloaded-ID database skip IDs that were already downloaded. Use `--no-db` for a one-off bypass or `uvx qobuz-dl --purge` to reset the database. | `uvx qobuz-dl dl ALBUM_URL` |
-| Choose an artwork policy | Keep the default `cover.jpg`, embed artwork with `--embed-art`, request original-quality covers with `--og-cover`, or skip cover downloads with `--no-cover`. | `uvx qobuz-dl dl ALBUM_URL --embed-art --og-cover` |
-| Discover from the terminal | Use `fun` for interactive search with queueing, or `lucky` when a best-match album, track, artist, or playlist search is good enough. | `uvx qobuz-dl fun --limit 10` |
+| Add a hi-res album to a local library | Download the album URL with `--quality 27` to request the highest hi-res tier supported by the CLI. Leave fallback enabled to accept a lower available tier, or add `--no-fallback` when you only want the requested quality. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27` |
+| Keep clean folder names | Use `--folder-format` and `--track-format` with metadata such as album artist, album, year, bit depth, sample rate, track number, and title. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl ALBUM_URL -ff "{albumartist} - {album} ({year})" -tf "{tracknumber}. {tracktitle}"` |
+| Intake an artist catalog | Download an artist URL. Add `--albums-only` to skip singles, EPs, and Various Artists releases where applicable; add `--smart-discography` to reduce likely spam/extras and prefer practical remaster/quality choices. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography` |
+| Capture a label or playlist | Download label URLs, Qobuz playlist URLs, Last.fm playlist URLs, or a text file of saved URLs. Playlist downloads can create `.m3u` files unless you pass `--no-m3u`. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl urls.txt` |
+| Avoid duplicate downloads | Let the local downloaded-ID database skip IDs that were already downloaded. Use `--no-db` for a one-off bypass or `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge` to reset the database. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl ALBUM_URL` |
+| Choose an artwork policy | Keep the default `cover.jpg`, embed artwork with `--embed-art`, request original-quality covers with `--og-cover`, or skip cover downloads with `--no-cover`. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl ALBUM_URL --embed-art --og-cover` |
+| Discover from the terminal | Use `fun` for interactive search with queueing, or `lucky` when a best-match album, track, artist, or playlist search is good enough. | `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun --limit 10` |
 
 ## 1. Account and authentication
 
@@ -25,7 +25,7 @@ You need an active Qobuz subscription. `qobuz-dl` creates a local config on firs
 Run any command that requires config, or explicitly reset/create config:
 
 ```sh
-uvx qobuz-dl -r
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -r
 ```
 
 The prompt asks for:
@@ -85,7 +85,7 @@ You can copy the config file to another computer to avoid re-entering the Qobuz 
 1. On the source computer, locate the files:
 
    ```sh
-   uvx qobuz-dl --show-config
+   uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --show-config
    ```
 
 2. Transfer the displayed `Configuration` file to the destination computer as `config.ini`. Transfer the displayed `Database` file as `qobuz_dl.db` too only if you want to preserve duplicate-tracking history.
@@ -115,20 +115,20 @@ You can copy the config file to another computer to avoid re-entering the Qobuz 
 
 4. If `default_folder` contains an old absolute path or a path from another operating system, edit it before the first download on the new computer.
 
-Use an encrypted transfer or trusted local copy method. Do not paste `config.ini` into issues, chat logs, shell history, public sync folders, or commits. If the copied app ID or app secrets stop working after Qobuz changes its web app, run `uvx qobuz-dl --reset` on the destination computer to refresh the config.
+Use an encrypted transfer or trusted local copy method. Do not paste `config.ini` into issues, chat logs, shell history, public sync folders, or commits. If the copied app ID or app secrets stop working after Qobuz changes its web app, run `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --reset` on the destination computer to refresh the config.
 
 ### Check whether config already exists
 
 Show the config path, database path, and redacted config values:
 
 ```sh
-uvx qobuz-dl --show-config
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --show-config
 ```
 
 Short form:
 
 ```sh
-uvx qobuz-dl -sc
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -sc
 ```
 
 Note: this confirms local configuration exists. If no config exists yet, normal first-run config creation runs before the paths and redacted values are printed. `--show-config` exits before initializing the Qobuz client, so it is not a dedicated login-validation command. Account access is validated when a Qobuz command initializes and talks to Qobuz.
@@ -138,16 +138,16 @@ Note: this confirms local configuration exists. If no config exists yet, normal 
 Use this when credentials changed, the config is broken, app credentials need to be refreshed, or you want a fresh setup:
 
 ```sh
-uvx qobuz-dl --reset
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --reset
 ```
 
 Short form:
 
 ```sh
-uvx qobuz-dl -r
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -r
 ```
 
-`--reset` prompts for Qobuz email, Qobuz password, default download folder, and default quality, fetches the current Qobuz app ID and app secrets, rewrites `config.ini`, and exits before initializing the Qobuz client. It does not delete `qobuz_dl.db`; use `uvx qobuz-dl --purge` if you also want to remove duplicate-tracking history.
+`--reset` prompts for Qobuz email, Qobuz password, default download folder, and default quality, fetches the current Qobuz app ID and app secrets, rewrites `config.ini`, and exits before initializing the Qobuz client. It does not delete `qobuz_dl.db`; use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge` if you also want to remove duplicate-tracking history.
 
 The replacement is written to a temporary file in the same directory, then installed atomically. A failure before replacement preserves the previous config's contents.
 
@@ -158,31 +158,31 @@ These are the main content-oriented use cases.
 ### Download a single track
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/track/TRACK_ID
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/track/TRACK_ID
 ```
 
 With explicit max available quality:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/track/TRACK_ID --quality 27
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/track/TRACK_ID --quality 27
 ```
 
 ### Download an album
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID
 ```
 
 With explicit max available quality:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27
 ```
 
 ### Download all albums from an artist
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID
 ```
 
 ### Download main artist albums only
@@ -190,19 +190,19 @@ uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID
 Skip singles, EPs, and Various Artists releases where applicable:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only
 ```
 
 For a more practical artist-discography filter that tries to reduce likely spam/extras and prefer useful remaster/quality choices:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --smart-discography
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --smart-discography
 ```
 
 You can combine both:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-discography
 ```
 
 ## 3. Other downloads
@@ -210,19 +210,19 @@ uvx qobuz-dl dl https://play.qobuz.com/artist/ARTIST_ID --albums-only --smart-di
 ### Download a Qobuz playlist
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID
 ```
 
 ### Download a label catalog
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/label/LABEL_ID
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/label/LABEL_ID
 ```
 
 Only main albums from the label:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/label/LABEL_ID --albums-only
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/label/LABEL_ID --albums-only
 ```
 
 ### Download many URLs from a text file
@@ -239,13 +239,13 @@ https://play.qobuz.com/playlist/PLAYLIST_ID
 Then run:
 
 ```sh
-uvx qobuz-dl dl urls.txt
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl urls.txt
 ```
 
 ### Download a Last.fm playlist
 
 ```sh
-uvx qobuz-dl dl https://www.last.fm/user/USERNAME/playlists/PLAYLIST_ID
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://www.last.fm/user/USERNAME/playlists/PLAYLIST_ID
 ```
 
 ## 4. Discovery and selection
@@ -255,13 +255,13 @@ Use discovery when you do not already have the exact Qobuz URL.
 ### Search interactively, select results, and queue downloads
 
 ```sh
-uvx qobuz-dl fun
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun
 ```
 
 Limit the number of search results shown per query:
 
 ```sh
-uvx qobuz-dl fun --limit 10
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun --limit 10
 ```
 
 Interactive mode lets you search for albums, tracks, artists, or playlists, select numbered results, and queue one or more downloads. Selection accepts comma-separated numbers and ranges such as `1,3-5`.
@@ -271,36 +271,36 @@ Interactive mode lets you search for albums, tracks, artists, or playlists, sele
 By default, `lucky` searches albums:
 
 ```sh
-uvx qobuz-dl lucky "artist album name"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky "artist album name"
 ```
 
 Download the first matching track:
 
 ```sh
-uvx qobuz-dl lucky --type track "artist song title"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type track "artist song title"
 ```
 
 Download the first matching artist result:
 
 ```sh
-uvx qobuz-dl lucky --type artist "artist name"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type artist "artist name"
 ```
 
 Download the first matching playlist:
 
 ```sh
-uvx qobuz-dl lucky --type playlist "playlist name"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type playlist "playlist name"
 ```
 
 Download the first N matches:
 
 ```sh
-uvx qobuz-dl lucky --type album --number 3 "search terms"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type album --number 3 "search terms"
 ```
 
 ## 5. Download preferences and configuration
 
-Most download preferences can be supplied as command flags for one run. To make a preference permanent, edit the config file shown by `uvx qobuz-dl --show-config`.
+Most download preferences can be supplied as command flags for one run. To make a preference permanent, edit the config file shown by `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --show-config`.
 
 ### Audio quality
 
@@ -315,22 +315,22 @@ Recommended user-facing choices:
 Use MP3:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 5
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 5
 ```
 
 Use CD quality:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 6
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 6
 ```
 
 Use max available resolution for one run:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27
 ```
 
-Make max available resolution the persistent default by setting this in the config file shown by `uvx qobuz-dl --show-config`:
+Make max available resolution the persistent default by setting this in the config file shown by `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --show-config`:
 
 ```ini
 default_quality = 27
@@ -345,19 +345,19 @@ By default, fallback is enabled: if the requested quality is unavailable, `qobuz
 Disable fallback and skip releases unavailable at the requested quality:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27 --no-fallback
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --quality 27 --no-fallback
 ```
 
 ### Download directory
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --directory "Music/Qobuz"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --directory "Music/Qobuz"
 ```
 
 Short form:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID -d "Music/Qobuz"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID -d "Music/Qobuz"
 ```
 
 ### Folder and track naming
@@ -365,21 +365,21 @@ uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID -d "Music/Qobuz"
 Set folder naming for one run:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
   --folder-format "{albumartist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]"
 ```
 
 Set track filename naming for one run:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
   --track-format "{tracknumber}. {artist} - {tracktitle}"
 ```
 
 Short forms:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
   -ff "{albumartist} - {album} ({year})" \
   -tf "{tracknumber}. {tracktitle}"
 ```
@@ -403,25 +403,25 @@ Default behavior downloads `cover.jpg`.
 Embed cover art into audio files:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art
 ```
 
 Download original-quality cover art when available:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --og-cover
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --og-cover
 ```
 
 Do not download `cover.jpg`:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-cover
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-cover
 ```
 
 Combine options:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art --og-cover
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art --og-cover
 ```
 
 ### Playlist file behavior
@@ -429,7 +429,7 @@ uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art --og-cover
 By default, playlist downloads can create `.m3u` playlist files. Disable `.m3u` creation:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID --no-m3u
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID --no-m3u
 ```
 
 ### Duplicate tracking
@@ -441,19 +441,19 @@ Rows already present in the database are trusted as before. `qobuz-dl` does not 
 Bypass duplicate tracking for one run:
 
 ```sh
-uvx qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-db
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --no-db
 ```
 
 Delete the downloaded-IDs database so previously tracked releases may download again:
 
 ```sh
-uvx qobuz-dl --purge
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge
 ```
 
 Short form:
 
 ```sh
-uvx qobuz-dl -p
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -p
 ```
 
 ### View or edit persistent defaults
@@ -461,7 +461,7 @@ uvx qobuz-dl -p
 Show the config path and redacted settings:
 
 ```sh
-uvx qobuz-dl --show-config
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --show-config
 ```
 
 Then edit the displayed config file to make defaults persistent, for example:
@@ -485,27 +485,27 @@ Then edit the displayed config file to make defaults persistent, for example:
 ### Show help
 
 ```sh
-uvx qobuz-dl --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --help
 ```
 
 Command-specific help:
 
 ```sh
-uvx qobuz-dl dl --help
-uvx qobuz-dl fun --help
-uvx qobuz-dl lucky --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --help
 ```
 
 ### Show version
 
 ```sh
-uvx qobuz-dl --version
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --version
 ```
 
 ### Inspect config and database locations
 
 ```sh
-uvx qobuz-dl --show-config
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --show-config
 ```
 
 ### Recover from a corrupted config
@@ -513,5 +513,5 @@ uvx qobuz-dl --show-config
 If the config is unreadable, malformed, incomplete, or contains an invalid typed value, the CLI refuses it before authentication and client initialization. The diagnostic identifies the requirement when possible and gives the reset command, but does not echo malformed values or config contents.
 
 ```sh
-uvx qobuz-dl --reset
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --reset
 ```
