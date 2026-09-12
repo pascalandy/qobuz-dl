@@ -5,6 +5,7 @@
 import hashlib
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from qobuz_dl.color import GREEN, YELLOW
@@ -154,24 +155,51 @@ class Client:
                 raise AuthenticationError("Invalid credentials.\n" + RESET)
             elif response.status_code == 400:
                 raise InvalidAppIdError("Invalid app id.\n" + RESET)
-            else:
-                logger.info(f"{GREEN}Logged: OK")
         elif (
             epoint in ["track/getFileUrl", "favorite/getUserFavorites"]
             and response.status_code == 400
         ):
-            raise InvalidAppSecretError(
-                f"Invalid app secret: {response.json()}.\n" + RESET
-            )
+            raise InvalidAppSecretError("Invalid app secret.\n" + RESET)
 
     def auth(self, email, pwd):
-        usr_info = self.api_call("user/login", email=email, pwd=pwd)
-        if not usr_info["user"]["credential"]["parameters"]:
-            raise IneligibleError("Free accounts are not eligible to download tracks.")
-        self.uat = usr_info["user_auth_token"]
-        self.session.headers.update({"X-User-Auth-Token": self.uat})
-        self.label = usr_info["user"]["credential"]["parameters"]["short_label"]
-        logger.info(f"{GREEN}Membership: {self.label}")
+        try:
+            usr_info = self.api_call("user/login", email=email, pwd=pwd)
+            if not isinstance(usr_info, Mapping):
+                raise TypeError
+
+            user = usr_info["user"]
+            if not isinstance(user, Mapping):
+                raise TypeError
+
+            credential = user["credential"]
+            if not isinstance(credential, Mapping):
+                raise TypeError
+
+            parameters = credential["parameters"]
+            if parameters is None:
+                raise IneligibleError(
+                    "Free accounts are not eligible to download tracks."
+                )
+            if not isinstance(parameters, Mapping):
+                raise TypeError
+            if not parameters:
+                raise IneligibleError(
+                    "Free accounts are not eligible to download tracks."
+                )
+
+            token = usr_info["user_auth_token"]
+            label = parameters["short_label"]
+            if not isinstance(token, str) or not token or not isinstance(label, str):
+                raise TypeError
+        except IneligibleError:
+            raise
+        except (KeyError, TypeError, ValueError):
+            raise AuthenticationError("Invalid login response.") from None
+
+        self.uat = token
+        self.session.headers.update({"X-User-Auth-Token": token})
+        self.label = label
+        logger.info(f"{GREEN}Logged: OK")
 
     def multi_meta(self, epoint, key, item_id, content_type):
         total = 1
