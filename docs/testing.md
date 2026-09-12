@@ -152,6 +152,8 @@ Network behavior should be tested with mocks. Live API or download tests should 
 
 Small readable static fixtures live under `tests/fixtures/`. Characterization tests should pair those fixtures with local fakes or `monkeypatch` so references to Last.fm, Qobuz, or media URLs never perform live network calls in the default suite.
 
+The Last.fm characterization tests pass static HTML fixtures through the importer with mocked Qobuz search and download boundaries. They prove row pairing, nested text handling, incomplete-row skipping, source order, repeated-row preservation, search queries, and downloaded IDs. These offline tests do not prove that live Last.fm pages are available or still use the fixture's HTML structure.
+
 HTTP-adjacent tests should prefer local fake response/session classes that implement only the behavior under test, such as `json()`, `raise_for_status()`, `headers`, `read()`, or context-manager entry and exit. Interactive tests should use built-in prompt/input fakes instead of requiring a real terminal or manual input.
 
 The CI and local `just ci` gate build and install the exact wheel before testing its imports and entry points. This catches packaging metadata errors that source checks can miss.
