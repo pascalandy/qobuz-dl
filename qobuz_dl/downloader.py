@@ -59,6 +59,7 @@ class DownloadResult:
 class _DownloadPreparation:
     directory: str
     is_mp3: bool
+    track_format: str
 
 
 def _destination_name_max(directory: str) -> int:
@@ -272,12 +273,12 @@ class Download:
         album_attr = self._get_album_attr(
             meta, album_title, file_format, bit_depth, sampling_rate
         )
-        directory = self._prepare_destination(album_attr, file_format)
-        self._download_cover(meta["image"]["large"], directory)
-        return _DownloadPreparation(directory=directory, is_mp3=self._is_mp3())
+        preparation = self._prepare_destination(album_attr, file_format)
+        self._download_cover(meta["image"]["large"], preparation.directory)
+        return preparation
 
     def _prepare_track_download(self, meta, track_url_dict, track_title):
-        _file_format, quality_met, bit_depth, sampling_rate = self._get_format(
+        file_format, quality_met, bit_depth, sampling_rate = self._get_format(
             track_url_dict
         )
 
@@ -285,9 +286,9 @@ class Download:
             return None
 
         track_attr = self._get_track_attr(meta, track_title, bit_depth, sampling_rate)
-        directory = self._prepare_destination(track_attr, str(bit_depth))
-        self._download_cover(meta["album"]["image"]["large"], directory)
-        return _DownloadPreparation(directory=directory, is_mp3=self._is_mp3())
+        preparation = self._prepare_destination(track_attr, file_format)
+        self._download_cover(meta["album"]["image"]["large"], preparation.directory)
+        return preparation
 
     def _quality_allows_download(self, item_title, quality_met):
         if self.downgrade_quality or quality_met:
@@ -298,13 +299,17 @@ class Download:
         return False
 
     def _prepare_destination(self, folder_attr, file_format):
-        folder_format, _ = _clean_format_str(
+        folder_format, track_format = _clean_format_str(
             self.folder_format, self.track_format, file_format
         )
         sanitized_title = sanitize_filepath(folder_format.format(**folder_attr))
         directory = os.path.join(self.path, sanitized_title)
         os.makedirs(directory, exist_ok=True)
-        return directory
+        return _DownloadPreparation(
+            directory=directory,
+            is_mp3=self._is_mp3(),
+            track_format=track_format,
+        )
 
     def _download_cover(self, cover_url, directory):
         if self.no_cover:
@@ -321,44 +326,19 @@ class Download:
         is_track,
         multiple=None,
     ):
-        return self._download_and_tag(
-            preparation.directory,
-            track_url_dict,
-            track_metadata,
-            album_or_track_metadata,
-            is_track,
-            preparation.is_mp3,
-            multiple,
-        )
-
-    def _is_mp3(self):
-        return int(self.quality) == 5
-
-    def _download_and_tag(
-        self,
-        root_dir,
-        track_url_dict,
-        track_metadata,
-        album_or_track_metadata,
-        is_track,
-        is_mp3,
-        multiple=None,
-    ):
-        extension = ".mp3" if is_mp3 else ".flac"
+        root_dir = preparation.directory
+        extension = ".mp3" if preparation.is_mp3 else ".flac"
 
         if multiple:
             root_dir = os.path.join(root_dir, f"Disc {multiple}")
             os.makedirs(root_dir, exist_ok=True)
 
-        # Determine the filename
         track_title = track_metadata.get("title")
         artist = _safe_get(track_metadata, "performer", "name")
         filename_attr = self._get_filename_attr(artist, track_metadata, track_title)
 
-        # track_format is a format string
-        # e.g. '{tracknumber}. {artist} - {tracktitle}'
         component = filename_component(
-            self.track_format.format(**filename_attr),
+            preparation.track_format.format(**filename_attr),
             extension,
             _destination_name_max(root_dir),
         )
@@ -382,7 +362,7 @@ class Download:
         try:
             os.close(descriptor)
             download_with_progress(url, filename, filename)
-            tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
+            tag_function = metadata.tag_mp3 if preparation.is_mp3 else metadata.tag_flac
             try:
                 tag_function(
                     filename,
@@ -411,6 +391,9 @@ class Download:
                 logger.debug(
                     "Could not remove temporary download %s: %s", filename, error
                 )
+
+    def _is_mp3(self):
+        return int(self.quality) == 5
 
     @staticmethod
     def _get_filename_attr(artist, track_metadata, track_title):

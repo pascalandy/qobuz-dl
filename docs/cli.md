@@ -91,9 +91,11 @@ Folder and track format patterns may use these keys where available:
 - `tracknumber`
 - `version`
 
+For MP3 quality (`--quality 5`), the default folder name ends with `[MP3]` for both album and direct-track downloads. qobuz-dl still uses a valid custom `--folder-format`.
+
 ## Final audio filename behavior
 
-`--track-format` produces one final audio filename component. After the existing invalid-character and whitespace cleanup, qobuz-dl keeps an ordinary nonempty name unchanged and appends the audio extension.
+`--track-format` produces one final audio filename component. If the pattern has one trailing lowercase `.mp3` or `.flac` suffix, qobuz-dl removes that suffix before it applies the existing invalid-character and whitespace cleanup. It then appends the extension for the downloaded audio. Album and direct-track downloads use this same rule, so the pattern produces one final audio extension.
 
 If cleanup leaves an empty name or a Windows-reserved first stem, qobuz-dl uses `track-<digest>` plus the original `.flac` or `.mp3` extension. Reserved first stems include `CON`, `PRN`, `AUX`, `NUL`, `COM1` through `COM9`, `LPT1` through `LPT9`, and their recognized superscript variants, with or without another extension. If the complete name is too long, qobuz-dl keeps a whole-character prefix and adds `~<digest>` before the extension. The digest comes from the unmodified formatted name and acts as a deterministic discriminator for repaired and truncated names.
 
