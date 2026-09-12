@@ -303,6 +303,17 @@ def _open_stream_with_rate_limit_retry(request: Request, timeout):
     return acquisition.response
 
 
+def _validate_bandwidth_limit(bandwidth_limit: int | None) -> None:
+    if bandwidth_limit is None:
+        return
+    if (
+        isinstance(bandwidth_limit, bool)
+        or not isinstance(bandwidth_limit, int)
+        or bandwidth_limit <= 0
+    ):
+        raise ValueError("bandwidth_limit must be a positive integer or None")
+
+
 def stream_download(
     url: str,
     target,
@@ -314,6 +325,7 @@ def stream_download(
     retry_rate_limited=False,
     bandwidth_limit: int | None = None,
 ) -> int:
+    _validate_bandwidth_limit(bandwidth_limit)
     try:
         request = Request(url, headers=dict(headers or {}))
         response = (

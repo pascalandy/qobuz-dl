@@ -151,6 +151,38 @@ def test_qobuz_dl_threads_bandwidth_to_new_downloads(tmp_path):
     assert download.bandwidth_limit == 4096
 
 
+@pytest.mark.parametrize("value", [0, -1, True, False, 1.0, "1024"])
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_stream_download_rejects_invalid_bandwidth_before_side_effects(
+    tmp_path, monkeypatch, value, target_exists
+):
+    target = tmp_path / "track.flac"
+    if target_exists:
+        target.write_bytes(b"existing audio")
+
+    def unexpected_request(url, headers):
+        pytest.fail("invalid bandwidth must stop before creating a request")
+
+    def unexpected_open(request, timeout):
+        pytest.fail("invalid bandwidth must stop before opening a network response")
+
+    monkeypatch.setattr(http, "Request", unexpected_request)
+    monkeypatch.setattr(http, "urlopen", unexpected_open)
+
+    with pytest.raises(ValueError) as exc_info:
+        http.stream_download(
+            "https://media.example.test/track.flac",
+            target,
+            bandwidth_limit=value,
+        )
+
+    assert str(exc_info.value) == ("bandwidth_limit must be a positive integer or None")
+    if target_exists:
+        assert target.read_bytes() == b"existing audio"
+    else:
+        assert not target.exists()
+
+
 def test_stream_download_paces_exact_bytes_after_read_and_write(tmp_path, monkeypatch):
     clock = Clock()
     response = BufferResponse(
