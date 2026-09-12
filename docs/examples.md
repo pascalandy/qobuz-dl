@@ -66,6 +66,8 @@ Download a Last.fm playlist in maximum quality:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://www.last.fm/user/vitiko98/playlists/11887574 -q 27
 ```
 
+The importer builds one Qobuz track search for each complete Last.fm table row. It keeps each row's artist and title pairing, joins text split across nested tags, and preserves the source order. The importer skips rows with an empty artist or title. It also skips rows without a closing `</tr>`, so fields from those rows do not combine with later rows. Repeated complete rows remain available to later download and playlist processing.
+
 ## Interactive mode
 
 Run interactive mode with a limit of 10 results:
