@@ -160,3 +160,35 @@ def test_download_with_progress_raises_connection_error_when_stream_is_short(
         download_with_progress("https://media.example.test/file", target, "track")
 
     assert not target.exists()
+
+
+def test_download_with_progress_runs_interrupt_hook_after_write_and_cleans_target(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "track.flac.tmp"
+
+    class ControlledInterruption(Exception):
+        pass
+
+    def fake_stream_download(
+        url, target_path, *, progress=None, retry_rate_limited=False
+    ):
+        target_path.write_bytes(b"first bytes")
+        progress(11, 11, 100)
+        return 11
+
+    monkeypatch.setattr(
+        "qobuz_dl.downloader.http.stream_download", fake_stream_download
+    )
+
+    with pytest.raises(ControlledInterruption):
+        download_with_progress(
+            "https://media.example.test/file",
+            target,
+            "track",
+            after_write=lambda size, downloaded, total: (_ for _ in ()).throw(
+                ControlledInterruption
+            ),
+        )
+
+    assert not target.exists()
