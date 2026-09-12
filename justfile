@@ -29,6 +29,10 @@ lint-fix:
 test:
     uv run pytest
 
+# Run unit tests with line and branch coverage
+coverage:
+    uv run --frozen pytest --cov=qobuz_dl --cov-branch --cov-report=term-missing
+
 # Build source and wheel distributions
 build:
     uv build
