@@ -62,4 +62,4 @@ Release steps:
 3. Run `just ci` locally and commit.
 4. Tag the commit `vX.Y.Z` (the tag must match the package version) and push the tag.
 
-The release build job runs the same full `scripts/check.py` gate as local `just ci` and normal CI. That gate builds and verifies the wheel and source distribution before it copies them to `dist/`. The release job then verifies that the tag matches the package version and uploads those already verified artifacts. The publish job attaches them to a GitHub release with generated release notes.
+The release build job runs the same full `scripts/check.py` gate as local `just ci` and normal CI. That gate builds the wheel and source distribution, verifies the wheel, and copies both artifacts to `dist/`. The release job then verifies that the tag matches the package version and uploads the artifacts. The publish job attaches them to a GitHub release with generated release notes.

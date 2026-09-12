@@ -47,7 +47,7 @@ The runner performs these checks in order:
 6. Create a temporary virtual environment and install the exact wheel by its absolute path.
 7. From an empty directory outside the checkout, verify that `qobuz_dl` imports from the temporary environment.
 8. Repeat the seven CLI probes with the installed `qobuz-dl` and `qdl` entry points. Both version commands must print the exact package version.
-9. Print the verified wheel's SHA-256 digest and copy the verified wheel and source distribution to `dist/`.
+9. Print the verified wheel's SHA-256 digest and copy the verified wheel and the source distribution to `dist/`.
 
 Run individual checks:
 
