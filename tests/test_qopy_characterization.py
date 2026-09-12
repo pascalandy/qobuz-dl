@@ -510,3 +510,38 @@ def test_client_init_updates_required_headers_when_auth_and_secret_tests_are_fak
     assert client.session.headers["Content-Type"] == "application/json;charset=UTF-8"
     assert client.session.headers["X-User-Auth-Token"] == "token-123"
     assert client.label == "Studio"
+
+
+def test_client_init_can_scope_secret_probe_to_an_authorized_track(monkeypatch):
+    captured_sessions = []
+
+    class AuthorizedTrackSession:
+        def __init__(self):
+            self.headers = {}
+            self.calls = []
+            captured_sessions.append(self)
+
+        def get(self, url, params=None):
+            self.calls.append((url, params))
+            if url.endswith("user/login"):
+                return FakeResponse(
+                    payload={
+                        "user": {
+                            "credential": {"parameters": {"short_label": "Studio"}}
+                        },
+                        "user_auth_token": "token-123",
+                    }
+                )
+            return FakeResponse(payload={"url": "https://media.example.test/track"})
+
+    monkeypatch.setattr("qobuz_dl.qopy.HttpClient", AuthorizedTrackSession)
+
+    Client(
+        "user@example.com",
+        "password",
+        "123456789",
+        ["secret"],
+        secret_test_track_id="authorized-track-id",
+    )
+
+    assert captured_sessions[0].calls[1][1]["track_id"] == "authorized-track-id"
