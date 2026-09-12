@@ -1,6 +1,6 @@
 # qobuz-dl local project capabilities
 
-Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026-05-26. Only the authentication and endpoint evidence was updated on 2026-09-11. Other sections retain the original exploration date.
+Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026-05-26. Authentication and endpoint evidence was updated on 2026-09-11 and 2026-09-12. Other sections retain the original exploration date.
 
 ## Project shape and entry points
 
@@ -25,10 +25,12 @@ Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026
 ## Config, auth, and session behavior
 
 - Config lives under OS config dir: macOS/Linux `~/.config/qobuz-dl/config.ini`; DB at `~/.config/qobuz-dl/qobuz_dl.db` (`qobuz_dl/cli.py:23-30`).
-- First non-help run creates config interactively: email, MD5-hashed password, default folder, default quality, limit, booleans, app ID, secrets, and filename formats (`qobuz_dl/cli.py:225-264`). Help/version bypass config creation (`qobuz_dl/cli.py:292-293`).
+- First non-help run creates config interactively. The CLI reads hidden plaintext password input, computes one lowercase MD5 hexadecimal digest over its UTF-8 bytes, and stores the digest under the historical `password` key. It also stores the email, defaults, app ID, secrets, and filename formats (`qobuz_dl/cli.py:237-264`). Help/version bypass config creation (`qobuz_dl/cli.py:292-293`).
 - App ID and app secrets are scraped from Qobuz web bundle: fetch `https://play.qobuz.com/login`, parse bundle JS URL, fetch bundle, extract production app ID and timezone-specific secrets (`qobuz_dl/bundle.py:17-77`).
-- Client auth uses Qobuz endpoint `user/login` with email, MD5 password, and app ID. Before changing session state, it validates the response structure, eligible membership parameters, a string membership label, and a non-empty string user token. Free accounts without membership parameters are rejected, while malformed success responses raise the fixed `Invalid login response.` error (`qobuz_dl/qopy.py:62-63`, `qobuz_dl/qopy.py:82-87`, `qobuz_dl/qopy.py:164-197`; `tests/test_qopy_characterization.py:266-345`).
+- CLI startup passes the stored digest to `QobuzDL.initialize_client` unchanged. Library callers must also supply the digest expected by the current flow and must not hash an existing digest again. `initialize_client` forwards its `pwd` argument unchanged (`qobuz_dl/cli.py:393-398`, `qobuz_dl/core.py:193-195`; `tests/test_auth_contract.py:114-183`).
+- Client auth currently uses GET for `user/login`, with email, the password digest, and app ID in the query. This is current local behavior, not a claim about required or live-verified server transport. Before changing session state, the client validates the response structure, eligible membership parameters, a string membership label, and a non-empty string user token. Free accounts without membership parameters are rejected, while malformed success responses raise the fixed `Invalid login response.` error (`qobuz_dl/qopy.py:54-56`, `qobuz_dl/qopy.py:62-63`, `qobuz_dl/qopy.py:82-87`, `qobuz_dl/qopy.py:164-197`; `tests/test_auth_contract.py:80-98`; `tests/test_qopy_characterization.py:266-345`).
 - After validation, the user token is stored and added to the session as `X-User-Auth-Token`, then authentication prints the fixed `Logged: OK` message. The server-provided membership label is retained internally but not logged (`qobuz_dl/qopy.py:199-202`; `tests/test_qopy_characterization.py:348-378`). Initial headers include `User-Agent`, `X-App-Id`, and JSON content type (`qobuz_dl/qopy.py:38-47`).
+- The password digest is credential-equivalent, not encryption. The current login flow can use the digest without the plaintext password. [Authentication credential and transport evidence](authentication-transport.md) records the dated public-client evidence and the unverified server inferences.
 - Secret validation calls `track/getFileUrl` on hard-coded track ID `5966783` at format 5 until a secret works (`qobuz_dl/qopy.py:266-284`).
 
 ## Qobuz API/client endpoints used
@@ -50,7 +52,7 @@ Endpoints wired in `qobuz_dl/qopy.py`:
 | Favorites | `favorite/getUserFavorites` | wrappers exist at `qobuz_dl/qopy.py:248-261`; request behavior is documented below |
 | User playlists | `playlist/getUserPlaylists` | wrapper exists at `qobuz_dl/qopy.py:263-264`, not used by CLI |
 
-`favorite/getUserFavorites` requests use the configured app secret by default and preserve each wrapper's type, offset, and limit. Direct API calls can override the secret (`qobuz_dl/qopy.py:120-132`, `qobuz_dl/qopy.py:248-261`; `tests/test_qopy_characterization.py:417-482`). No CLI path calls these wrappers.
+`favorite/getUserFavorites` requests use GET and the configured app secret by default. The current request puts the user token in both the query and the session header. This is current local behavior, not proof that the server accepts header-only authentication or requires both placements. The wrappers preserve type, offset, and limit, and direct API calls can override the secret (`qobuz_dl/qopy.py:52-55`, `qobuz_dl/qopy.py:120-132`, `qobuz_dl/qopy.py:199-200`, `qobuz_dl/qopy.py:248-261`; `tests/test_auth_contract.py:100-111`; `tests/test_qopy_characterization.py:417-482`). No CLI path calls these wrappers.
 
 ## Download behavior
 
@@ -77,7 +79,7 @@ Endpoints wired in `qobuz_dl/qopy.py`:
 
 - Main proof gate is `just ci`, which runs ruff format check, ruff lint, pytest, CLI smoke help checks, and `uv build` (`justfile:15-40`).
 - Default tests must not require Qobuz credentials, an active subscription, live Qobuz API calls, live Last.fm pages, or real media downloads; network behavior should be mocked (`docs/testing.md:87-100`).
-- Current tests cover CLI parsing/help/config redaction (`tests/test_commands.py`), DB behavior (`tests/test_db.py`), HTTP boundary (`tests/test_http.py`), bundle parsing/download stream characterization (`tests/test_bundle_downloader_characterization.py`), Last.fm fixtures (`tests/test_lastfm_characterization.py`), qopy API call/signature behavior (`tests/test_qopy_characterization.py`), terminal prompts (`tests/test_terminal_interactive_characterization.py`), sanitization/path generation (`tests/test_sanitization_characterization.py`), metadata helpers (`tests/test_metadata_characterization.py`), and imports (`tests/test_imports.py`).
+- Current tests cover CLI parsing/help/config redaction (`tests/test_commands.py`), offline credential forwarding and request placement (`tests/test_auth_contract.py`), DB behavior (`tests/test_db.py`), HTTP boundary (`tests/test_http.py`), bundle parsing/download stream characterization (`tests/test_bundle_downloader_characterization.py`), Last.fm fixtures (`tests/test_lastfm_characterization.py`), qopy API call/signature behavior (`tests/test_qopy_characterization.py`), terminal prompts (`tests/test_terminal_interactive_characterization.py`), sanitization/path generation (`tests/test_sanitization_characterization.py`), metadata helpers (`tests/test_metadata_characterization.py`), and imports (`tests/test_imports.py`).
 - Dependency docs explicitly require characterization tests before later dependency removals and keep `mutagen` as retained/pinned/audited (`docs/dependencies.md:7-20`, `docs/dependencies.md:22-60`).
 - Packaging metadata belongs in `pyproject.toml`; `setup.py` is intentionally minimal and should not regain duplicate metadata (`docs/packaging.md:1-35`).
 - Documentation map expects user docs in `README.md` and detailed docs under `docs/` (`docs/INDEX.md:1-13`). Behavior/tooling/package changes should update docs per repository instructions.

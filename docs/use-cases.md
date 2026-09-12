@@ -33,11 +33,17 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -r
 The prompt asks for:
 
 - Qobuz email
-- Qobuz password
+- Qobuz password, with terminal input hidden
 - default download folder
 - default quality
 
 If you want max available resolution as your normal default, enter `27` for the default quality. If you leave the first-run quality prompt empty, the current config creator uses `6` / CD quality.
+
+The config creator encodes the plaintext password as UTF-8 and computes one lowercase MD5 hexadecimal digest. It stores the digest under the historical `password` key. Later commands pass that stored digest to `QobuzDL.initialize_client` unchanged. Do not hash the stored digest again.
+
+The current client sends `GET user/login` with `email`, `password`, and `app_id` in the query. Here, `password` is the stored digest. A successful response supplies a user token that stays in memory and becomes the `X-User-Auth-Token` session header. The Favorites client currently sends that token in both the GET query and the session header.
+
+These statements document current local behavior. They do not claim that Qobuz requires these placements or that this investigation verified them against the live server. See [Authentication credential and transport evidence](research/authentication-transport.md) for the dated public-client observations and the evidence gap tracked in [issue #63](https://github.com/pascalandy/qobuz-dl/issues/63).
 
 ### Where auth/config and the database live
 
@@ -55,7 +61,7 @@ On Windows, `--help`, `--version`, and command-specific help remain available wh
 The config file stores:
 
 - `email`
-- `password`, as an MD5 hash of the Qobuz password
+- `password`, as one lowercase MD5 hexadecimal digest of the UTF-8 Qobuz password
 - `app_id`
 - `secrets`
 - `default_folder`
@@ -74,7 +80,7 @@ The config file stores:
 
 Before a command starts authentication or initializes the Qobuz client, the CLI parses and validates the existing config. The configured `default_quality` must be `5`, `6`, `7`, or `27`. `default_limit` must be an integer. Boolean preferences use ConfigParser's standard forms. `1`, `yes`, `true`, and `on` mean true. `0`, `no`, `false`, and `off` mean false. Explicit CLI options still override valid config defaults.
 
-Treat the config file as a secret. The saved password is hashed, not plaintext, but that hash is still used for the tool's login flow. `--show-config` redacts `email`, `password`, `app_id`, `secrets`, `private_key`, and `user_auth_token` if those keys are present, but the actual config file contains the saved values. The current config creator does not write `user_auth_token`; Qobuz login returns that token when a command initializes, and the process keeps it in memory for that run.
+Treat the config file as a secret. The saved password digest is not plaintext, but it is credential-equivalent because the tool uses it directly for login. `--show-config` redacts `email`, `password`, `app_id`, `secrets`, `private_key`, and `user_auth_token` if those keys are present, but the actual config file contains the saved values. The current config creator does not write `user_auth_token`; Qobuz login returns that token when a command initializes, and the process keeps it in memory for that run.
 
 On POSIX systems, config creation and reset set the `qobuz-dl` directory to `0700` and `config.ini` to `0600`. Commands that load config also repair these permissions before reading it, without changing the file's contents.
 
