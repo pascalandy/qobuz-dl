@@ -68,7 +68,7 @@ These options are shared by `fun`, `dl`, and `lucky`.
 | `-q`, `--quality QUALITY` | Audio quality: `5` = MP3 320, `6` = FLAC lossless, `7` = 24-bit <=96kHz, `27` = 24-bit >96kHz. |
 | `--albums-only` | For artist/label downloads, skip singles, EPs, and Various Artists releases. |
 | `--no-m3u` | Do not create `.m3u` playlist files when downloading playlists. |
-| `--no-fallback` | Disable quality fallback; skip releases unavailable at the requested quality. |
+| `--no-fallback` | Disable quality fallback; skip each track that Qobuz marks as a quality downgrade. |
 | `-e`, `--embed-art` | Embed cover art into audio files. |
 | `--og-cover` | Download cover art at original quality when available. |
 | `--no-cover` | Do not download `cover.jpg`. |
