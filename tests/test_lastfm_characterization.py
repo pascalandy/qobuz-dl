@@ -4,6 +4,7 @@ import pytest
 
 from qobuz_dl import http
 from qobuz_dl.core import QobuzDL
+from qobuz_dl.downloader import DownloadResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -99,16 +100,22 @@ def test_lastfm_playlist_parsing_sanitizes_title_downloads_found_tracks_and_obey
         no_m3u_for_playlists=no_m3u_for_playlists,
     )
     monkeypatch.setattr("qobuz_dl.core.http.get_text", fake_get_text)
-    monkeypatch.setattr("qobuz_dl.core.make_m3u", lambda path: m3u_paths.append(path))
+    monkeypatch.setattr(
+        "qobuz_dl.core.make_m3u",
+        lambda path, finalized_paths: m3u_paths.append(path),
+    )
 
     def fake_search(query, item_type, limit=10, lucky=False):
         queries.append((query, item_type, limit, lucky))
         return [f"https://play.qobuz.com/track/id{len(queries)}"]
 
     qdl.search_by_type = fake_search
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloads.append(
-        (item_id, album, alt_path)
-    )
+
+    def record_download(item_id, album=True, alt_path=None):
+        downloads.append((item_id, album, alt_path))
+        return DownloadResult("finalized", "downloaded")
+
+    qdl.download_from_id = record_download
 
     qdl.download_lastfm_pl("https://www.last.fm/user/example/library/playlists/1")
 
@@ -136,7 +143,10 @@ def test_lastfm_playlist_with_no_usable_track_list_does_not_search_or_download(
     m3u_paths = []
 
     monkeypatch.setattr("qobuz_dl.core.http.get_text", lambda url, timeout: html)
-    monkeypatch.setattr("qobuz_dl.core.make_m3u", lambda path: m3u_paths.append(path))
+    monkeypatch.setattr(
+        "qobuz_dl.core.make_m3u",
+        lambda path, finalized_paths: m3u_paths.append(path),
+    )
 
     qdl = QobuzDL(directory=tmp_path)
     qdl.search_by_type = lambda *args, **kwargs: search_calls.append((args, kwargs))
@@ -168,7 +178,10 @@ def test_lastfm_playlist_http_errors_do_not_escape(
         raise http_error
 
     monkeypatch.setattr("qobuz_dl.core.http.get_text", fake_get_text)
-    monkeypatch.setattr("qobuz_dl.core.make_m3u", lambda path: m3u_paths.append(path))
+    monkeypatch.setattr(
+        "qobuz_dl.core.make_m3u",
+        lambda path, finalized_paths: m3u_paths.append(path),
+    )
 
     qdl = QobuzDL(directory=tmp_path)
     qdl.search_by_type = lambda *args, **kwargs: search_calls.append((args, kwargs))
