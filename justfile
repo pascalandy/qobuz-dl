@@ -46,3 +46,11 @@ check:
 
 # Alias for CI
 ci: check
+
+# Verify the floating Git install source in isolated temporary environments (networked)
+verify-install:
+    uv run --frozen python scripts/verify_install.py
+
+# Verify a full 40-character Git revision in isolated temporary environments (networked)
+verify-install-revision revision:
+    uv run --frozen python scripts/verify_install.py {{ quote(revision) }}
