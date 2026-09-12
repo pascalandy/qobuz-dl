@@ -161,6 +161,49 @@ def test_tag_mp3_writes_track_metadata_cover_flag_and_renames(tmp_path):
     assert no_cover.getall("APIC") == []
 
 
+def test_tag_flac_can_write_staging_file_without_publishing(tmp_path):
+    album = _fake_album()
+    track = _fake_track(album)
+    temp_file = tmp_path / "staged.flac"
+    final_file = tmp_path / "Disc 2" / "02. Finale.flac"
+    _write_fake_flac(temp_file)
+
+    metadata.tag_flac(
+        str(temp_file),
+        str(tmp_path),
+        str(final_file),
+        track,
+        album,
+        istrack=False,
+        finalize=False,
+    )
+
+    assert temp_file.is_file()
+    assert not final_file.exists()
+    assert FLAC(temp_file)["DISCNUMBER"] == ["2"]
+
+
+def test_tag_mp3_can_write_staging_file_without_publishing(tmp_path):
+    album = _fake_album()
+    track = _fake_track(album)
+    temp_file = tmp_path / "staged.mp3"
+    final_file = tmp_path / "02. Finale.mp3"
+    temp_file.write_bytes(b"fake mp3 frame bytes")
+
+    metadata.tag_mp3(
+        str(temp_file),
+        str(tmp_path),
+        str(final_file),
+        track,
+        album,
+        finalize=False,
+    )
+
+    assert temp_file.is_file()
+    assert not final_file.exists()
+    assert ID3(temp_file, translate=False)["TIT2"].text == ["Suite: Finale (Live)"]
+
+
 def test_tag_mp3_converts_existing_v24_frames_before_v23_save(tmp_path):
     album = _fake_album()
     track = _fake_track(album)

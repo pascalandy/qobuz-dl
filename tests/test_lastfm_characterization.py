@@ -23,8 +23,8 @@ def test_lastfm_playlist_keeps_complete_rows_and_fragment_order(tmp_path, monkey
         return [f"https://play.qobuz.com/track/row{len(queries)}"]
 
     qdl.search_by_type = fake_search
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloads.append(
-        (item_id, album, alt_path)
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None, **_kwargs: (
+        downloads.append((item_id, album, alt_path))
     )
 
     qdl.download_lastfm_pl("https://www.last.fm/user/example/playlists/row-pairs")
@@ -67,8 +67,8 @@ def test_lastfm_playlist_ignores_valueless_class_attributes(tmp_path, monkeypatc
         return ["https://play.qobuz.com/track/validid"]
 
     qdl.search_by_type = fake_search
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: downloads.append(
-        (item_id, album, alt_path)
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None, **_kwargs: (
+        downloads.append((item_id, album, alt_path))
     )
 
     qdl.download_lastfm_pl("https://www.last.fm/user/example/playlists/valueless")
@@ -111,7 +111,7 @@ def test_lastfm_playlist_parsing_sanitizes_title_downloads_found_tracks_and_obey
 
     qdl.search_by_type = fake_search
 
-    def record_download(item_id, album=True, alt_path=None):
+    def record_download(item_id, album=True, alt_path=None, **_kwargs):
         downloads.append((item_id, album, alt_path))
         return DownloadResult("finalized", "downloaded")
 

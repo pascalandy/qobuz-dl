@@ -241,8 +241,10 @@ class QobuzDL:
             secret for secret in bundle.get_secrets().values() if secret
         ]  # avoid empty fields
 
-    def download_from_id(self, item_id, album=True, alt_path=None):
-        if self.download_history.contains_legacy_id(item_id):
+    def download_from_id(
+        self, item_id, album=True, alt_path=None, *, legacy_destination=False
+    ):
+        if legacy_destination and self.download_history.contains_legacy_id(item_id):
             logger.info(
                 f"{OFF}This release ID ({item_id}) was already downloaded "
                 "according to the local database.\nUse the '--no-db' flag "
@@ -250,7 +252,14 @@ class QobuzDL:
             )
             return downloader.DownloadResult("ignored", "database_duplicate")
         try:
-            dloader = self._new_downloader(item_id, alt_path)
+            if legacy_destination:
+                dloader = self._new_downloader(
+                    item_id,
+                    alt_path,
+                    verified_destinations=False,
+                )
+            else:
+                dloader = self._new_downloader(item_id, alt_path)
             if album:
                 result = dloader.download_release()
             else:
@@ -264,7 +273,7 @@ class QobuzDL:
             self.download_history.record_legacy_id(item_id)
         return result
 
-    def _new_downloader(self, item_id, alt_path=None):
+    def _new_downloader(self, item_id, alt_path=None, *, verified_destinations=True):
         return downloader.Download(
             self.client,
             item_id,
@@ -278,6 +287,7 @@ class QobuzDL:
             self.folder_format,
             self.track_format,
             download_history=self.download_history,
+            verified_destinations=verified_destinations,
         )
 
     def _resolve_url_download_plan(self, url):
@@ -382,7 +392,12 @@ class QobuzDL:
         occurrences = []
         for item_id in item_ids:
             if item_id not in results_by_id:
-                result = self.download_from_id(item_id, False, destination)
+                result = self.download_from_id(
+                    item_id,
+                    False,
+                    destination,
+                    legacy_destination=True,
+                )
                 if recover_existing and result.reason == "database_duplicate":
                     result = self._reuse_playlist_destination(
                         item_id, destination, result
@@ -394,7 +409,9 @@ class QobuzDL:
     def _reuse_playlist_destination(self, item_id, destination, duplicate_result):
         try:
             final_path = self._new_downloader(
-                item_id, destination
+                item_id,
+                destination,
+                verified_destinations=False,
             ).existing_track_path()
         except (http.HttpError, ConnectionError):
             return duplicate_result

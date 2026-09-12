@@ -130,7 +130,7 @@ def test_qobuz_playlist_rewrites_from_current_source_without_scanning_directory(
     qdl.client = Client()
     transfers = []
 
-    def download(item_id, album=True, alt_path=None):
+    def download(item_id, album=True, alt_path=None, **_kwargs):
         transfers.append((item_id, album, alt_path))
         return DownloadResult("finalized", "downloaded", (str(paths[item_id]),))
 
@@ -171,7 +171,9 @@ def test_playlist_occurrences_preserve_explicit_failures_and_usable_failed_paths
         "tagging-failed": DownloadResult("failed", "tagging_error", (str(usable),)),
         "missing": DownloadResult("failed", "missing_url"),
     }
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: results[item_id]
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None, **_kwargs: (
+        results[item_id]
+    )
 
     occurrences = qdl._download_playlist_occurrences(
         ("tagging-failed", "missing"),
@@ -353,7 +355,7 @@ def test_distinct_track_ids_claiming_one_path_are_reported(tmp_path, caplog):
     shared = tmp_path / "shared.flac"
     result = DownloadResult("finalized", "existing_file", (str(shared),))
     qdl = QobuzDL(directory=tmp_path)
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: result
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None, **_kwargs: result
     caplog.set_level(logging.WARNING, logger="qobuz_dl.core")
 
     occurrences = qdl._download_playlist_occurrences(
@@ -381,8 +383,8 @@ def test_lastfm_html_selection_flows_through_real_m3u_output(tmp_path, monkeypat
     qdl.search_by_type = lambda query, item_type, limit, lucky: [
         f"https://play.qobuz.com/track/id{1 if query.startswith('Alpha') else 2}"
     ]
-    qdl.download_from_id = lambda item_id, album=True, alt_path=None: DownloadResult(
-        "finalized", "existing_file", (str(paths[item_id]),)
+    qdl.download_from_id = lambda item_id, album=True, alt_path=None, **_kwargs: (
+        DownloadResult("finalized", "existing_file", (str(paths[item_id]),))
     )
 
     qdl.download_lastfm_pl("https://www.last.fm/user/example/playlists/1")

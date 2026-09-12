@@ -153,6 +153,7 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
         27,
         no_cover=True,
         track_format="{tracknumber}. {artist} - {tracktitle}",
+        verified_destinations=False,
     )
 
     download.download_track()
@@ -185,7 +186,7 @@ def test_playlist_and_artist_handle_url_directories_are_sanitized(
     qdl = QobuzDL(directory=tmp_path, no_m3u_for_playlists=True)
     downloaded = []
 
-    def record_download(item_id, album=True, alt_path=None):
+    def record_download(item_id, album=True, alt_path=None, **_kwargs):
         downloaded.append((item_id, album, alt_path))
         return DownloadResult("finalized", "downloaded")
 

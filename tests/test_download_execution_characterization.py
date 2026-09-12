@@ -77,6 +77,8 @@ def _labeled_track_meta():
 def _track_url(track_id, *, restrictions=None):
     parsed = {
         "url": f"https://media.example.test/{track_id}.flac",
+        "format_id": 27,
+        "mime_type": "audio/flac",
         "sampling_rate": 96,
         "bit_depth": 24,
     }
@@ -167,16 +169,17 @@ def _download_real_media(
         shutil.copyfile(fixture, filename)
 
     monkeypatch.setattr(downloader, "download_with_progress", copy_fixture)
-    qdl = QobuzDL(
-        directory=tmp_path,
+    client = FakeDownloadClient(track_meta=track_meta, album_meta=album_meta)
+    download = Download(
+        client,
+        "album-1" if album else "track-1",
+        str(tmp_path),
         quality=quality,
         no_cover=True,
         folder_format="proof",
         track_format="track",
     )
-    qdl.client = FakeDownloadClient(track_meta=track_meta, album_meta=album_meta)
-
-    qdl.download_from_id("album-1" if album else "track-1", album=album)
+    download.download_release() if album else download.download_track()
 
     return tmp_path / "proof" / f"track.{extension}"
 

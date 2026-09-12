@@ -156,7 +156,15 @@ def _embed_id3_img(root_dir, audio: id3.ID3):
 
 # Use KeyError catching instead of dict.get to avoid empty tags
 def tag_flac(
-    filename, root_dir, final_name, d: dict, album, istrack=True, em_image=False
+    filename,
+    root_dir,
+    final_name,
+    d: dict,
+    album,
+    istrack=True,
+    em_image=False,
+    *,
+    finalize=True,
 ):
     """
     Tag a FLAC file
@@ -168,6 +176,7 @@ def tag_flac(
     :param dict album: Album dictionary from Qobuz_client
     :param bool istrack
     :param bool em_image: Embed cover art into file
+    :param bool finalize: Rename the tagged file to ``final_name``
     """
     audio = FLAC(filename)
     tags = _build_metadata_payload(d, album, istrack=istrack)
@@ -195,10 +204,21 @@ def tag_flac(
         _embed_flac_img(root_dir, audio)
 
     audio.save()
-    os.rename(filename, final_name)
+    if finalize:
+        os.rename(filename, final_name)
 
 
-def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=False):
+def tag_mp3(
+    filename,
+    root_dir,
+    final_name,
+    d,
+    album,
+    istrack=True,
+    em_image=False,
+    *,
+    finalize=True,
+):
     """
     Tag an mp3 file
 
@@ -208,6 +228,7 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
     :param dict d: Track dictionary from Qobuz_client
     :param bool istrack
     :param bool em_image: Embed cover art into file
+    :param bool finalize: Rename the tagged file to ``final_name``
     """
 
     try:
@@ -250,4 +271,5 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
         _embed_id3_img(root_dir, audio)
 
     audio.save(filename, v2_version=3)
-    os.rename(filename, final_name)
+    if finalize:
+        os.rename(filename, final_name)

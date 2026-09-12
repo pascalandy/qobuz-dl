@@ -128,6 +128,10 @@ def _qobuz(tmp_path, client, *, quality=27, quality_fallback=False):
         downloads_db=tmp_path / "downloads.sqlite",
     )
     qdl.client = client
+    new_downloader = qdl._new_downloader
+    qdl._new_downloader = lambda item_id, alt_path=None: new_downloader(
+        item_id, alt_path, verified_destinations=False
+    )
     return qdl
 
 

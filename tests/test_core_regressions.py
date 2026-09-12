@@ -363,7 +363,7 @@ def test_handle_url_downloads_collection_items_from_every_page(
     m3u_paths = []
     metadata_item_ids = []
 
-    def record_download(item_id, album=True, alt_path=None):
+    def record_download(item_id, album=True, alt_path=None, **_kwargs):
         downloaded.append((item_id, album, alt_path))
         return DownloadResult("finalized", "downloaded")
 
@@ -644,7 +644,7 @@ def test_lastfm_playlist_skips_tracks_without_qobuz_matches(tmp_path, monkeypatc
     )
     qdl.search_by_type = lambda *args, **kwargs: next(searches)
 
-    def record_download(item_id, album=True, alt_path=None):
+    def record_download(item_id, album=True, alt_path=None, **_kwargs):
         downloads.append(item_id)
         return DownloadResult("finalized", "downloaded")
 

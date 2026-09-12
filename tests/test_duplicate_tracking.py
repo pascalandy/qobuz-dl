@@ -26,6 +26,7 @@ def _record_downloads(monkeypatch, calls, failures=None):
             track_format,
             *,
             download_history,
+            verified_destinations,
         ):
             self.item_id = item_id
             self.path = path
@@ -48,7 +49,7 @@ def _record_downloads(monkeypatch, calls, failures=None):
     monkeypatch.setattr("qobuz_dl.core.downloader.Download", FakeDownload)
 
 
-def test_duplicate_db_records_successful_album_and_track_downloads(
+def test_direct_downloads_bypass_legacy_ids_but_keep_recording_them(
     tmp_path, monkeypatch, caplog
 ):
     calls = []
@@ -66,12 +67,14 @@ def test_duplicate_db_records_successful_album_and_track_downloads(
     assert [(item_id, is_track) for item_id, is_track, _path in calls] == [
         ("album-1", False),
         ("track-1", True),
+        ("album-1", False),
+        ("track-1", True),
     ]
     assert handle_download_id(db_path, "album-1") == ("album-1",)
     assert handle_download_id(db_path, "track-1") == ("track-1",)
     assert (
         sum("already downloaded" in record.getMessage() for record in caplog.records)
-        == 2
+        == 0
     )
 
 
@@ -93,9 +96,7 @@ def test_duplicate_db_records_only_successful_downloads(tmp_path, monkeypatch):
     assert handle_download_id(db_path, "album-1") == ("album-1",)
 
 
-def test_duplicate_db_skips_repeated_direct_text_and_queue_inputs(
-    tmp_path, monkeypatch
-):
+def test_direct_text_and_queue_inputs_bypass_legacy_ids(tmp_path, monkeypatch):
     calls = []
     _record_downloads(monkeypatch, calls)
     db_path = tmp_path / "downloads.sqlite"
@@ -126,7 +127,11 @@ def test_duplicate_db_skips_repeated_direct_text_and_queue_inputs(
     assert [(item_id, is_track) for item_id, is_track, _path in calls] == [
         ("album1", False),
         ("track1", True),
+        ("album1", False),
+        ("album1", False),
         ("track2", True),
+        ("track2", True),
+        ("track1", True),
     ]
 
 

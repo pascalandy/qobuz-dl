@@ -1,6 +1,6 @@
 # Download history satisfaction policy
 
-Status: decision recorded for [issue #49](https://github.com/pascalandy/qobuz-dl/issues/49). Runtime and schema work remain unimplemented
+Status: decision recorded for [issue #49](https://github.com/pascalandy/qobuz-dl/issues/49). [Issue #79](https://github.com/pascalandy/qobuz-dl/issues/79) and [issue #80](https://github.com/pascalandy/qobuz-dl/issues/80) are represented by stacked pull requests and in-progress implementation. [Issue #81](https://github.com/pascalandy/qobuz-dl/issues/81) remains pending. None of these implementation slices are claimed as merged into `master`
 
 ## Decision
 
@@ -12,7 +12,7 @@ This policy replaces the global interpretation of "downloaded once" with a desti
 
 ## Why this policy
 
-The current database stores only one unique item ID. `download_from_id()` checks that ID before it resolves a destination or inspects a file. The global check can therefore suppress work that the current request still requires.
+The legacy database model stored only one unique item ID. `download_from_id()` checked that ID before it resolved a destination or inspected a file. The global check could therefore suppress work that the current request still required.
 
 The audit attached to [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20#issuecomment-5636304337) demonstrated two failures of that model:
 
@@ -25,11 +25,11 @@ The selected guarantee matches the user's request more closely than a global act
 
 **Requested destination.** The directory and file paths produced for the current request from the output root, collection name, current folder template, current track template, and current sanitization rules
 
-**Requested format.** The Qobuz format ID selected for the current request, one of `5`, `6`, `7`, or `27`, together with whether quality fallback is allowed
+**Requested format.** The Qobuz format ID selected for the current request, one of `5`, `6`, `7`, or `27`. This value is provenance rather than proof of effective quality
 
-**Actual media facts.** The codec, bit depth, sample rate, and bitrate of an artifact that exists on disk. A fact can be absent when it does not apply. For example, MP3 uses bitrate rather than bit depth
+**Actual media facts.** The codec, bit depth, sample rate, and bitrate of an artifact that exists on disk. MP3 verification also requires the parser to identify constant bitrate mode. A fact can be absent when it does not apply. For example, MP3 uses bitrate rather than bit depth
 
-**Acceptable effective quality.** A file whose actual media facts match the quality resolved for the current request under the same requested-format and fallback rule that a fresh download would apply. Current availability matters. An earlier fallback does not suppress a later request when the requested higher quality becomes available. The requested format is not a claim about the file that Qobuz returned. History must keep requested format separate from actual codec, bit depth, sample rate, and bitrate
+**Acceptable effective quality.** A file whose actual media facts match the effective Qobuz format resolved for the current request. MP3 requires explicit format `5` evidence and nominal constant bitrate of 320 kbps. FLAC uses the effective bit depth and sample rate. The requested format remains provenance and is not a claim about the format that Qobuz returned
 
 **Satisfied request.** A request for which every required artifact exists at its requested path, is bound to the requested Qobuz track by trustworthy evidence, and has acceptable effective quality. A filename, path, extension, ordinary descriptive tag, or database row without that proof is not satisfaction
 
@@ -45,15 +45,15 @@ An album is fully satisfied only when every track accepted by the current reques
 
 ### Qobuz playlist
 
-A Qobuz playlist evaluates each source occurrence in order. Successful occurrences require a verified artifact in the playlist destination. Unavailable, failed, quality-refused, or conflicted occurrences retain their existing outcomes and are omitted without reordering later successes. When M3U output is enabled, the M3U contains the successful occurrences in source order and preserves repeats.
+A Qobuz playlist will evaluate each source occurrence in order after issue #81. Successful occurrences will require a verified artifact in the playlist destination. Unavailable, failed, quality-refused, or conflicted occurrences will retain their existing outcomes and will be omitted without reordering later successes. When M3U output is enabled, the M3U will contain the successful occurrences in source order and preserve repeats.
 
-A file in another album or playlist destination does not satisfy the playlist request. The implementation must download the file into the playlist destination or verify a file already at the exact requested path.
+Until issue #81 is implemented, Qobuz playlists retain legacy duplicate handling. The current issue #80 implementation does not extend direct-request artifact satisfaction to playlists.
 
 ### Last.fm playlist
 
-A Last.fm playlist applies the same rule to each source occurrence that resolves to a Qobuz track. Successful occurrences require a verified artifact in the Last.fm playlist destination. Unmatched, unavailable, failed, quality-refused, or conflicted occurrences retain their existing outcomes and are omitted without reordering later successes. When M3U output is enabled, the M3U contains the successful resolved occurrences in source order and preserves repeats.
+A Last.fm playlist will apply the same rule to each source occurrence that resolves to a Qobuz track after issue #81. Successful occurrences will require a verified artifact in the Last.fm playlist destination. Unmatched, unavailable, failed, quality-refused, or conflicted occurrences will retain their existing outcomes and will be omitted without reordering later successes. When M3U output is enabled, the M3U will contain the successful resolved occurrences in source order and preserve repeats.
 
-An unmatched Last.fm entry is outside history satisfaction because no Qobuz artifact was resolved for it. Earlier matches do not prove that the current Last.fm source resolves to the same Qobuz tracks.
+Until issue #81 is implemented, Last.fm playlists retain legacy duplicate handling. Earlier matches do not prove that the current Last.fm source resolves to the same Qobuz tracks.
 
 ## Changes that invalidate satisfaction
 
@@ -79,7 +79,7 @@ Two Qobuz IDs can resolve to the same requested path. The shared path does not s
 
 ### `--no-db`
 
-`--no-db` disables both reads from and writes to persistent download history for that run. It does not authorize an overwrite or weaken the identity, destination, or quality rule. A missing path can be downloaded normally. An existing file can be reused only if the run has independent trustworthy evidence for its track identity and effective quality. Otherwise the run reports a conflict and preserves the file.
+`--no-db` disables both reads from and writes to persistent download history for that run. Run-local evidence can satisfy later occurrences in the same process. It does not authorize an overwrite or weaken the identity, destination, or quality rule. A missing path can be downloaded normally. For direct track and album requests, an unexplained pre-existing path reports a conflict and remains unchanged.
 
 ### `--purge`
 
@@ -87,14 +87,19 @@ Two Qobuz IDs can resolve to the same requested path. The shared path does not s
 
 ## Existing databases
 
-Existing ID-only rows are historical evidence and never authoritative satisfaction. They can indicate that an item succeeded before, but they contain no destination or actual media facts.
+For direct track and album requests, existing ID-only rows are historical evidence and never authoritative satisfaction. They can indicate that an item succeeded before, but they contain no destination or actual media facts. Playlist paths retain their legacy use of these rows until issue #81.
 
-A migration may retain those IDs as historical evidence. It must not convert them into verified artifact records or let them suppress a request on their own. Each later request must establish satisfaction from the exact requested path and the file's actual media facts.
+The schema migration retains those IDs as historical evidence. It does not convert them into verified artifact records. Each later direct request must establish satisfaction from the exact requested path and the file's actual media facts.
+
+## Replacement recovery
+
+Direct requests stage, tag, and verify new media in a private `.qdl-*` directory beside the destination. A handled failure or interruption after displacement retains the private recovery directory and logs its path, even when restoration of the prior artifact succeeds. Recovery assumes that the destination parent stays stable and no other process modifies the private workspace.
 
 ## Boundaries
 
 - No cross-destination copy, move, hard link, or symbolic link
-- No claim that the current schema or runtime enforces this policy
+- No claim that issues #79 or #80 are merged into `master`
+- No claim that issue #80 changes Qobuz or Last.fm playlist behavior
 - No SQLite migration in this decision artifact
 - No change to the Qobuz format IDs or the fresh-download quality rule
 - Cover art and embedded artwork remain outside duplicate-history satisfaction
@@ -106,8 +111,8 @@ The first boundary favors predictable requests over storage deduplication. A sep
 - History becomes an optimization and evidence source, not the final authority
 - The filesystem and verified media facts decide whether the current request is satisfied
 - The same Qobuz ID may have valid artifacts in several destinations or at several effective qualities
-- Schema and runtime work must preserve requested format separately from actual codec, bit depth, and sample rate
-- Legacy databases remain usable as history, but their ID-only rows cannot skip verification
+- Verified artifact history preserves requested format separately from actual codec, bit depth, sample rate, bitrate, file size, and digest
+- Legacy databases remain usable as history. Their ID-only rows cannot skip direct-request verification
 
 ## Follow-up slices
 
@@ -115,12 +120,13 @@ The first boundary favors predictable requests over storage deduplication. A sep
 2. [Issue #80: Require destination and effective quality for direct downloads](https://github.com/pascalandy/qobuz-dl/issues/80)
 3. [Issue #81: Preserve playlist order and repeats with artifact-based reuse](https://github.com/pascalandy/qobuz-dl/issues/81)
 
-These slices own the implementation work.
+Issues #79 and #80 are represented by stacked pull requests and in-progress implementation. Issue #81 remains pending. This document does not claim that any slice is merged into `master`.
 
 ## Evidence
 
-- [`qobuz_dl/db.py`](../../../qobuz_dl/db.py) defines the current ID-only table and lookup
-- [`qobuz_dl/core.py`](../../../qobuz_dl/core.py) performs the current global history check before creating a downloader
-- [`tests/test_playlist_m3u.py`](../../../tests/test_playlist_m3u.py) captures exact-destination playlist reuse and the no-transfer boundary
-- [`tests/test_duplicate_tracking.py`](../../../tests/test_duplicate_tracking.py) captures `--no-db` and legacy-schema behavior
+- [`qobuz_dl/db.py`](../../../qobuz_dl/db.py) defines legacy ID history, verified artifacts, and run-local evidence
+- [`qobuz_dl/core.py`](../../../qobuz_dl/core.py) limits legacy ID satisfaction to legacy destination paths
+- [`tests/test_destination_history.py`](../../../tests/test_destination_history.py) covers exact-destination verification, media matching, conflict handling, replacement recovery, and `--no-db`
+- [`tests/test_playlist_m3u.py`](../../../tests/test_playlist_m3u.py) preserves the transitional playlist behavior before issue #81
+- [`tests/test_duplicate_tracking.py`](../../../tests/test_duplicate_tracking.py) covers legacy-schema behavior
 - [Issue #49](https://github.com/pascalandy/qobuz-dl/issues/49) owns this decision

@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -65,8 +66,10 @@ def _track_meta(track_id="track-1", title="Single Track", track_number=1):
 def _available_url(track_id):
     return {
         "url": f"https://media.example.test/{track_id}.flac",
-        "sampling_rate": 96,
-        "bit_depth": 24,
+        "sampling_rate": 44.1,
+        "bit_depth": 16,
+        "format_id": 27,
+        "mime_type": "audio/flac",
     }
 
 
@@ -98,12 +101,16 @@ def _install_file_boundaries(monkeypatch, *, tagging_fails=None):
     ):
         track_id = Path(url).stem
         transferred.append(track_id)
-        Path(target_path).write_bytes(f"audio:{track_id}".encode())
+        shutil.copyfile(
+            Path(__file__).parent / "fixtures" / "synthetic-silence.flac",
+            target_path,
+        )
 
-    def fake_tag(filename, root_dir, final_file, track_metadata, *args):
+    def fake_tag(filename, root_dir, final_file, track_metadata, *args, finalize=True):
         if track_metadata["id"] in tagging_fails:
             raise RuntimeError(f"cannot tag {track_metadata['id']}")
-        os.replace(filename, final_file)
+        if finalize:
+            os.replace(filename, final_file)
 
     monkeypatch.setattr(downloader.http, "stream_download", fake_stream_download)
     monkeypatch.setattr(downloader.metadata, "tag_flac", fake_tag)
@@ -193,13 +200,16 @@ def test_incomplete_download_is_not_recorded_and_retries_after_correction(
     completed = qdl.download_from_id(item_id, album=album)
 
     folder = (
-        "Album Artist - Album Title (2024) [24B-96kHz]"
+        "Album Artist - Album Title (2024) [16B-44.1kHz]"
         if album
-        else "Album Artist - Track Album (2024) [24B-96kHz]"
+        else "Album Artist - Track Album (2024) [16B-44.1kHz]"
     )
     final_path = tmp_path / "music" / folder / "01. Single Track.flac"
     _assert_result(completed, "finalized", "downloaded", (final_path,))
-    assert final_path.read_bytes() == b"audio:track-1"
+    assert (
+        final_path.read_bytes()
+        == (Path(__file__).parent / "fixtures" / "synthetic-silence.flac").read_bytes()
+    )
     assert handle_download_id(qdl.downloads_db, item_id) == (item_id,)
     assert transferred[-1] == "track-1"
     assert len(_completed_messages(caplog)) == 1
@@ -226,13 +236,16 @@ def test_partial_album_reuses_finalized_track_and_records_only_completed_retry(
     )
     qdl.client = client
     caplog.set_level("INFO", logger="qobuz_dl.downloader")
-    album_dir = tmp_path / "music" / "Album Artist - Album Title (2024) [24B-96kHz]"
+    album_dir = tmp_path / "music" / "Album Artist - Album Title (2024) [16B-44.1kHz]"
     first_path = album_dir / "01. Opening.flac"
     second_path = album_dir / "02. Finale.flac"
 
     incomplete = qdl.download_from_id("album-1", album=True)
 
-    assert first_path.read_bytes() == b"audio:track-1"
+    expected_media = (
+        Path(__file__).parent / "fixtures" / "synthetic-silence.flac"
+    ).read_bytes()
+    assert first_path.read_bytes() == expected_media
     assert not second_path.exists()
     assert transferred == ["track-1", "track-2"]
     assert handle_download_id(qdl.downloads_db, "album-1") is None
@@ -250,8 +263,8 @@ def test_partial_album_reuses_finalized_track_and_records_only_completed_retry(
         "downloaded",
         (first_path, second_path),
     )
-    assert first_path.read_bytes() == b"audio:track-1"
-    assert second_path.read_bytes() == b"audio:track-2"
+    assert first_path.read_bytes() == expected_media
+    assert second_path.read_bytes() == expected_media
     assert transferred == ["track-1", "track-2", "track-2"]
     assert handle_download_id(qdl.downloads_db, "album-1") == ("album-1",)
     assert len(_completed_messages(caplog)) == 1
@@ -285,7 +298,10 @@ def test_partial_album_request_failure_retains_paths_and_stops(
         ):
             track_id = Path(url).stem
             transferred.append(track_id)
-            Path(target_path).write_bytes(f"audio:{track_id}".encode())
+            shutil.copyfile(
+                Path(__file__).parent / "fixtures" / "synthetic-silence.flac",
+                target_path,
+            )
             if track_id == "track-2":
                 raise ConnectionError("stream failed")
 
@@ -299,13 +315,16 @@ def test_partial_album_request_failure_retains_paths_and_stops(
     )
     qdl.client = client
     caplog.set_level("INFO", logger="qobuz_dl.downloader")
-    album_dir = tmp_path / "music" / "Album Artist - Album Title (2024) [24B-96kHz]"
+    album_dir = tmp_path / "music" / "Album Artist - Album Title (2024) [16B-44.1kHz]"
     first_path = album_dir / "01. Opening.flac"
 
     result = qdl.download_from_id("album-1", album=True)
 
     _assert_result(result, "failed", "request_error", (first_path,))
-    assert first_path.read_bytes() == b"audio:track-1"
+    assert (
+        first_path.read_bytes()
+        == (Path(__file__).parent / "fixtures" / "synthetic-silence.flac").read_bytes()
+    )
     assert "track-3" not in requested
     assert transferred == (
         ["track-1"] if failure_point == "url_request" else ["track-1", "track-2"]
@@ -343,7 +362,7 @@ def test_database_duplicate_is_ignored_without_fabricated_paths(tmp_path, caplog
     qdl.client = object()
     caplog.set_level("INFO")
 
-    result = qdl.download_from_id("album-1", album=True)
+    result = qdl.download_from_id("album-1", album=True, legacy_destination=True)
 
     _assert_result(result, "ignored", "database_duplicate")
     assert _completed_messages(caplog) == []
