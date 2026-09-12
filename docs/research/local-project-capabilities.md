@@ -13,9 +13,9 @@ Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026
 - Global usage: `qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...` (`docs/cli.md:5-10`, `qobuz_dl/commands.py:154-190`).
 - Global flags:
   - `--version` from installed package metadata (`qobuz_dl/commands.py:9-13`, `qobuz_dl/commands.py:166-171`).
-  - `-r/--reset` creates/resets config (`qobuz_dl/commands.py:173-175`, `qobuz_dl/cli.py:52-94`).
-  - `-p/--purge` deletes local downloaded-ID DB (`qobuz_dl/commands.py:176-183`, `qobuz_dl/cli.py:205-211`).
-  - `-sc/--show-config` prints config and DB paths with sensitive values redacted (`qobuz_dl/commands.py:184-188`, `qobuz_dl/cli.py:28-49`, `qobuz_dl/cli.py:199-203`).
+  - `-r/--reset` creates/resets config (`qobuz_dl/commands.py:173-175`, `qobuz_dl/cli.py:226-265`).
+  - `-p/--purge` deletes local downloaded-ID DB (`qobuz_dl/commands.py:176-183`, `qobuz_dl/cli.py:341-346`).
+  - `-sc/--show-config` prints config and DB paths with sensitive values redacted (`qobuz_dl/commands.py:184-188`, `qobuz_dl/cli.py:32-39`, `qobuz_dl/cli.py:206-223`, `qobuz_dl/cli.py:336-339`).
 - Subcommands:
   - `dl SOURCE...`: downloads Qobuz album/track/artist/label/playlist URLs, Last.fm playlist URLs, or local text files of URLs (`qobuz_dl/commands.py:79-105`, `qobuz_dl/core.py:268-294`).
   - `fun`: interactive search, multi-select queue, quality choice, then download (`qobuz_dl/commands.py:15-38`, `qobuz_dl/core.py:371-443`).
@@ -24,8 +24,8 @@ Read-only exploration of `/Users/andy16/Documents/github_local/qobuz-dl` on 2026
 
 ## Config, auth, and session behavior
 
-- Config lives under OS config dir: macOS/Linux `~/.config/qobuz-dl/config.ini`; DB at `~/.config/qobuz-dl/qobuz_dl.db` (`qobuz_dl/cli.py:18-26`).
-- First non-help run creates config interactively: email, MD5-hashed password, default folder, default quality, limit, booleans, app ID, secrets, and filename formats (`qobuz_dl/cli.py:52-94`). Help/version bypass config creation (`qobuz_dl/cli.py:130-137`).
+- Config lives under OS config dir: macOS/Linux `~/.config/qobuz-dl/config.ini`; DB at `~/.config/qobuz-dl/qobuz_dl.db` (`qobuz_dl/cli.py:24-31`).
+- First non-help run creates config interactively: email, MD5-hashed password, default folder, default quality, limit, booleans, app ID, secrets, and filename formats (`qobuz_dl/cli.py:226-265`). Help/version bypass config creation (`qobuz_dl/cli.py:304-334`).
 - App ID and app secrets are scraped from Qobuz web bundle: fetch `https://play.qobuz.com/login`, parse bundle JS URL, fetch bundle, extract production app ID and timezone-specific secrets (`qobuz_dl/bundle.py:17-77`).
 - Client auth uses Qobuz endpoint `user/login` with email, MD5 password, and app ID; free accounts without credential parameters are rejected (`qobuz_dl/qopy.py:43-49`, `qobuz_dl/qopy.py:124-131`).
 - After login, `X-User-Auth-Token` is added to the HTTP session headers (`qobuz_dl/qopy.py:124-131`). Initial headers include `User-Agent`, `X-App-Id`, and JSON content type (`qobuz_dl/qopy.py:22-37`).
