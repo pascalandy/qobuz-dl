@@ -27,6 +27,14 @@ qobuz.handle_url("https://play.qobuz.com/album/va4j3hdlwaubc")
 
 The digest is not encryption. Treat it as credential-equivalent because the current login flow can use it without the plaintext password. See [Authentication credential and transport evidence](research/authentication-transport.md) for the current request placement and its verification limits.
 
+## API rate-limit errors
+
+`QobuzDL` propagates `qobuz_dl.exceptions.ApiRateLimitError` when a replay-safe Qobuz API read exhausts its bounded `429` retries. A collection stops before the next queued item.
+
+The retry helper lets `KeyboardInterrupt` propagate. An interactive caller can handle the interruption.
+
+See [API rate-limit retries](cli.md#api-rate-limit-retries) for the attempt, wait, and endpoint limits.
+
 ## Download results
 
 `QobuzDL.download_from_id(item_id, album=True, alt_path=None)` returns an immutable `DownloadResult` with three fields:
