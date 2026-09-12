@@ -4,6 +4,9 @@ from importlib import metadata
 QUALITY_HELP = "5=MP3 320, 6=FLAC lossless, 7=24-bit <=96kHz, 27=24-bit >96kHz"
 QUALITY_CHOICES = (5, 6, 7, 27)
 LUCKY_TYPE_CHOICES = ("artist", "album", "track", "playlist")
+FORK_SOURCE = "git+https://github.com/pascalandy/qobuz-dl.git"
+RUN_COMMAND = f"uvx --from {FORK_SOURCE} qobuz-dl"
+RESET_COMMAND = f"{RUN_COMMAND} -r"
 
 
 def _package_version():
@@ -23,9 +26,9 @@ def fun_args(subparsers, default_limit):
         help="interactively search Qobuz and queue downloads",
         epilog=(
             "Examples:\n"
-            "  uvx qobuz-dl fun\n"
-            "  uvx qobuz-dl fun --limit 10\n\n"
-            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'.\n"
+            f"  {RUN_COMMAND} fun\n"
+            f"  {RUN_COMMAND} fun --limit 10\n\n"
+            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'.\n"
             "Interactive selection accepts comma-separated numbers and ranges, "
             "for example: 1,3-5."
         ),
@@ -52,10 +55,10 @@ def lucky_args(subparsers):
         help="search Qobuz and download the first matching results",
         epilog=(
             "Examples:\n"
-            '  uvx qobuz-dl lucky "playboi carti die lit"\n'
-            '  uvx qobuz-dl lucky --type track --number 3 "artist song"\n'
-            '  uvx qobuz-dl lucky --type playlist --number 1 "jazz classics"\n\n'
-            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'."
+            f'  {RUN_COMMAND} lucky "playboi carti die lit"\n'
+            f'  {RUN_COMMAND} lucky --type track --number 3 "artist song"\n'
+            f'  {RUN_COMMAND} lucky --type playlist --number 1 "jazz classics"\n\n'
+            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -94,10 +97,10 @@ def dl_args(subparsers):
             "  - local text files containing one URL per line; lines starting "
             "with # are ignored\n\n"
             "Examples:\n"
-            "  uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb\n"
-            "  uvx qobuz-dl dl urls.txt --no-cover\n"
-            "  uvx qobuz-dl dl https://www.last.fm/user/example/playlists/123 --quality 6\n\n"
-            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'."
+            f"  {RUN_COMMAND} dl https://play.qobuz.com/album/qxjbxh1dc3xyb\n"
+            f"  {RUN_COMMAND} dl urls.txt --no-cover\n"
+            f"  {RUN_COMMAND} dl https://www.last.fm/user/example/playlists/123 --quality 6\n\n"
+            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -201,12 +204,12 @@ def qobuz_dl_args(
         ),
         epilog=(
             "Examples:\n"
-            "  uvx qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7\n"
-            "  uvx qobuz-dl dl urls.txt --directory Music --no-cover\n"
-            "  uvx qobuz-dl fun --limit 10\n"
-            '  uvx qobuz-dl lucky --type track --number 3 "artist song"\n\n'
-            "Installed users may replace 'uvx qobuz-dl' with 'qobuz-dl'.\n"
-            "Use 'uvx qobuz-dl <command> --help' for command-specific options.\n"
+            f"  {RUN_COMMAND} dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7\n"
+            f"  {RUN_COMMAND} dl urls.txt --directory Music --no-cover\n"
+            f"  {RUN_COMMAND} fun --limit 10\n"
+            f'  {RUN_COMMAND} lucky --type track --number 3 "artist song"\n\n'
+            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'.\n"
+            f"Use '{RUN_COMMAND} <command> --help' for command-specific options.\n"
             "Docs: https://github.com/pascalandy/qobuz-dl"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -238,7 +241,9 @@ def qobuz_dl_args(
 
     subparsers = parser.add_subparsers(
         title="commands",
-        description="choose one command; use uvx qobuz-dl <command> --help for details",
+        description=(
+            f"choose one command; use {RUN_COMMAND} <command> --help for details"
+        ),
         dest="command",
     )
 
