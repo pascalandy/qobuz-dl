@@ -48,7 +48,9 @@ The current implementation stores config and duplicate-tracking state under one 
 | Linux and macOS | `~/.config/qobuz-dl/config.ini` | `~/.config/qobuz-dl/qobuz_dl.db` |
 | Windows | `%APPDATA%\qobuz-dl\config.ini` | `%APPDATA%\qobuz-dl\qobuz_dl.db` |
 
-These paths come from the running process: non-Windows systems use the current user's home directory plus `.config`, and Windows uses the `APPDATA` environment variable. The CLI does not currently use `XDG_CONFIG_HOME` or macOS `~/Library/Application Support`.
+These paths come from the running process: non-Windows systems use the current user's home directory plus `.config`, and Windows uses the nonempty `APPDATA` environment variable. When `APPDATA` is present, `qobuz-dl` keeps the existing `%APPDATA%\qobuz-dl\config.ini` and `%APPDATA%\qobuz-dl\qobuz_dl.db` paths. The CLI does not currently use `XDG_CONFIG_HOME` or macOS `~/Library/Application Support`.
+
+On Windows, `--help`, `--version`, and command-specific help remain available when `APPDATA` is missing or empty. A command that needs the config or database exits with status `1` and writes `APPDATA is not set. Set APPDATA to your Windows application-data directory and retry.` to standard error. The CLI exits before prompts, config or database changes, and network requests.
 
 The config file stores:
 

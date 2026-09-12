@@ -11,9 +11,12 @@ import qobuz_dl.cli as cli
 @pytest.fixture
 def config_file(monkeypatch, tmp_path):
     path = tmp_path / "qobuz-dl" / "config.ini"
-    monkeypatch.setattr(cli, "CONFIG_PATH", str(path.parent))
-    monkeypatch.setattr(cli, "CONFIG_FILE", str(path))
-    monkeypatch.setattr(cli, "QOBUZ_DB", str(path.parent / "qobuz_dl.db"))
+    database = path.parent / "qobuz_dl.db"
+    monkeypatch.setattr(
+        cli,
+        "_resolve_config_paths",
+        lambda: (str(path), str(database)),
+    )
     answers = iter(["new@example.com", "My Music", "27"])
     monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: "password")
