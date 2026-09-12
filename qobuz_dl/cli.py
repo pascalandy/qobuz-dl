@@ -1,6 +1,5 @@
 import configparser
 import getpass
-import glob
 import hashlib
 import logging
 import os
@@ -202,15 +201,6 @@ def _quality_fallback_enabled(cli_no_fallback, config_no_fallback):
     return not (cli_no_fallback or config_no_fallback)
 
 
-def _remove_leftovers(directory):
-    directory = os.path.join(directory, "**", ".*.tmp")
-    for i in glob.glob(directory, recursive=True):
-        try:
-            os.remove(i)
-        except OSError:
-            pass
-
-
 def _handle_commands(qobuz, arguments):
     try:
         if arguments.command == "dl":
@@ -229,9 +219,6 @@ def _handle_commands(qobuz, arguments):
             f"{RED}Interrupted by user\n{YELLOW}Already downloaded items will "
             "be skipped if you try to download the same releases again."
         )
-
-    finally:
-        _remove_leftovers(qobuz.directory)
 
 
 def main():

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import qobuz_dl.downloader as downloader
 from qobuz_dl.core import QobuzDL
@@ -157,16 +158,20 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
     expected_dir = os.path.join(
         str(tmp_path), "Album Artist BadName - Album NamePart (2024) [24B-96kHz]"
     )
-    expected_tmp = os.path.join(expected_dir, ".01.tmp")
     expected_final = os.path.join(
         expected_dir, "03. Track Artist BadName - Track NamePart.flac"
     )
 
     assert os.path.isdir(expected_dir)
-    assert downloaded == [
-        ("https://example.invalid/audio.flac", expected_tmp, expected_tmp)
-    ]
-    assert tagged[0][0] == expected_tmp
+    assert len(downloaded) == 1
+    url, temporary, description = downloaded[0]
+    temporary_path = Path(temporary)
+    assert url == "https://example.invalid/audio.flac"
+    assert temporary_path.parent == Path(expected_dir)
+    assert temporary_path.name.startswith(".qobuz-dl-")
+    assert temporary_path.name.endswith(".tmp")
+    assert description == temporary
+    assert tagged[0][0] == temporary
     assert tagged[0][1] == expected_dir
     assert tagged[0][2] == expected_final
     assert tagged[0][5] is True

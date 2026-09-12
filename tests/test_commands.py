@@ -490,7 +490,6 @@ def test_download_first_run_creates_config_once_then_initializes_client(
     monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
-    monkeypatch.setattr(cli, "_remove_leftovers", lambda directory: None)
 
     cli.main()
 
@@ -587,7 +586,6 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
     monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
     monkeypatch.setattr(cli, "QOBUZ_DB", str(database_file))
     monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
-    monkeypatch.setattr(cli, "_remove_leftovers", lambda directory: None)
 
     cli.main()
 
@@ -653,3 +651,39 @@ def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path):
 
     assert not database_file.exists()
     assert "The database was deleted." in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    ["normal-completion", "runtime-error", "keyboard-interrupt"],
+)
+def test_command_dispatch_preserves_unrelated_hidden_temporaries(tmp_path, outcome):
+    root_sentinel = tmp_path / ".unrelated-root.tmp"
+    nested_directory = tmp_path / "nested"
+    nested_sentinel = nested_directory / ".unrelated-nested.tmp"
+    nested_directory.mkdir()
+    root_sentinel.write_bytes(b"root sentinel bytes")
+    nested_sentinel.write_bytes(b"nested sentinel bytes")
+    runtime_error = RuntimeError("download failed")
+
+    class FakeQobuz:
+        directory = tmp_path
+
+        def download_list_of_urls(self, sources):
+            assert sources == ["source"]
+            if outcome == "runtime-error":
+                raise runtime_error
+            if outcome == "keyboard-interrupt":
+                raise KeyboardInterrupt
+
+    arguments = qobuz_dl_args().parse_args(["dl", "source"])
+
+    if outcome == "runtime-error":
+        with pytest.raises(RuntimeError) as exc_info:
+            cli._handle_commands(FakeQobuz(), arguments)
+        assert exc_info.value is runtime_error
+    else:
+        cli._handle_commands(FakeQobuz(), arguments)
+
+    assert root_sentinel.read_bytes() == b"root sentinel bytes"
+    assert nested_sentinel.read_bytes() == b"nested sentinel bytes"

@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -71,7 +72,6 @@ class Download:
             self.download_release()
 
     def download_release(self):
-        count = 0
         meta = self.client.get_album_meta(self.item_id)
 
         if not meta.get("streamable"):
@@ -104,7 +104,6 @@ class Download:
             if "sample" not in parse and parse.get("sampling_rate"):
                 self._download_prepared_track(
                     preparation,
-                    count,
                     parse,
                     i,
                     meta,
@@ -113,7 +112,6 @@ class Download:
                 )
             else:
                 logger.info(f"{OFF}Demo. Skipping")
-            count = count + 1
         logger.info(f"{GREEN}Completed")
 
     def download_track(self):
@@ -129,7 +127,6 @@ class Download:
                 return
             self._download_prepared_track(
                 preparation,
-                1,
                 parse,
                 meta,
                 meta,
@@ -196,7 +193,6 @@ class Download:
     def _download_prepared_track(
         self,
         preparation,
-        tmp_count,
         track_url_dict,
         track_metadata,
         album_or_track_metadata,
@@ -205,7 +201,6 @@ class Download:
     ):
         self._download_and_tag(
             preparation.directory,
-            tmp_count,
             track_url_dict,
             track_metadata,
             album_or_track_metadata,
@@ -220,7 +215,6 @@ class Download:
     def _download_and_tag(
         self,
         root_dir,
-        tmp_count,
         track_url_dict,
         track_metadata,
         album_or_track_metadata,
@@ -240,8 +234,6 @@ class Download:
             root_dir = os.path.join(root_dir, f"Disc {multiple}")
             os.makedirs(root_dir, exist_ok=True)
 
-        filename = os.path.join(root_dir, f".{tmp_count:02}.tmp")
-
         # Determine the filename
         track_title = track_metadata.get("title")
         artist = _safe_get(track_metadata, "performer", "name")
@@ -259,20 +251,37 @@ class Download:
             logger.info(f"{OFF}{track_title} was already downloaded")
             return
 
-        download_with_progress(url, filename, filename)
-        tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
+        filename = os.path.join(root_dir, f".qobuz-dl-{uuid.uuid4().hex}.tmp")
+        descriptor = os.open(
+            filename,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o666,
+        )
         try:
-            tag_function(
-                filename,
-                root_dir,
-                final_file,
-                track_metadata,
-                album_or_track_metadata,
-                is_track,
-                self.embed_art,
-            )
-        except Exception as e:
-            logger.error(f"{RED}Error tagging the file: {e}", exc_info=True)
+            os.close(descriptor)
+            download_with_progress(url, filename, filename)
+            tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
+            try:
+                tag_function(
+                    filename,
+                    root_dir,
+                    final_file,
+                    track_metadata,
+                    album_or_track_metadata,
+                    is_track,
+                    self.embed_art,
+                )
+            except Exception as e:
+                logger.error(f"{RED}Error tagging the file: {e}", exc_info=True)
+        finally:
+            try:
+                os.remove(filename)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                logger.debug(
+                    "Could not remove temporary download %s: %s", filename, error
+                )
 
     @staticmethod
     def _get_filename_attr(artist, track_metadata, track_title):
