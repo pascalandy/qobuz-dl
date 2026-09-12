@@ -60,6 +60,10 @@ def _replace_config_value(config_file, key, value):
     config_file.write_text("\n".join(lines))
 
 
+def _append_config_value(config_file, key, value):
+    config_file.write_text(f"{config_file.read_text()}\n{key} = {value}\n")
+
+
 def _configure_cli_main(monkeypatch, config_file, argv, client):
     class UnexpectedBundle:
         def __init__(self, *args, **kwargs):
@@ -376,6 +380,7 @@ def test_reset_config_creates_parent_directory(monkeypatch, tmp_path):
     assert "app_id = <redacted>" in output
     assert "secrets = <redacted>" in output
     assert "default_folder = Music" in output
+    assert "bandwidth_limit = off" in output
 
 
 def test_reset_config_leaves_duplicate_database_in_place(monkeypatch, tmp_path):
@@ -567,6 +572,7 @@ def test_download_first_run_creates_config_once_then_initializes_client(
             "quality_fallback": True,
             "smart_discography": False,
             "track_format": "{tracknumber}. {tracktitle}",
+            "bandwidth_limit": None,
         },
     )
     assert initialized[1] == (
@@ -938,6 +944,117 @@ def test_explicit_cli_values_override_valid_config_defaults(monkeypatch, tmp_pat
     cli.main()
 
     assert initialized == [("CLI Music", 27, True)]
+
+
+@pytest.mark.parametrize(
+    ("configured", "cli_value", "expected"),
+    [
+        ("1KiB/s", None, 1024),
+        ("1KiB/s", "off", None),
+        ("SECRET_SENTINEL", "2MiB/s", 2 * 1024 * 1024),
+    ],
+)
+def test_effective_bandwidth_limit_reaches_client(
+    monkeypatch, tmp_path, configured, cli_value, expected
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _append_config_value(config_file, "bandwidth_limit", configured)
+    initialized = []
+
+    class FakeQobuzDL:
+        def __init__(self, directory, quality, embed_art, **kwargs):
+            self.directory = directory
+            initialized.append(kwargs["bandwidth_limit"])
+
+        def initialize_client(self, *args):
+            pass
+
+        def download_list_of_urls(self, urls):
+            pass
+
+    argv = ["dl", "https://play.qobuz.com/album/album-1"]
+    if cli_value is not None:
+        argv.extend(("--bandwidth-limit", cli_value))
+    _configure_cli_main(monkeypatch, config_file, argv, FakeQobuzDL)
+
+    cli.main()
+
+    assert initialized == [expected]
+
+
+def test_old_config_without_bandwidth_limit_remains_unlimited(tmp_path):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+
+    values = cli._load_config_values(config_file)
+
+    assert values["bandwidth_limit"] is None
+
+
+def test_invalid_effective_config_bandwidth_stops_before_auth_without_echo(
+    monkeypatch, tmp_path, capsys, caplog
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _append_config_value(config_file, "bandwidth_limit", "SECRET_SENTINEL")
+
+    diagnostic = _run_config_failure(
+        monkeypatch,
+        capsys,
+        caplog,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/album-1"],
+    )
+
+    assert "'bandwidth_limit' must be 'off', NKiB/s, or NMiB/s" in diagnostic
+    assert "SECRET_SENTINEL" not in diagnostic
+
+
+def test_config_bandwidth_over_integer_digit_limit_uses_fixed_safe_error(
+    monkeypatch, tmp_path, capsys, caplog
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    value = f"{'9' * 5000}KiB/s"
+    _append_config_value(config_file, "bandwidth_limit", value)
+
+    diagnostic = _run_config_failure(
+        monkeypatch,
+        capsys,
+        caplog,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/album-1"],
+    )
+
+    assert "'bandwidth_limit' must be 'off', NKiB/s, or NMiB/s" in diagnostic
+    assert value not in diagnostic
+
+
+def test_invalid_cli_bandwidth_stops_before_config_or_auth(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "qobuz-dl",
+            "dl",
+            "https://play.qobuz.com/album/album-1",
+            "--bandwidth-limit",
+            "1MB/s",
+        ],
+    )
+
+    def unexpected_config_access():
+        pytest.fail("invalid CLI bandwidth must stop before config access")
+
+    monkeypatch.setattr(cli, "_resolve_config_paths", unexpected_config_access)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    output = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "--bandwidth-limit" in output.err
 
 
 def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(

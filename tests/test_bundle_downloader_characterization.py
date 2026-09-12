@@ -89,7 +89,12 @@ def test_download_with_progress_writes_streamed_content(tmp_path, monkeypatch):
     requested = []
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         requested.append((url, target_path))
         target_path.write_bytes(b"abcdef")
@@ -114,7 +119,12 @@ def test_download_with_progress_throttles_progress_logging(
     target = tmp_path / "track.flac.tmp"
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         target_path.write_bytes(b"x" * 2048)
         if progress is not None:
@@ -147,7 +157,12 @@ def test_download_with_progress_raises_connection_error_when_stream_is_short(
     target = tmp_path / "track.flac.tmp"
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         target_path.write_bytes(b"abc")
         raise ConnectionError("File download was interrupted for " + str(target_path))
@@ -171,7 +186,12 @@ def test_download_with_progress_runs_interrupt_hook_after_write_and_cleans_targe
         pass
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         target_path.write_bytes(b"first bytes")
         progress(11, 11, 100)

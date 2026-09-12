@@ -122,6 +122,7 @@ class Download:
         no_cover: bool = False,
         folder_format=None,
         track_format=None,
+        bandwidth_limit: int | None = None,
     ):
         validate_cover_options(embed_art, no_cover)
         self.client = client
@@ -135,6 +136,7 @@ class Download:
         self.no_cover = no_cover
         self.folder_format = folder_format or DEFAULT_FOLDER
         self.track_format = track_format or DEFAULT_TRACK
+        self.bandwidth_limit = bandwidth_limit
 
     def download_id_by_type(self, track=True):
         if track:
@@ -390,6 +392,7 @@ class Download:
                 filename,
                 filename,
                 retry_rate_limited=True,
+                bandwidth_limit=self.bandwidth_limit,
             )
             tag_function = metadata.tag_mp3 if preparation.is_mp3 else metadata.tag_flac
             try:
@@ -505,7 +508,13 @@ class Download:
 
 
 def download_with_progress(
-    url, fname, desc, *, retry_rate_limited=False, after_write=None
+    url,
+    fname,
+    desc,
+    *,
+    retry_rate_limited=False,
+    after_write=None,
+    bandwidth_limit: int | None = None,
 ):
     """Stream ``url`` to ``fname``, logging throttled progress updates."""
     next_report = PROGRESS_MIN_INTERVAL_BYTES
@@ -528,6 +537,7 @@ def download_with_progress(
             fname,
             progress=show_progress,
             retry_rate_limited=retry_rate_limited,
+            bandwidth_limit=bandwidth_limit,
         )
     except BaseException:
         try:

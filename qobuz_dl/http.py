@@ -312,6 +312,7 @@ def stream_download(
     chunk_size=DEFAULT_CHUNK_SIZE,
     progress=None,
     retry_rate_limited=False,
+    bandwidth_limit: int | None = None,
 ) -> int:
     try:
         request = Request(url, headers=dict(headers or {}))
@@ -335,14 +336,27 @@ def stream_download(
                 total = int(total_header) if total_header else None
             except ValueError:
                 total = None
+            read_size = chunk_size
+            if bandwidth_limit is not None:
+                read_size = min(chunk_size, max(1, bandwidth_limit // 10))
             with open(target, "wb") as file:
                 downloaded = 0
                 while True:
-                    chunk = response.read(chunk_size)
+                    started_at = 0.0
+                    if bandwidth_limit is not None:
+                        started_at = time.monotonic()
+                    chunk = response.read(read_size)
                     if not chunk:
                         break
                     size = file.write(chunk)
                     downloaded += size
+                    if bandwidth_limit is not None:
+                        deadline = started_at + size / bandwidth_limit
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                break
+                            time.sleep(remaining)
                     if progress is not None:
                         progress(size, downloaded, total)
     except HTTPError as exc:

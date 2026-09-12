@@ -183,9 +183,14 @@ def test_only_audio_downloads_enable_rate_limit_retry(tmp_path, monkeypatch):
     calls = []
 
     def fake_download_with_progress(
-        url, target, description, *, retry_rate_limited=False
+        url,
+        target,
+        description,
+        *,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
-        calls.append((url, retry_rate_limited))
+        calls.append((url, retry_rate_limited, bandwidth_limit))
         Path(target).write_bytes(b"downloaded bytes")
 
     monkeypatch.setattr(
@@ -198,13 +203,14 @@ def test_only_audio_downloads_enable_rate_limit_retry(tmp_path, monkeypatch):
         "album-1",
         str(tmp_path),
         27,
+        bandwidth_limit=4096,
     ).download_release()
 
     assert result.state == "finalized"
     assert calls == [
-        ("https://img.example.test/cover.jpg", False),
-        ("https://img.example.test/booklet.pdf", False),
-        ("https://media.example.test/track-1.flac", True),
+        ("https://img.example.test/cover.jpg", False, None),
+        ("https://img.example.test/booklet.pdf", False, None),
+        ("https://media.example.test/track-1.flac", True, 4096),
     ]
 
 

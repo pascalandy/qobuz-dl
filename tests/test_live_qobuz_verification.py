@@ -1220,7 +1220,13 @@ def test_progress_output_is_contained(tmp_path, monkeypatch, capsys):
     real_download = downloader.download_with_progress
 
     def noisy_download(
-        url, target, description, *, retry_rate_limited=False, after_write=None
+        url,
+        target,
+        description,
+        *,
+        retry_rate_limited=False,
+        after_write=None,
+        bandwidth_limit=None,
     ):
         def noisy_progress(size, downloaded, total):
             print(SENTINEL)
@@ -1235,6 +1241,7 @@ def test_progress_output_is_contained(tmp_path, monkeypatch, capsys):
             description,
             retry_rate_limited=retry_rate_limited,
             after_write=noisy_progress,
+            bandwidth_limit=bandwidth_limit,
         )
 
     monkeypatch.setattr(downloader, "download_with_progress", noisy_download)

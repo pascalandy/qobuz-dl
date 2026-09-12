@@ -1,4 +1,5 @@
 import argparse
+import re
 from importlib import metadata
 
 QUALITY_HELP = "5=MP3 320, 6=FLAC lossless, 7=24-bit <=96kHz, 27=24-bit >96kHz"
@@ -7,6 +8,26 @@ LUCKY_TYPE_CHOICES = ("artist", "album", "track", "playlist")
 FORK_SOURCE = "git+https://github.com/pascalandy/qobuz-dl.git"
 RUN_COMMAND = f"uvx --from {FORK_SOURCE} qobuz-dl"
 RESET_COMMAND = f"{RUN_COMMAND} -r"
+_BANDWIDTH_LIMIT_PATTERN = re.compile(r"([1-9][0-9]*)(KiB/s|MiB/s)")
+
+
+def _bandwidth_limit_error() -> argparse.ArgumentTypeError:
+    return argparse.ArgumentTypeError(
+        "must be 'off', NKiB/s, or NMiB/s with a positive integer N"
+    )
+
+
+def _parse_bandwidth_limit(value: str) -> int | None:
+    if value == "off":
+        return None
+    match = _BANDWIDTH_LIMIT_PATTERN.fullmatch(value)
+    if match is None:
+        raise _bandwidth_limit_error()
+    multiplier = 1024 if match.group(2) == "KiB/s" else 1024 * 1024
+    try:
+        return int(match.group(1)) * multiplier
+    except ValueError:
+        raise _bandwidth_limit_error() from None
 
 
 def _package_version():
@@ -113,7 +134,12 @@ def dl_args(subparsers):
     return download
 
 
-def add_common_arg(custom_parser, default_folder, default_quality):
+def add_common_arg(
+    custom_parser,
+    default_folder,
+    default_quality,
+    default_bandwidth_limit,
+):
     custom_parser.add_argument(
         "-d",
         "--directory",
@@ -129,6 +155,15 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         choices=QUALITY_CHOICES,
         default=default_quality,
         help=f"audio quality: {QUALITY_HELP} (default: {default_quality})",
+    )
+    custom_parser.add_argument(
+        "--bandwidth-limit",
+        metavar="RATE",
+        type=_parse_bandwidth_limit,
+        default=default_bandwidth_limit,
+        help=(
+            "limit track audio bandwidth to NKiB/s or NMiB/s; off disables the limit"
+        ),
     )
     custom_parser.add_argument(
         "--albums-only",
@@ -194,7 +229,10 @@ def add_common_arg(custom_parser, default_folder, default_quality):
 
 
 def qobuz_dl_args(
-    default_quality=6, default_limit=20, default_folder="Qobuz Downloads"
+    default_quality=6,
+    default_limit=20,
+    default_folder="Qobuz Downloads",
+    default_bandwidth_limit=argparse.SUPPRESS,
 ):
     parser = argparse.ArgumentParser(
         prog="qobuz-dl",
@@ -251,6 +289,11 @@ def qobuz_dl_args(
     download = dl_args(subparsers)
     lucky = lucky_args(subparsers)
     for subparser in (interactive, download, lucky):
-        add_common_arg(subparser, default_folder, default_quality)
+        add_common_arg(
+            subparser,
+            default_folder,
+            default_quality,
+            default_bandwidth_limit,
+        )
 
     return parser

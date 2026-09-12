@@ -1,3 +1,4 @@
+import argparse
 import configparser
 import getpass
 import hashlib
@@ -11,7 +12,12 @@ from io import StringIO
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
-from qobuz_dl.commands import QUALITY_CHOICES, RESET_COMMAND, qobuz_dl_args
+from qobuz_dl.commands import (
+    QUALITY_CHOICES,
+    RESET_COMMAND,
+    _parse_bandwidth_limit,
+    qobuz_dl_args,
+)
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK, validate_cover_options
 from qobuz_dl.exceptions import ApiRateLimitError, BundleError
@@ -64,6 +70,7 @@ _CONFIG_BOOLEAN_KEYS = (
     "no_database",
     "smart_discography",
 )
+_CONFIG_VALUE_UNSET = object()
 
 
 class _ConfigPathError(Exception):
@@ -179,7 +186,7 @@ def _required_config_value(config, key):
         ) from None
 
 
-def _load_config_values(config_file):
+def _load_config_values(config_file, bandwidth_limit_override=_CONFIG_VALUE_UNSET):
     config = _read_config(config_file)
     keys = (
         *_CONFIG_STRING_KEYS,
@@ -210,6 +217,26 @@ def _load_config_values(config_file):
         values["default_limit"] = int(values["default_limit"])
     except ValueError:
         raise _ConfigValidationError("'default_limit' must be an integer.") from None
+
+    if bandwidth_limit_override is _CONFIG_VALUE_UNSET:
+        try:
+            configured_bandwidth_limit = config[config.default_section].get(
+                "bandwidth_limit", "off"
+            )
+        except configparser.InterpolationError:
+            raise _ConfigValidationError(
+                "Configuration option 'bandwidth_limit' could not be resolved."
+            ) from None
+        try:
+            values["bandwidth_limit"] = _parse_bandwidth_limit(
+                configured_bandwidth_limit
+            )
+        except argparse.ArgumentTypeError:
+            raise _ConfigValidationError(
+                "'bandwidth_limit' must be 'off', NKiB/s, or NMiB/s."
+            ) from None
+    else:
+        values["bandwidth_limit"] = bandwidth_limit_override
 
     values["secrets"] = [secret for secret in values["secrets"].split(",") if secret]
     return values
@@ -255,6 +282,7 @@ def _reset_config(config_file):
         or "6"
     )
     config["DEFAULT"]["default_limit"] = "20"
+    config["DEFAULT"]["bandwidth_limit"] = "off"
     config["DEFAULT"]["no_m3u"] = "false"
     config["DEFAULT"]["albums_only"] = "false"
     config["DEFAULT"]["no_fallback"] = "false"
@@ -326,7 +354,10 @@ def main():
         if startup.needs_config:
             _ensure_config_exists(config_file)
             if startup.needs_auth or arguments.show_config:
-                config_values = _load_config_values(config_file)
+                config_values = _load_config_values(
+                    config_file,
+                    getattr(arguments, "bandwidth_limit", _CONFIG_VALUE_UNSET),
+                )
         if arguments.show_config:
             redacted_config = _redacted_config_text(config_file)
     except _ConfigStorageError:
@@ -373,6 +404,7 @@ def main():
             config_values["default_quality"],
             config_values["default_limit"],
             config_values["default_folder"],
+            config_values["bandwidth_limit"],
         ).parse_args()
 
     embed_art = arguments.embed_art or config_values["embed_art"]
@@ -402,6 +434,7 @@ def main():
         smart_discography=(
             arguments.smart_discography or config_values["smart_discography"]
         ),
+        bandwidth_limit=arguments.bandwidth_limit,
     )
     try:
         qobuz.initialize_client(

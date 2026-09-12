@@ -209,7 +209,12 @@ def _install_fake_media_network(monkeypatch):
     temporary_paths = []
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         assert url.startswith("https://media.example.test/")
         assert retry_rate_limited is True

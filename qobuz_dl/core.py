@@ -62,6 +62,17 @@ def _normalize_search_query(query):
     return query.strip()
 
 
+def _validate_bandwidth_limit(bandwidth_limit: int | None) -> None:
+    if bandwidth_limit is None:
+        return
+    if (
+        isinstance(bandwidth_limit, bool)
+        or not isinstance(bandwidth_limit, int)
+        or bandwidth_limit <= 0
+    ):
+        raise ValueError("bandwidth_limit must be a positive integer or None")
+
+
 class LastFmPlaylistParser(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -208,8 +219,10 @@ class QobuzDL:
         folder_format="{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]",
         track_format="{tracknumber}. {tracktitle}",
         smart_discography=False,
+        bandwidth_limit: int | None = None,
     ):
         downloader.validate_cover_options(embed_art, no_cover)
+        _validate_bandwidth_limit(bandwidth_limit)
         self.directory = create_and_return_dir(directory)
         self.quality = quality
         self.embed_art = embed_art
@@ -225,6 +238,7 @@ class QobuzDL:
         self.folder_format = folder_format
         self.track_format = track_format
         self.smart_discography = smart_discography
+        self.bandwidth_limit = bandwidth_limit
 
     def initialize_client(self, email, pwd, app_id, secrets):
         self.client = qopy.Client(email, pwd, app_id, secrets)
@@ -273,6 +287,7 @@ class QobuzDL:
             self.no_cover,
             self.folder_format,
             self.track_format,
+            bandwidth_limit=self.bandwidth_limit,
         )
 
     def _resolve_url_download_plan(self, url):

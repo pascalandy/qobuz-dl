@@ -106,7 +106,9 @@ class FakeDownloadClient:
 
 
 def _recording_download(monkeypatch, downloads):
-    def fake_download_with_progress(url, fname, desc, *, retry_rate_limited=False):
+    def fake_download_with_progress(
+        url, fname, desc, *, retry_rate_limited=False, bandwidth_limit=None
+    ):
         downloads.append((url, fname, desc))
         Path(fname).write_bytes(b"audio")
 
@@ -163,7 +165,14 @@ def _download_real_media(
     extension = "mp3" if quality == 5 else "flac"
     fixture = FIXTURES / f"synthetic-silence.{extension}"
 
-    def copy_fixture(_url, filename, _description, *, retry_rate_limited=False):
+    def copy_fixture(
+        _url,
+        filename,
+        _description,
+        *,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
+    ):
         shutil.copyfile(fixture, filename)
 
     monkeypatch.setattr(downloader, "download_with_progress", copy_fixture)
@@ -428,7 +437,12 @@ def test_failed_media_stream_removes_partial_file_and_logs_safe_failure(
     tmp_path, monkeypatch, caplog
 ):
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         Path(target_path).write_bytes(b"partial")
         raise ConnectionError("interrupted stream")
@@ -463,7 +477,12 @@ def test_track_tag_failure_removes_only_its_operation_temporary(tmp_path, monkey
     operation_paths = []
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         operation_path = Path(target_path)
         operation_paths.append(operation_path)
@@ -495,7 +514,12 @@ def test_track_tag_interrupt_propagates_and_removes_operation_temporary(
     interrupt = KeyboardInterrupt("tagging interrupted")
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         operation_path = Path(target_path)
         operation_paths.append(operation_path)
@@ -537,7 +561,12 @@ def test_nested_track_downloads_own_distinct_temporary_files(tmp_path, monkeypat
     )
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         operation = "a" if url.endswith("track-a.flac") else "b"
         operation_path = Path(target_path)
@@ -605,7 +634,12 @@ def test_operation_temporary_uses_ordinary_creation_mode(
     final_paths = []
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         operation_path = Path(target_path)
         observed_modes.append(operation_path.stat().st_mode & 0o777)
@@ -643,7 +677,12 @@ def test_tag_interrupt_after_rename_preserves_completed_final_file(
     interrupt = KeyboardInterrupt("interrupted after rename")
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         operation_path = Path(target_path)
         operation_paths.append(operation_path)

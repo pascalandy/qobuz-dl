@@ -62,7 +62,12 @@ def _install_real_file_boundaries(monkeypatch):
     temporary_paths = []
 
     def fake_stream_download(
-        url, target_path, *, progress=None, retry_rate_limited=False
+        url,
+        target_path,
+        *,
+        progress=None,
+        retry_rate_limited=False,
+        bandwidth_limit=None,
     ):
         temporary_path = Path(target_path)
         temporary_paths.append(temporary_path)

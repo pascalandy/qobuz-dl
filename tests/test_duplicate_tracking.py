@@ -24,6 +24,8 @@ def _record_downloads(monkeypatch, calls, failures=None):
             no_cover,
             folder_format,
             track_format,
+            *,
+            bandwidth_limit,
         ):
             self.item_id = item_id
             self.path = path

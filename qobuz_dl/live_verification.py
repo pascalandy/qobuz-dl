@@ -199,6 +199,7 @@ class RealBackend:
             quality_fallback=True,
             no_cover=True,
             downloads_db=None,
+            bandwidth_limit=None,
         )
         qobuz.client = client
         return qobuz.download_from_id(track_id, album=False)
