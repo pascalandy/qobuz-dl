@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from collections.abc import Mapping
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
@@ -95,6 +96,15 @@ class VerificationOutcome:
     reason: str
 
 
+@dataclass(frozen=True)
+class ExpectedMetadata:
+    title: str
+    artist: str
+    album: str
+    track_number: int
+    album_tracks_count: int | None
+
+
 class InputError(Exception):
     pass
 
@@ -137,7 +147,7 @@ class RealBackend:
         )
 
     def login(self, config_path: Path):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)
         with config_path.open(encoding="utf-8") as stream:
             config.read_file(stream)
         values = config[config.default_section]
@@ -214,7 +224,7 @@ def _write_private_config(
     if any(not secret for secret in credentials.secrets):
         raise VerificationFailure("bundle", "bundle_credentials_invalid")
 
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(interpolation=None)
     config[config.default_section] = {
         "email": inputs.email,
         "password": hashlib.md5(
@@ -364,14 +374,144 @@ def _media_quality(path: Path) -> tuple[ObtainedQuality, object]:
     raise VerificationFailure("media", "final_media_invalid")
 
 
-def _has_required_metadata(audio, path: Path) -> bool:
-    if path.suffix.lower() == ".flac":
-        return all(
-            audio.get(key) for key in ("TITLE", "ARTIST", "ALBUM", "TRACKNUMBER")
+def _positive_decimal(value) -> int:
+    if isinstance(value, bool):
+        raise ValueError
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        number = int(value)
+    else:
+        raise ValueError
+    if number <= 0:
+        raise ValueError
+    return number
+
+
+def _expected_metadata(response, authorized_track_id: str) -> ExpectedMetadata:
+    try:
+        if not isinstance(response, Mapping):
+            raise ValueError
+        response_id = response["id"]
+        if isinstance(response_id, bool) or str(response_id) != authorized_track_id:
+            raise ValueError
+
+        title = response["title"]
+        if not isinstance(title, str) or not title:
+            raise ValueError
+        version = response.get("version")
+        if version:
+            if not isinstance(version, str):
+                raise ValueError
+            title = f"{title} ({version})"
+        work = response.get("work")
+        if work:
+            if not isinstance(work, str):
+                raise ValueError
+            title = f"{work}: {title}"
+
+        album = response["album"]
+        if not isinstance(album, Mapping):
+            raise ValueError
+        album_title = album["title"]
+        album_artist = album["artist"]
+        if (
+            not isinstance(album_title, str)
+            or not album_title
+            or not isinstance(album_artist, Mapping)
+        ):
+            raise ValueError
+        album_artist_name = album_artist["name"]
+        if not isinstance(album_artist_name, str) or not album_artist_name:
+            raise ValueError
+
+        performer = response.get("performer")
+        if performer is not None and not isinstance(performer, Mapping):
+            raise ValueError
+        performer_name = performer.get("name") if performer is not None else None
+        if performer_name is not None and not isinstance(performer_name, str):
+            raise ValueError
+        artist = performer_name or album_artist_name
+
+        track_number = _positive_decimal(response["track_number"])
+        tracks_count_value = album.get("tracks_count")
+        album_tracks_count = (
+            _positive_decimal(tracks_count_value)
+            if tracks_count_value is not None
+            else None
         )
-    tags = audio.tags
-    return tags is not None and all(
-        tags.get(key) for key in ("TIT2", "TPE1", "TALB", "TRCK")
+    except (KeyError, TypeError, ValueError):
+        raise VerificationFailure("metadata", "metadata_reference_invalid") from None
+
+    return ExpectedMetadata(
+        title=unicodedata.normalize("NFC", title),
+        artist=unicodedata.normalize("NFC", artist),
+        album=unicodedata.normalize("NFC", album_title),
+        track_number=track_number,
+        album_tracks_count=album_tracks_count,
+    )
+
+
+def _single_metadata_text(value) -> str:
+    values = value.text if hasattr(value, "text") else value
+    if (
+        not isinstance(values, (list, tuple))
+        or len(values) != 1
+        or not isinstance(values[0], str)
+        or not values[0]
+    ):
+        raise ValueError
+    return unicodedata.normalize("NFC", values[0])
+
+
+def _track_number_matches(value: str, expected: ExpectedMetadata) -> bool:
+    match = re.fullmatch(r"([0-9]+)(?:/([0-9]+))?", value)
+    if not match:
+        return False
+    try:
+        numerator = _positive_decimal(match.group(1))
+        denominator = (
+            _positive_decimal(match.group(2)) if match.group(2) is not None else None
+        )
+    except ValueError:
+        return False
+    if numerator != expected.track_number:
+        return False
+    return denominator is None or (
+        expected.album_tracks_count is not None
+        and denominator == expected.album_tracks_count
+    )
+
+
+def _metadata_matches(audio, path: Path, expected: ExpectedMetadata) -> bool:
+    if path.suffix.lower() == ".flac":
+        values = {
+            "title": audio.get("TITLE"),
+            "artist": audio.get("ARTIST"),
+            "album": audio.get("ALBUM"),
+            "track": audio.get("TRACKNUMBER"),
+        }
+    else:
+        tags = audio.tags
+        if tags is None:
+            return False
+        values = {
+            "title": tags.get("TIT2"),
+            "artist": tags.get("TPE1"),
+            "album": tags.get("TALB"),
+            "track": tags.get("TRCK"),
+        }
+    try:
+        observed = {
+            name: _single_metadata_text(value) for name, value in values.items()
+        }
+    except (TypeError, ValueError):
+        return False
+    return (
+        observed["title"] == expected.title
+        and observed["artist"] == expected.artist
+        and observed["album"] == expected.album
+        and _track_number_matches(observed["track"], expected)
     )
 
 
@@ -526,8 +666,10 @@ def verify(
             phases["media"] = "passed"
 
             current_phase = "metadata"
-            if not _has_required_metadata(audio, final_path):
-                raise VerificationFailure("metadata", "metadata_invalid")
+            reference = client.get_track_meta(inputs.track_id)
+            expected_metadata = _expected_metadata(reference, inputs.track_id)
+            if not _metadata_matches(audio, final_path, expected_metadata):
+                raise VerificationFailure("metadata", "metadata_mismatch")
             phases["metadata"] = "passed"
             stages_passed = True
         except VerificationFailure as error:
