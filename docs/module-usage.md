@@ -23,6 +23,8 @@ qobuz.initialize_client(email, password_md5, qobuz.app_id, qobuz.secrets)
 qobuz.handle_url("https://play.qobuz.com/album/va4j3hdlwaubc")
 ```
 
+Pass `bandwidth_limit=2 * 1024 * 1024` to `QobuzDL` to limit each track audio transfer to 2 MiB per second. The setting paces application-level audio payload consumption, but TLS, socket, and kernel buffers can receive bytes ahead, so it is not an instantaneous network-interface ceiling. The public value is a positive integer number of bytes per second. `None` keeps transfers unlimited and is the default. Boolean values, non-integers, zero, and negative integers raise `ValueError`.
+
 `initialize_client` forwards its password argument unchanged. Pass one lowercase MD5 hexadecimal digest computed from the UTF-8 plaintext password, as shown above. If you load an existing digest from `config.ini`, pass it unchanged. Do not hash the digest again.
 
 The digest is not encryption. Treat it as credential-equivalent because the current login flow can use it without the plaintext password. See [Authentication credential and transport evidence](research/authentication-transport.md) for the current request placement and its verification limits.

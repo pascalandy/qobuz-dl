@@ -69,6 +69,7 @@ The config file stores:
 - `default_folder`
 - `default_quality`
 - `default_limit`
+- `bandwidth_limit`
 - `no_m3u`
 - `albums_only`
 - `no_fallback`
@@ -82,7 +83,7 @@ The config file stores:
 
 qobuz-dl reads and writes `config.ini` as UTF-8 on every platform.
 
-Before a command starts authentication or initializes the Qobuz client, the CLI parses and validates the existing config. The configured `default_quality` must be `5`, `6`, `7`, or `27`. `default_limit` must be an integer. Boolean preferences use ConfigParser's standard forms. `1`, `yes`, `true`, and `on` mean true. `0`, `no`, `false`, and `off` mean false. Explicit CLI options still override valid config defaults.
+Before a command starts authentication or initializes the Qobuz client, the CLI parses and validates the existing config. The configured `default_quality` must be `5`, `6`, `7`, or `27`. `default_limit` must be an integer. The optional `bandwidth_limit` must be `off` or a positive integer followed by `KiB/s` or `MiB/s`. A missing `bandwidth_limit` remains compatible and means unlimited. Boolean preferences use ConfigParser's standard forms. `1`, `yes`, `true`, and `on` mean true. `0`, `no`, `false`, and `off` mean false. Explicit CLI options override config defaults.
 
 Treat the config file as a secret. The saved password digest is not plaintext, but it is credential-equivalent because the tool uses it directly for login. `--show-config` redacts `email`, `password`, `app_id`, `secrets`, `private_key`, and `user_auth_token` if those keys are present, but the actual config file contains the saved values. The current config creator does not write `user_auth_token`; Qobuz login returns that token when a command initializes, and the process keeps it in memory for that run.
 
@@ -352,6 +353,26 @@ default_quality = 27
 
 Advanced note: the CLI also supports `--quality 7` for 24-bit up to 96 kHz, but the simpler product model is MP3, CD quality, or max available resolution.
 
+### Track audio bandwidth limit
+
+Limit track audio transfers to 512 KiB per second for one run:
+
+```sh
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --bandwidth-limit 512KiB/s
+```
+
+The accepted values are exactly `off` or a positive integer followed by `KiB/s` or `MiB/s`. The value uses binary units, so `1KiB/s` is 1,024 bytes per second and `1MiB/s` is 1,048,576 bytes per second. Spaces, signs, decimals, leading zeroes, SI units such as `KB/s`, case variants, and `auto` are invalid.
+
+Set a persistent limit in `config.ini`:
+
+```ini
+bandwidth_limit = 2MiB/s
+```
+
+Use `bandwidth_limit = off` for unlimited transfers. New and reset configs use `off`. The `--bandwidth-limit` value overrides the config for one run, including `--bandwidth-limit off`.
+
+The limit applies only to track audio. Cover art, booklets, Qobuz API responses, web bundle requests, and Last.fm pages remain unpaced. The setting paces application-level audio payload consumption, but TLS, socket, and kernel buffers can receive bytes ahead, so it is not an instantaneous network-interface ceiling. The transfer counts network read and file write time toward each chunk's allowance. A slow read or write reduces the following wait, but idle time and late wakeups do not give later chunks extra bandwidth.
+
 ### Quality fallback behavior
 
 By default, fallback is enabled: if the requested quality is unavailable, `qobuz-dl` can fall back to an available lower quality.
@@ -495,6 +516,7 @@ Then edit the displayed config file to make defaults persistent, for example:
 - `default_folder`
 - `default_quality`
 - `default_limit`
+- `bandwidth_limit`
 - `no_m3u`
 - `albums_only`
 - `no_fallback`
