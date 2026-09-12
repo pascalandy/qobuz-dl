@@ -13,7 +13,7 @@ from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
 from qobuz_dl.commands import QUALITY_CHOICES, RESET_COMMAND, qobuz_dl_args
 from qobuz_dl.core import QobuzDL
-from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
+from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK, validate_cover_options
 from qobuz_dl.exceptions import BundleError
 
 logging.basicConfig(
@@ -303,6 +303,11 @@ def _handle_commands(qobuz, arguments):
 def main():
     parser = qobuz_dl_args()
     arguments = parser.parse_args()
+    if arguments.command is not None:
+        try:
+            validate_cover_options(arguments.embed_art, arguments.no_cover)
+        except ValueError as error:
+            parser.error(str(error))
     try:
         config_file, database_file = _resolve_config_paths()
     except _ConfigPathError:
@@ -369,10 +374,17 @@ def main():
             config_values["default_folder"],
         ).parse_args()
 
+    embed_art = arguments.embed_art or config_values["embed_art"]
+    no_cover = arguments.no_cover or config_values["no_cover"]
+    try:
+        validate_cover_options(embed_art, no_cover)
+    except ValueError as error:
+        parser.error(str(error))
+
     qobuz = QobuzDL(
         arguments.directory,
         arguments.quality,
-        arguments.embed_art or config_values["embed_art"],
+        embed_art,
         ignore_singles_eps=arguments.albums_only or config_values["albums_only"],
         no_m3u_for_playlists=arguments.no_m3u or config_values["no_m3u"],
         quality_fallback=_quality_fallback_enabled(
@@ -380,7 +392,7 @@ def main():
             config_values["no_fallback"],
         ),
         cover_og_quality=arguments.og_cover or config_values["og_cover"],
-        no_cover=arguments.no_cover or config_values["no_cover"],
+        no_cover=no_cover,
         downloads_db=None
         if config_values["no_database"] or arguments.no_db
         else database_file,

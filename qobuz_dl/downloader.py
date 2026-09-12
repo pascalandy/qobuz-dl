@@ -31,6 +31,11 @@ DEFAULT_NAME_MAX = 255
 logger = logging.getLogger(__name__)
 
 
+def validate_cover_options(embed_art: bool, no_cover: bool) -> None:
+    if embed_art and no_cover:
+        raise ValueError("--embed-art cannot be used with --no-cover")
+
+
 @dataclass(frozen=True)
 class DownloadResult:
     state: Literal["finalized", "ignored", "failed"]
@@ -117,6 +122,7 @@ class Download:
         folder_format=None,
         track_format=None,
     ):
+        validate_cover_options(embed_art, no_cover)
         self.client = client
         self.item_id = item_id
         self.path = path

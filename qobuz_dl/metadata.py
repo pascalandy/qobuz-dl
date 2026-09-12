@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 COPYRIGHT, PHON_COPYRIGHT = "\u00a9", "\u2117"
 # if a metadata block exceeds this, mutagen will raise error
 # and the file won't be tagged
-FLAC_MAX_BLOCKSIZE = 16777215
+FLAC_MAX_BLOCKSIZE = 16_777_215
+FLAC_PICTURE_OVERHEAD = 47
+EMBEDDED_ART_MAX_BYTES = FLAC_MAX_BLOCKSIZE - FLAC_PICTURE_OVERHEAD
 
 ID3_LEGEND = {
     "album": id3.TALB,
@@ -109,48 +111,47 @@ def _build_metadata_payload(d: dict, album: dict, istrack=True):
     }
 
 
-def _embed_flac_img(root_dir, audio: FLAC):
-    emb_image = os.path.join(root_dir, "cover.jpg")
-    multi_emb_image = os.path.join(
+def _read_embedded_art(root_dir) -> bytes | None:
+    local_cover = os.path.join(root_dir, "cover.jpg")
+    parent_cover = os.path.join(
         os.path.abspath(os.path.join(root_dir, os.pardir)), "cover.jpg"
     )
-    if os.path.isfile(emb_image):
-        cover_image = emb_image
-    else:
-        cover_image = multi_emb_image
-
+    cover_image = local_cover if os.path.isfile(local_cover) else parent_cover
     try:
-        # rest of the metadata still gets embedded
-        # when the image size is too big
-        if os.path.getsize(cover_image) > FLAC_MAX_BLOCKSIZE:
-            raise Exception(
-                "downloaded cover size too large to embed. "
-                "turn off `og_cover` to avoid error"
-            )
+        with open(cover_image, "rb") as cover:
+            image_data = cover.read(EMBEDDED_ART_MAX_BYTES + 1)
+    except OSError:
+        logger.warning(
+            "Cover art could not be read. Continuing without embedded cover art."
+        )
+        return None
 
-        image = Picture()
-        image.type = 3
-        image.mime = "image/jpeg"
-        image.desc = "cover"
-        with open(cover_image, "rb") as img:
-            image.data = img.read()
-        audio.add_picture(image)
-    except Exception as e:
-        logger.error(f"Error embedding image: {e}", exc_info=True)
+    if len(image_data) > EMBEDDED_ART_MAX_BYTES:
+        logger.warning(
+            "Cover art exceeds %s bytes. Continuing without embedded cover art.",
+            EMBEDDED_ART_MAX_BYTES,
+        )
+        return None
+    return image_data
+
+
+def _embed_flac_img(root_dir, audio: FLAC):
+    image_data = _read_embedded_art(root_dir)
+    if image_data is None:
+        return
+
+    image = Picture()
+    image.type = 3
+    image.mime = "image/jpeg"
+    image.desc = "cover"
+    image.data = image_data
+    audio.add_picture(image)
 
 
 def _embed_id3_img(root_dir, audio: id3.ID3):
-    emb_image = os.path.join(root_dir, "cover.jpg")
-    multi_emb_image = os.path.join(
-        os.path.abspath(os.path.join(root_dir, os.pardir)), "cover.jpg"
-    )
-    if os.path.isfile(emb_image):
-        cover_image = emb_image
-    else:
-        cover_image = multi_emb_image
-
-    with open(cover_image, "rb") as cover:
-        audio.add(id3.APIC(3, "image/jpeg", 3, "", cover.read()))
+    image_data = _read_embedded_art(root_dir)
+    if image_data is not None:
+        audio.add(id3.APIC(3, "image/jpeg", 3, "", image_data))
 
 
 # Use KeyError catching instead of dict.get to avoid empty tags
