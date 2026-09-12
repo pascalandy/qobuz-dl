@@ -26,7 +26,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 - [Dependencies](dependencies.md) — dependency policy, runtime inventory, usage sites, and update rules.
 - [Development](development.md) — local fork workflow, global CLI separation, `qdl-dev`, and Chezmoi-managed shell config.
 - [Packaging](packaging.md) — Python packaging metadata, dependency locking, build-file ownership, and the release process.
-- [Testing](testing.md): uv-based checks, isolated package tests, opt-in Git install verification, and GitHub Actions CI/CD.
+- [Testing](testing.md): uv-based checks, isolated package tests, opt-in Git install and live Qobuz verification, and GitHub Actions CI/CD.
 - [Changelog](../CHANGELOG.md) — notable changes per release.
 - [Contributing](../CONTRIBUTING.md) — setup, workflow, ground rules, and release steps.
 
