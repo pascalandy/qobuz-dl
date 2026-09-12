@@ -1392,8 +1392,13 @@ def test_finalized_path_must_be_exactly_one_file_inside_destination(
 @pytest.mark.parametrize(
     ("audio_bytes", "expected_phase", "expected_reason"),
     [
-        (b"tags only", "media", "final_media_invalid"),
-        (_mpeg_audio(), "metadata", "metadata_mismatch"),
+        pytest.param(b"tags only", "media", "final_media_invalid", id="tags-only"),
+        pytest.param(
+            _mpeg_audio(),
+            "metadata",
+            "metadata_mismatch",
+            id="audio-without-tags",
+        ),
     ],
 )
 def test_mp3_requires_playable_audio_and_required_tags(

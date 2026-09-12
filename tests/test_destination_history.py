@@ -429,6 +429,34 @@ def test_known_replacement_failures_preserve_old_artifact(
     assert qobuz.download_history.verified_artifact("track-1", final_path) is not None
 
 
+def test_staged_flush_failure_stops_before_publication_and_preserves_old_artifact(
+    tmp_path, monkeypatch
+):
+    _install_real_flac_download(monkeypatch)
+    qobuz = _qobuz(tmp_path)
+    first = qobuz.download_from_id("track-1", album=False)
+    final_path = Path(first.finalized_paths[0])
+    old_bytes = final_path.read_bytes()
+    _force_known_replacement(monkeypatch, qobuz, final_path)
+    publication_attempts = []
+
+    def fail_flush(_descriptor):
+        raise OSError("flush failed")
+
+    def capture_publication(source, destination):
+        publication_attempts.append((source, destination))
+
+    monkeypatch.setattr(downloader.os, "fsync", fail_flush)
+    monkeypatch.setattr(downloader.os, "link", capture_publication)
+
+    result = qobuz.download_from_id("track-1", album=False)
+
+    assert result == DownloadResult("failed", "publish_error")
+    assert publication_attempts == []
+    assert final_path.read_bytes() == old_bytes
+    assert qobuz.download_history.verified_artifact("track-1", final_path) is not None
+
+
 def test_interrupted_replacement_restores_old_artifact(tmp_path, monkeypatch):
     _install_real_flac_download(monkeypatch)
     qobuz = _qobuz(tmp_path)
@@ -582,7 +610,7 @@ def test_unsupported_hard_link_uses_verified_exclusive_copy(tmp_path, monkeypatc
         downloader.os,
         "link",
         lambda *_args: (_ for _ in ()).throw(
-            OSError(getattr(os, "EOPNOTSUPP", 95), "links unsupported")
+            OSError(errno.ENOTSUP, "links unsupported")
         ),
     )
 
@@ -657,24 +685,32 @@ def test_interrupted_copy_publication_removes_only_owned_partial(tmp_path, monke
 def test_copy_publication_does_not_adopt_intervening_path(tmp_path, monkeypatch):
     _install_real_flac_download(monkeypatch)
     qobuz = _qobuz(tmp_path, database=False)
+    final_path = tmp_path / "music" / "album" / "01. Track.flac"
     monkeypatch.setattr(
         downloader.os,
         "link",
         lambda *_args: (_ for _ in ()).throw(OSError(errno.EXDEV, "no links")),
     )
-    real_copy = shutil.copyfileobj
+    real_copy = downloader._DestinationTransaction._copy_no_clobber
+    swapped = False
 
-    def interleave_copy(source, destination):
-        real_copy(source, destination)
-        interloper = Path(destination.name).with_name("interloper")
+    def copy_then_interleave(transaction, source, destination):
+        nonlocal swapped
+        real_copy(transaction, source, destination)
+        interloper = Path(destination).with_name("interloper")
         interloper.write_bytes(b"intervening")
-        os.replace(interloper, destination.name)
+        os.replace(interloper, destination)
+        swapped = True
 
-    monkeypatch.setattr(downloader.shutil, "copyfileobj", interleave_copy)
+    monkeypatch.setattr(
+        downloader._DestinationTransaction,
+        "_copy_no_clobber",
+        copy_then_interleave,
+    )
 
     result = qobuz.download_from_id("track-1", album=False)
 
-    final_path = tmp_path / "music" / "album" / "01. Track.flac"
+    assert swapped
     assert result.state == "failed"
     assert _files_equal_to(final_path.parent, b"intervening")
 

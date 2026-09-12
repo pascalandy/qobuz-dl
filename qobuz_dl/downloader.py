@@ -154,7 +154,7 @@ class _DestinationTransaction:
 
     def fsync_staged(self):
         try:
-            with open(self.staged_path, "rb") as staged:
+            with open(self.staged_path, "r+b") as staged:
                 os.fsync(staged.fileno())
         except OSError as error:
             raise _TransactionFailure("publish_error") from error
