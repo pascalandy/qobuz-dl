@@ -38,6 +38,18 @@ Run command-level help for detailed options:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --help
 ```
 
+## API rate-limit retries
+
+If a known replay-safe Qobuz API read returns HTTP `429`, qobuz-dl makes up to three total attempts. The policy covers catalog metadata, searches, favorites, user playlists, and the API request that fetches a track's media URL.
+
+A single `Retry-After` header can specify seconds or an HTTP date. If the header is absent, invalid, or ambiguous, qobuz-dl waits one second before the second attempt. It waits two seconds before the third attempt.
+
+The cumulative requested wait is limited to 30 seconds for each API call. If the next wait would exceed the remaining budget, qobuz-dl stops without waiting or sending another request. Press `Ctrl-C` to interrupt a wait.
+
+Login requests, audio data downloads, and unknown API endpoints remain single-attempt operations. qobuz-dl does not infer a numeric Qobuz quota. Other HTTP failures, transport failures, and invalid JSON do not trigger the retry policy.
+
+When retries run out, the CLI exits nonzero with `Qobuz API rate limit retries exhausted.` The message omits response bodies, headers, and request parameters. A collection stops before it starts the next item.
+
 ## `dl` sources
 
 `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl SOURCE...` accepts:

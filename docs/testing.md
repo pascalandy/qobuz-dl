@@ -156,6 +156,8 @@ The Last.fm characterization tests pass static HTML fixtures through the importe
 
 HTTP-adjacent tests should prefer local fake response/session classes that implement only the behavior under test, such as `json()`, `raise_for_status()`, `headers`, `read()`, or context-manager entry and exit. Interactive tests should use built-in prompt/input fakes instead of requiring a real terminal or manual input.
 
+Rate-limit tests must inject a controlled wall clock and sleep function. Assert the requested waits and call count. Do not delay the test suite.
+
 The CI and local `just ci` gate build and install the exact wheel before testing its imports and entry points. This catches packaging metadata errors that source checks can miss.
 
 ## Good next tests
