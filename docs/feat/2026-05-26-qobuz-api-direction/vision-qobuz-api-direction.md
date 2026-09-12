@@ -1,5 +1,7 @@
 # Vision: Qobuz API direction
 
+> Historical direction from 26 May 2026. [Qobuz access and project status](../../qobuz-access.md), dated 12 September 2026, supersedes this document for the adopted unofficial bundle-derived access mode, its evidence limits and public notices, and the fork's Beta maturity decision. This status does not claim Qobuz approval, a current endpoint contract, or legal compliance.
+
 ## Relationship to agent operation
 
 This May 2026 direction remains a constraint on the [agent operation design](../2026-09-12-agent-ergonomics/design-agent-ergonomics.md). Improve inspection, bounded catalog selection, and download evidence within the downloader mission. Broader favorites, purchases, or user-playlist sources remain separate work and must use those same contracts if added.

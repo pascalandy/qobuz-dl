@@ -16,7 +16,7 @@ authors = [
 ]
 keywords = ["qobuz", "music", "downloader", "flac", "hi-res", "lossless"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
   "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",

@@ -1,5 +1,7 @@
 # Research: Qobuz official developer/API/SDK documentation
 
+> Historical research with a 12 September 2026 authentication addendum. [Qobuz access and project status](../qobuz-access.md) supersedes this document for the project's current access decision. The sources below remain dated evidence, not proof of current Qobuz approval, a current contract, or legal compliance.
+
 ## Summary
 Officially accessible Qobuz API documentation appears limited from the provided primary-source excerpts: the public developer portal (`developer.qobuz.com`) returned HTTP 503 during the parent research pass, while two official static PDFs document integration requirements and terms. The official sources confirm that Qobuz exposes an API for third-party apps, requires Qobuz-issued application credentials, supports user/library/playlists/search/playback-related capabilities, and can mutate user data; specific REST endpoint paths were not confirmed in the accessible official materials.
 
