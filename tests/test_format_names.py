@@ -77,7 +77,7 @@ class _Client:
 def _install_file_boundaries(monkeypatch):
     transfers = []
 
-    def fake_download(url, filename, description):
+    def fake_download(url, filename, description, *, retry_rate_limited=False):
         transfers.append((url, filename, description))
         Path(filename).write_bytes(b"audio")
 

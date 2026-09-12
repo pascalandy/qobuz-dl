@@ -115,7 +115,7 @@ def test_download_track_sanitizes_folder_and_final_file_paths(tmp_path, monkeypa
     downloaded = []
     tagged = []
 
-    def fake_download_with_progress(url, fname, desc):
+    def fake_download_with_progress(url, fname, desc, *, retry_rate_limited=False):
         downloaded.append((url, fname, desc))
         Path(fname).write_bytes(b"audio")
 

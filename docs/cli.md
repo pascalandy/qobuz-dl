@@ -46,9 +46,21 @@ A single `Retry-After` header can specify seconds or an HTTP date. If the header
 
 The cumulative requested wait is limited to 30 seconds for each API call. If the next wait would exceed the remaining budget, qobuz-dl stops without waiting or sending another request. Press `Ctrl-C` to interrupt a wait.
 
-Login requests, audio data downloads, and unknown API endpoints remain single-attempt operations. qobuz-dl does not infer a numeric Qobuz quota. Other HTTP failures, transport failures, and invalid JSON do not trigger the retry policy.
+Login requests and unknown API endpoints remain single-attempt operations. qobuz-dl does not infer a numeric Qobuz quota. Other HTTP failures, transport failures, and invalid JSON do not trigger the retry policy.
 
 When retries run out, the CLI exits nonzero with `Qobuz API rate limit retries exhausted.` The message omits response bodies, headers, and request parameters. A collection stops before it starts the next item.
+
+## Audio rate-limit retries
+
+An audio download uses the same policy. It permits up to three attempts, honors `Retry-After`, uses the fallback waits, and limits cumulative waits to 30 seconds. These limits apply only while qobuz-dl acquires the response.
+
+The policy handles both a returned `429` response and a raised HTTP `429` error. A later successful attempt follows the same transfer, tagging, and finalization path as a direct success.
+
+After qobuz-dl accepts a non-429 response, it never retries that stream, even when it has read no bytes. Read, write, progress, close, and content-length failures do not start another request. qobuz-dl does not append responses, send a `Range` request, or resume a partial transfer.
+
+If acquisition retries run out, the download has the ordinary `failed` state and `request_error` reason. On exhaustion or cancellation, qobuz-dl removes the owned temporary file and does not publish an incomplete final file. A partial album result keeps paths finalized before the failed track.
+
+Cover art, booklets, and other extras remain single-attempt downloads. Non-429 HTTP failures and transport failures do not trigger a retry. The policy does not limit or pace transferred audio bytes.
 
 ## `dl` sources
 
