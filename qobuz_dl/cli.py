@@ -11,7 +11,7 @@ from io import StringIO
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
-from qobuz_dl.commands import QUALITY_CHOICES, qobuz_dl_args
+from qobuz_dl.commands import QUALITY_CHOICES, RESET_COMMAND, qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
 
@@ -312,7 +312,7 @@ def main():
     except _ConfigValidationError as error:
         sys.exit(
             f"{RED}Your config file is corrupted: {error}! "
-            "Run 'uvx qobuz-dl -r' to fix this "
+            f"Run '{RESET_COMMAND}' to fix this "
             "(or 'qobuz-dl -r' if installed)."
         )
 

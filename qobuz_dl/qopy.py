@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 
 from qobuz_dl.color import GREEN, YELLOW
+from qobuz_dl.commands import RESET_COMMAND
 from qobuz_dl.exceptions import (
     AuthenticationError,
     IneligibleError,
@@ -17,7 +18,7 @@ from qobuz_dl.exceptions import (
 )
 from qobuz_dl.http import HttpClient
 
-RESET = "Reset your credentials with 'uvx qobuz-dl -r' (or 'qobuz-dl -r' if installed)"
+RESET = f"Reset your credentials with '{RESET_COMMAND}' (or 'qobuz-dl -r' if installed)"
 
 logger = logging.getLogger(__name__)
 
