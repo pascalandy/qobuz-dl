@@ -41,6 +41,12 @@ qobuz-dl
 
 See [Installation](docs/installation.md) for source selection, reproducible revisions, first-run setup, reinstall instructions, and the install verifier.
 
+## Qobuz access and project status
+
+This is an unofficial Beta project. It is not affiliated with or certified by Qobuz. The current client derives app parameters from Qobuz's public web bundle, so Qobuz changes can break setup or downloads without notice. You still need an eligible Qobuz account and subscription.
+
+The public Qobuz documents linked by this project do not prove that Qobuz currently approves this client. They also do not establish a current contract or legal compliance for your use. Read [Qobuz access and project status](docs/qobuz-access.md) for the decision and its evidence limits.
+
 ## Examples
 
 Download an album while requesting the highest hi-res tier the CLI supports:
@@ -99,6 +105,7 @@ See the [CLI reference](docs/cli.md) for global options and command descriptions
 * [Installation](docs/installation.md)
 * [Examples](docs/examples.md)
 * [Use cases](docs/use-cases.md)
+* [Qobuz access and project status](docs/qobuz-access.md)
 * [CLI reference](docs/cli.md)
 * [Module usage](docs/module-usage.md)
 * [Dependencies](docs/dependencies.md)
@@ -120,5 +127,6 @@ This is a maintained fork of [vitiko98/Qobuz-DL](https://github.com/vitiko98/Qob
 
 ## Disclaimer
 
-* This tool was written for educational purposes. I will not be responsible if you use this program in bad faith. By using it, you are accepting the [Qobuz API Terms of Use](https://static.qobuz.com/apps/api/QobuzAPI-TermsofUse.pdf).
-* `qobuz-dl` is not affiliated with Qobuz.
+* This application uses the Qobuz API but is not certified by Qobuz
+* `qobuz-dl` is unofficial and is not affiliated with Qobuz
+* You are responsible for checking the terms and laws that apply to your account, subscription, location, and use
