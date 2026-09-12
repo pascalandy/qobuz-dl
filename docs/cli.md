@@ -10,6 +10,8 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [--versi
 
 The CLI can download from direct URLs, local text files, interactive search, or best-match search.
 
+On Windows, `--help`, `--version`, and `<command> --help` work when `APPDATA` is missing or empty. Commands that continue into config or database work require a nonempty `APPDATA` value. See [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live) for paths and the missing-`APPDATA` diagnostic.
+
 ## Global options
 
 | Option | Description |
