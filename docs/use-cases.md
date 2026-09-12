@@ -440,7 +440,13 @@ MP3 and FLAC files use the same best-effort artwork policy. With `--embed-art`, 
 
 ### Playlist file behavior
 
-By default, playlist downloads can create `.m3u` playlist files. Disable `.m3u` creation:
+By default, a playlist download rewrites its `.m3u` file from the current source selection and the final audio paths available for that run. The file keeps the source order and repeated tracks. A repeated track appears more than once in the `.m3u`, but `qobuz-dl` transfers it at most once during that playlist run.
+
+The rewrite excludes audio files that are present in the playlist directory but absent from the source. It also excludes failed items without a readable final MP3 or FLAC path. Removing a source entry removes it from the next `.m3u` without deleting its audio file.
+
+When duplicate history already contains a track, a rerun can reuse the expected file at the same playlist destination without transferring it again. `qobuz-dl` does not search other destinations or copy files between them. Cross-destination reuse remains a separate decision.
+
+Disable `.m3u` creation and leave an existing playlist file unchanged:
 
 ```sh
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/playlist/PLAYLIST_ID --no-m3u
