@@ -329,8 +329,12 @@ def main():
         try:
             os.remove(QOBUZ_DB)
         except FileNotFoundError:
-            pass
-        sys.exit(f"{GREEN}The database was deleted.")
+            logging.warning(f"{GREEN}The database is already absent.")
+            return
+        except OSError:
+            sys.exit(f"Unable to delete database at {QOBUZ_DB}. Check its permissions.")
+        logging.warning(f"{GREEN}The database was deleted.")
+        return
 
     if startup.needs_auth:
         arguments = qobuz_dl_args(
