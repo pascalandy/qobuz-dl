@@ -163,16 +163,11 @@ Revise.
 
 One-line reason: the repo already has the right HTTP boundary and the feature has clear user and maintainer value, but the original idea should be narrowed to opt-in pacing and standards-based backoff, not a hard default cap or claims of official Qobuz player equivalence.
 
-## Recommended Next Phase
+## Current routing
 
-Use `pa-architect` or a small `pa-plan-slicer` pass before implementation. The next artifact should decide the exact UX and policy shape:
+This recommendation is a historical direction from 22 June 2026. Do not use it as an active backlog. [Issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) owns current sequencing.
 
-1. CLI/config surface for an optional bandwidth cap.
-2. HTTP-layer retry/backoff behavior for `429` and `Retry-After`.
-3. Test cases for paced streams, retry-after parsing, bounded retries, interrupted downloads, and partial-file cleanup.
-4. Documentation wording that keeps responsible-use claims modest.
-
-If maintainers want only the smallest implementation slice, skip broad architecture and plan one vertical slice: add optional `stream_download` byte pacing with offline tests, then separately add central `429`/`Retry-After` handling.
+[Issue #39](https://github.com/pascalandy/qobuz-dl/issues/39) and [issue #40](https://github.com/pascalandy/qobuz-dl/issues/40) own bounded `429` retries for API reads and media acquisition. [Issue #50](https://github.com/pascalandy/qobuz-dl/issues/50) owns recovery and review of the bandwidth-limit vision. [Issue #51](https://github.com/pascalandy/qobuz-dl/issues/51) owns an explicit optional byte-rate limit. [Issue #52](https://github.com/pascalandy/qobuz-dl/issues/52) owns any later automatic mode, only if the maintainer approves its rule.
 
 ## Verification Log
 

@@ -79,12 +79,8 @@ Proceed, but with a narrowed direction: build a documented, conservative downloa
 
 One-line reason: the value is real for maintainers and power users, but the official API contract is too unavailable to justify broad SDK claims.
 
-## Recommended next phase
+## Current routing
 
-Use `pa-plan-slicer` to split the work into small slices:
+This recommendation is a historical direction from 26 May 2026. Do not use its numbered list as an active backlog. [Issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) owns current sequencing.
 
-1. documentation baseline and endpoint confidence matrix;
-2. auth/token modernization spike;
-3. internal signed-request helper cleanup;
-4. read-only favorites/user-playlists/purchases feasibility slice;
-5. CLI/docs update only after one read-only source proves stable.
+[Issue #37](https://github.com/pascalandy/qobuz-dl/issues/37) owns the authentication contract and transport evidence. [Issue #38](https://github.com/pascalandy/qobuz-dl/issues/38) owns the maintainer's decision about the project's Qobuz access mode. Those issues preserve the distinction between observed local behavior and a server-accepted or official contract.

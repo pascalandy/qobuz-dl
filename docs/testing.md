@@ -71,6 +71,8 @@ This optional command prints the current coverage and missing lines for `qobuz_d
 
 See the [coverage receipt for issue 45](../artifacts/coverage/2026-09-12-issue-45.md) for the dated Python 3.13 measurement, scope, and behavior-linked gaps.
 
+As of 12 September 2026, the recipe and receipt are proposed in open [PR #76](https://github.com/pascalandy/qobuz-dl/pull/76). They are present in this stacked revision but are not part of `master` until that pull request is merged.
+
 ## GitHub Actions CI/CD
 
 GitHub Actions runs the CI gate on pushes to `master` or `main` and on pull requests. Pull requests can target non-default branches, so branch-on-branch pull requests receive the same checks. Generated `graphite-base` branches are excluded. Maintainers can also start the workflow manually with `workflow_dispatch`.
@@ -89,6 +91,8 @@ Windows tests exercise CLI startup when `APPDATA` is absent and create final fil
 The matrix covers only the listed hosted runner images and Python versions. It does not cover every operating system release, Python version, filesystem, or authenticated download path. A workflow definition states the intended matrix; only completed hosted jobs prove a specific revision on Windows and macOS.
 
 The workflow uses read-only repository permissions. The successful Ubuntu Python 3.13 job uploads the built `dist/` files as the `qobuz-dl-dist` artifact for release and download inspection.
+
+As of 12 September 2026, open [PR #75](https://github.com/pascalandy/qobuz-dl/pull/75) proposes this four-job native matrix. All four jobs passed on that pull request. The matrix is present in this stacked revision but is not part of `master` until that pull request is merged.
 
 A separate tag-triggered release workflow publishes GitHub releases; see [Packaging — Releases](packaging.md#releases).
 
@@ -164,6 +168,8 @@ The live verifier is disabled by default. Ordinary tests and `just ci` do not re
 ```sh
 uv run --frozen pytest tests/test_live_qobuz_verification.py
 ```
+
+As of 12 September 2026, the disabled verifier is proposed in open [PR #77](https://github.com/pascalandy/qobuz-dl/pull/77). It is present in this stacked revision but is not part of `master` until that pull request is merged. No authorized live run from [issue #48](https://github.com/pascalandy/qobuz-dl/issues/48) is claimed here.
 
 Do not run the live procedure as part of verifier preparation. [Issue #48](https://github.com/pascalandy/qobuz-dl/issues/48) owns explicit authorization, the account and track inputs, the live run, and the receipt's publication or disposal.
 
@@ -249,13 +255,21 @@ Keep API and media exhaustion scenarios separate. For media streams, cover both 
 
 The CI and local `just ci` gate build and install the exact wheel before testing its imports and entry points. This catches packaging metadata errors that source checks can miss.
 
-## Good next tests
+## Scenario evidence from 20 June 2026
 
-Add coverage in this order:
+The [S01 to S10 scenario record](../artifacts/scenario-evaluation/2026-06-20-qobuz-dl-capability-scenarios.md) preserves the original pass criteria, commands, and observed results. Each scenario was delivered in its own reviewed pull request:
 
-1. CLI parsing and command defaults
-2. Downloaded-ID database behavior
-3. Filename and path sanitization
-4. Last.fm parsing with static HTML fixtures
-5. Qobuz API client behavior with mocked HTTP responses
-6. Optional integration tests guarded by credentials and explicit markers
+| Scenario | Capability | Evidence |
+| --- | --- | --- |
+| S01 | CLI and config safety | [PR #1](https://github.com/pascalandy/qobuz-dl/pull/1) |
+| S02 | Direct source routing | [PR #2](https://github.com/pascalandy/qobuz-dl/pull/2) |
+| S03 | Text-file source ingestion | [PR #3](https://github.com/pascalandy/qobuz-dl/pull/3) |
+| S04 | Lucky search mode | [PR #4](https://github.com/pascalandy/qobuz-dl/pull/4) |
+| S05 | Interactive queue mode | [PR #5](https://github.com/pascalandy/qobuz-dl/pull/5) |
+| S06 | Last.fm playlist ingestion | [PR #6](https://github.com/pascalandy/qobuz-dl/pull/6) |
+| S07 | Download execution | [PR #7](https://github.com/pascalandy/qobuz-dl/pull/7) |
+| S08 | Duplicate tracking | [PR #8](https://github.com/pascalandy/qobuz-dl/pull/8) |
+| S09 | Metadata and M3U generation | [PR #9](https://github.com/pascalandy/qobuz-dl/pull/9) |
+| S10 | HTTP, API, bundle, and packaging | [PR #10](https://github.com/pascalandy/qobuz-dl/pull/10) |
+
+These are offline scenario results, not live Qobuz evidence. The suite has grown since the dated record. Use the [coverage receipt](../artifacts/coverage/2026-09-12-issue-45.md) for the current measured gaps, the native CI section above for Windows and macOS scope, and [issue #20](https://github.com/pascalandy/qobuz-dl/issues/20) for active work. The live verifier remains disabled by default. Only [issue #48](https://github.com/pascalandy/qobuz-dl/issues/48) can record an authorized live run.

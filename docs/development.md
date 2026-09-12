@@ -46,7 +46,7 @@ which qobuz-dl
 Example global install path:
 
 ```text
-/Users/andy16/.local/bin/qobuz-dl
+$HOME/.local/bin/qobuz-dl
 ```
 
 From this checkout, use `uv run` to run the fork under development:
@@ -63,24 +63,24 @@ To confirm which source is imported, run:
 uv run python -c "import qobuz_dl; print(qobuz_dl.__file__)"
 ```
 
-The path should point inside this repository, for example:
+The path should point inside your checkout, for example:
 
 ```text
-/Users/andy16/Documents/github_local/qobuz-dl/qobuz_dl/__init__.py
+<checkout>/qobuz_dl/__init__.py
 ```
 
-## `qdl-dev` shell alias
+## Pascal's `qdl-dev` shell alias
 
-The development alias is managed in the Chezmoi source file:
+This section records Pascal's local setup. It is not a project requirement. His development alias is managed in this Chezmoi source file:
 
 ```text
-/Users/andy16/.local/share/chezmoi/dot_zshrc
+$HOME/.local/share/chezmoi/dot_zshrc
 ```
 
 Alias:
 
 ```sh
-alias qdl-dev='cd "$HOME/Documents/github_local/qobuz-dl" && uv run qobuz-dl'
+alias qdl-dev='cd "<checkout>" && uv run qobuz-dl'
 ```
 
 Use it from any shell location:
@@ -92,16 +92,16 @@ qdl-dev dl --help
 
 This keeps the production/global `qobuz-dl` command separate from the local development fork.
 
-The alias selects one personal checkout. Use `uv run` directly inside another worktree so tests exercise the intended branch. These macOS paths describe the personal alias, not a required repository location.
+The alias selects one personal checkout. Use `uv run` directly inside another worktree so tests exercise the intended branch. The alias and Chezmoi paths describe Pascal's setup, not a required repository location.
 
-## Dotfiles and Chezmoi
+## Pascal's dotfiles and Chezmoi
 
-Personal shell configuration is managed through dotfiles with [Chezmoi](https://www.chezmoi.io/).
+Pascal manages his personal shell configuration through dotfiles with [Chezmoi](https://www.chezmoi.io/). Other contributors do not need Chezmoi.
 
 Do not edit applied home-directory files such as `~/.zshrc` directly when they are Chezmoi-managed. Edit the Chezmoi source instead:
 
 ```text
-/Users/andy16/.local/share/chezmoi/dot_zshrc
+$HOME/.local/share/chezmoi/dot_zshrc
 ```
 
 Then apply changes with Chezmoi when ready:
