@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+  <body>
+    <h1>Row Pairing: Proof?*</h1>
+    <table>
+      <td class="chartlist-artist"><a>Outside Artist</a></td>
+      <td class="chartlist-name"><a>Outside Song</a></td>
+
+      <tr>
+        <td class="chartlist-name">
+          outside <a> First <span>Song</span> &amp; <em>Dance</em> </a>
+          <a>Wrong Song</a>
+        </td>
+        <td class="chartlist-artist">
+          <a> Alpha <strong>Ar</strong><span>t</span><em>ist</em> </a>
+          <a>Wrong Artist</a>
+        </td>
+      </tr>
+
+      <tr><td class="chartlist-artist"><a>Artist Only</a></td></tr>
+      <tr><td class="chartlist-name"><a>Title Only</a></td></tr>
+      <tr>
+        <td class="chartlist-artist"><a>Whitespace Artist</a></td>
+        <td class="chartlist-name"><a>   </a></td>
+      </tr>
+      <tr>
+        <td class="chartlist-artist"><a>   </a></td>
+        <td class="chartlist-name"><a>Whitespace Title</a></td>
+      </tr>
+
+      <tr>
+        <td class="chartlist-artist"><a>Repeat Artist</a></td>
+        <td class="chartlist-name"><a>Repeat Song</a></td>
+      </tr>
+      <tr>
+        <td class="chartlist-artist"><a>Repeat Artist</a></td>
+        <td class="chartlist-name"><a>Repeat Song</a></td>
+      </tr>
+
+      <!-- Each new row discards the preceding unclosed row. -->
+      <tr><td class="chartlist-artist"><a>Discarded Artist</a></td>
+      <tr><td class="chartlist-name"><a>Discarded Song</a></td>
+      <tr>
+        <td class="chartlist-artist"><a>Gamma Artist</a></td>
+        <td class="chartlist-name"><a>Third Song</a></td>
+      </tr>
+
+      <!-- EOF discards this otherwise complete row. -->
+      <tr>
+        <td class="chartlist-artist"><a>Truncated Artist</a></td>
+        <td class="chartlist-name"><a>Truncated Song</a></td>
