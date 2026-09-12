@@ -14,7 +14,7 @@ from qobuz_dl.color import GREEN, RED, YELLOW
 from qobuz_dl.commands import QUALITY_CHOICES, RESET_COMMAND, qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK, validate_cover_options
-from qobuz_dl.exceptions import BundleError
+from qobuz_dl.exceptions import ApiRateLimitError, BundleError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -402,14 +402,16 @@ def main():
             arguments.smart_discography or config_values["smart_discography"]
         ),
     )
-    qobuz.initialize_client(
-        config_values["email"],
-        config_values["password"],
-        config_values["app_id"],
-        config_values["secrets"],
-    )
-
-    _handle_commands(qobuz, arguments)
+    try:
+        qobuz.initialize_client(
+            config_values["email"],
+            config_values["password"],
+            config_values["app_id"],
+            config_values["secrets"],
+        )
+        _handle_commands(qobuz, arguments)
+    except ApiRateLimitError as error:
+        sys.exit(f"{RED}{error}")
 
 
 if __name__ == "__main__":

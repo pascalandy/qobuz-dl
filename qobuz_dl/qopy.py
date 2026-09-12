@@ -11,17 +11,35 @@ from dataclasses import dataclass
 from qobuz_dl.color import GREEN, YELLOW
 from qobuz_dl.commands import RESET_COMMAND
 from qobuz_dl.exceptions import (
+    ApiRateLimitError,
     AuthenticationError,
     IneligibleError,
     InvalidAppIdError,
     InvalidAppSecretError,
     InvalidQuality,
 )
-from qobuz_dl.http import HttpClient
+from qobuz_dl.http import HttpClient, HttpRateLimitError, retry_rate_limited
 
 RESET = f"Reset your credentials with '{RESET_COMMAND}' (or 'qobuz-dl -r' if installed)"
 
 logger = logging.getLogger(__name__)
+
+_RETRYABLE_API_READS = frozenset(
+    {
+        "album/get",
+        "album/search",
+        "artist/get",
+        "artist/search",
+        "favorite/getUserFavorites",
+        "label/get",
+        "playlist/get",
+        "playlist/getUserPlaylists",
+        "playlist/search",
+        "track/get",
+        "track/getFileUrl",
+        "track/search",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -52,9 +70,23 @@ class Client:
         self.cfg_setup()
 
     def api_call(self, epoint, **kwargs):
-        request = self._build_api_request(epoint, kwargs)
-        r = self.session.get(self.base + request.endpoint, params=request.params)
-        self._raise_mapped_api_error(request.endpoint, r)
+        def request_once():
+            request = self._build_api_request(epoint, kwargs)
+            return self.session.get(
+                self.base + request.endpoint,
+                params=request.params,
+            )
+
+        if epoint in _RETRYABLE_API_READS:
+            try:
+                r = retry_rate_limited(request_once)
+            except HttpRateLimitError:
+                raise ApiRateLimitError(
+                    "Qobuz API rate limit retries exhausted."
+                ) from None
+        else:
+            r = request_once()
+        self._raise_mapped_api_error(epoint, r)
         r.raise_for_status()
         return r.json()
 
