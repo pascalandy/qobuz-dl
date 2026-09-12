@@ -174,6 +174,7 @@ class QobuzDL:
         track_format="{tracknumber}. {tracktitle}",
         smart_discography=False,
     ):
+        downloader.validate_cover_options(embed_art, no_cover)
         self.directory = create_and_return_dir(directory)
         self.quality = quality
         self.embed_art = embed_art

@@ -818,6 +818,8 @@ def test_configparser_boolean_vocabulary_is_accepted(
     )
     for key in boolean_keys:
         _replace_config_value(config_file, key, configured)
+    if expected:
+        _replace_config_value(config_file, "no_cover", "false")
     initialized = []
 
     class FakeQobuzDL:
@@ -846,9 +848,34 @@ def test_configparser_boolean_vocabulary_is_accepted(
     assert options["no_m3u_for_playlists"] is expected
     assert options["quality_fallback"] is (not expected)
     assert options["cover_og_quality"] is expected
-    assert options["no_cover"] is expected
+    assert options["no_cover"] is False
     assert (options["downloads_db"] is None) is expected
     assert options["smart_discography"] is expected
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("1", True),
+        ("yes", True),
+        ("true", True),
+        ("on", True),
+        ("0", False),
+        ("no", False),
+        ("false", False),
+        ("off", False),
+    ],
+)
+def test_no_cover_configparser_boolean_vocabulary_is_accepted(
+    tmp_path, configured, expected
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _replace_config_value(config_file, "no_cover", configured)
+
+    values = cli._load_config_values(config_file)
+
+    assert values["no_cover"] is expected
 
 
 @pytest.mark.parametrize("limit", [0, -5])
