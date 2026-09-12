@@ -434,6 +434,10 @@ Combine options:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID --embed-art --og-cover
 ```
 
+`--embed-art` and `--no-cover` are incompatible. `qobuz-dl` rejects the combination before it transfers any files.
+
+MP3 and FLAC files use the same best-effort artwork policy. With `--embed-art`, `qobuz-dl` first looks for `cover.jpg` beside the audio file, then in the parent directory. It embeds JPEG files up to and including 16,777,168 bytes. If the cover is missing, unreadable, or larger, `qobuz-dl` warns and finalizes the audio file without embedded artwork. Existing audio files are not automatically retagged when cover art becomes available.
+
 ### Playlist file behavior
 
 By default, playlist downloads can create `.m3u` playlist files. Disable `.m3u` creation:
