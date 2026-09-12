@@ -151,7 +151,7 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -r
 
 `--reset` prompts for Qobuz email, Qobuz password, default download folder, and default quality, fetches the current Qobuz app ID and app secrets, rewrites `config.ini`, and exits before initializing the Qobuz client. It does not delete `qobuz_dl.db`; use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge` if you also want to remove duplicate-tracking history.
 
-The replacement is written to a temporary file in the same directory, then installed atomically. A failure before replacement preserves the previous config's contents.
+`qobuz-dl` extracts the app ID and app secrets from the current Qobuz web bundle before it saves the config atomically. It rejects incomplete data, conflicting fragments that make the result ambiguous, and invalid secret encoding before saving. A first-run failure leaves no invalid config file, and a failed reset preserves the existing config byte for byte. The fixed `Unable to create configuration from the Qobuz web bundle: ... Configuration was not saved.` error reports a web-bundle format mismatch. It does not claim that Qobuz is down.
 
 ## 2. Primary downloads
 
