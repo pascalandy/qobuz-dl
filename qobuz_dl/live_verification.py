@@ -1020,9 +1020,39 @@ def build_parser() -> Parser:
     return parser
 
 
-def _rerun_command(argv) -> str:
-    kept = [argument for argument in argv if argument not in ("-v", "--verbose")]
-    return format_command((*COMMAND.split(), "--verbose", *kept))
+# Inputs that identify the account or the track; a hint never repeats them.
+_PRIVATE_FLAGS = ("--email", "--track-id", "--query")
+
+
+def _join_flags(flags) -> str:
+    if len(flags) <= 2:
+        return " and ".join(flags)
+    return ", ".join(flags[:-1]) + f", and {flags[-1]}"
+
+
+def _rerun_line(argv, label="rerun") -> str:
+    """The command to run next, with --verbose and without private input values.
+
+    Flags whose values were dropped are named, so the reader supplies them
+    again; inputs from the environment need nothing.
+    """
+    kept, dropped = [], []
+    arguments = iter(argv)
+    for argument in arguments:
+        name = argument.split("=", 1)[0]
+        if argument in ("-v", "--verbose"):
+            continue
+        if name in _PRIVATE_FLAGS:
+            if name not in dropped:
+                dropped.append(name)
+            if "=" not in argument:
+                next(arguments, None)
+            continue
+        kept.append(argument)
+    command = format_command((*COMMAND.split(), "--verbose", *kept))
+    if not dropped:
+        return f"{label}: {command}"
+    return f"{label} with the same {_join_flags(dropped)}: {command}"
 
 
 def main(
@@ -1072,7 +1102,7 @@ def main(
             return failure.interruption
         print(
             f"{PROG}: verification failed [report:report_write_failed]; "
-            f"no report was written\nrerun: {_rerun_command(argv)}",
+            f"no report was written\n{_rerun_line(argv)}",
             file=stderr,
         )
         return ExitCode.FAILURE
@@ -1082,7 +1112,7 @@ def main(
     except Exception:
         print(
             f"{PROG}: verification failed [complete:unexpected_error]; "
-            f"no report was written\nrerun: {_rerun_command(argv)}",
+            f"no report was written\n{_rerun_line(argv)}",
             file=stderr,
         )
         return ExitCode.FAILURE
@@ -1102,7 +1132,7 @@ def main(
         return ExitCode.OK
     print(
         f"{PROG}: verification failed {status}; sanitized report written\n"
-        f"rerun: {_rerun_command(argv)}",
+        f"{_rerun_line(argv)}",
         file=stderr,
     )
     return ExitCode.FAILURE
