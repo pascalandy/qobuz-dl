@@ -1,9 +1,14 @@
+import json
 import os
+import re
+import signal
 from copy import deepcopy
 from importlib import util
 from pathlib import Path
 
 import pytest
+
+from qobuz_dl.console import Terminated
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "verify_install.py"
 SPEC = util.spec_from_file_location("verify_install", MODULE_PATH)
@@ -193,3 +198,256 @@ def test_subprocess_timeout_has_a_fixed_failure(monkeypatch, tmp_path):
 
     with pytest.raises(VerificationFailure, match="timed out after 300 seconds"):
         _run(("uv", "--version"), cwd=tmp_path, env={})
+
+
+EVIDENCE = {"resolved_commit": COMMIT, "source": FLOATING_SOURCE}
+RERUN = "uv run --frozen python scripts/verify_install.py --verbose"
+
+
+@pytest.fixture
+def quiet_environment(monkeypatch):
+    monkeypatch.delenv("VERIFY_INSTALL_DEBUG", raising=False)
+
+
+def _logging_verify(monkeypatch, *, result=None, error=None):
+    calls = []
+
+    def fake_verify(revision=None, *, timeout):
+        calls.append((revision, timeout))
+        verify_install.logger.info("+ uv --version")
+        if error is not None:
+            raise error
+        return result
+
+    monkeypatch.setattr(verify_install, "verify", fake_verify)
+    return calls
+
+
+@pytest.mark.parametrize("flags", [[], ["-v"], ["--debug"]])
+def test_success_prints_one_json_object_and_quiet_stderr(
+    monkeypatch, capsys, quiet_environment, flags
+):
+    _logging_verify(monkeypatch, result=EVIDENCE)
+
+    assert verify_install.main(flags) == 0
+
+    output = capsys.readouterr()
+    assert json.loads(output.out) == EVIDENCE
+    assert output.out.count("\n") == 1
+    assert output.err == ("" if not flags else "+ uv --version\n")
+
+
+@pytest.mark.parametrize("flags", [[], ["-v"]])
+def test_failure_prints_evidence_then_failure_then_rerun(
+    monkeypatch, capsys, quiet_environment, flags
+):
+    failure = VerificationFailure(
+        "`uv tool install` exited with status 2", output="uv: network is down"
+    )
+    _logging_verify(monkeypatch, error=failure)
+
+    assert verify_install.main([*flags, COMMIT]) == 1
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err.endswith(
+        "uv: network is down\n"
+        "verify_install.py: install verification failed: "
+        "`uv tool install` exited with status 2\n"
+        f"rerun: {RERUN} {COMMIT}\n"
+    )
+
+
+def test_nonzero_command_keeps_its_output_as_evidence(monkeypatch, tmp_path):
+    def failed_run(command, **kwargs):
+        return verify_install.subprocess.CompletedProcess(command, 2, "", "boom\n")
+
+    monkeypatch.setattr(verify_install.subprocess, "run", failed_run)
+
+    with pytest.raises(VerificationFailure) as failure:
+        _run(("uv", "tool", "install"), cwd=tmp_path, env={})
+
+    assert str(failure.value) == "`uv tool install` exited with status 2"
+    assert failure.value.output == "boom"
+    assert failure.value.temporary is False
+
+
+def test_timeout_is_temporary_and_suggests_a_retry(
+    monkeypatch, capsys, quiet_environment
+):
+    def time_out(*args, **kwargs):
+        raise verify_install.subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(verify_install.subprocess, "run", time_out)
+
+    def fake_verify(revision=None, *, timeout):
+        return _run(("uvx", "--version"), cwd=Path("."), env={}, timeout=timeout)
+
+    monkeypatch.setattr(verify_install, "verify", fake_verify)
+
+    assert verify_install.main(["--timeout=90s"]) == 75
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "verify_install.py: install verification failed: "
+        "uvx timed out after 90 seconds\n"
+        f"retry: {RERUN} --timeout 90s\n"
+    )
+
+
+def test_floating_source_moving_during_verification_is_temporary(
+    monkeypatch, capsys, quiet_environment
+):
+    commits = iter([COMMIT, COMMIT, "f" * 40])
+    monkeypatch.setattr(verify_install.shutil, "which", lambda name: f"/tools/{name}")
+    monkeypatch.setattr(verify_install, "_probe_with_uvx", lambda *a, **k: {})
+    monkeypatch.setattr(verify_install, "_probe_with_python", lambda *a, **k: {})
+    monkeypatch.setattr(verify_install, "validate_record", lambda *a: next(commits))
+    monkeypatch.setattr(verify_install, "compare_records", lambda *a: None)
+    monkeypatch.setattr(
+        verify_install,
+        "_smoke",
+        lambda *a, **k: {"help": "ok", "version": "qobuz-dl 1.0.0"},
+    )
+
+    def fake_run(command, *, cwd, env, timeout):
+        if command[1:3] == ("tool", "install"):
+            python = verify_install._environment_command(
+                Path(env["UV_TOOL_DIR"]) / "qobuz-dl", "python"
+            )
+            python.parent.mkdir(parents=True)
+            python.touch()
+            for name in EXPECTED_ENTRY_POINTS:
+                executable = f"{name}.exe" if os.name == "nt" else name
+                (Path(env["UV_TOOL_BIN_DIR"]) / executable).touch()
+        return ""
+
+    monkeypatch.setattr(verify_install, "_run", fake_run)
+
+    assert verify_install.main([]) == 75
+
+    assert capsys.readouterr().err == (
+        "verify_install.py: install verification failed: the floating source "
+        "moved during verification; rerun to verify one commit\n"
+        f"retry: {RERUN}\n"
+    )
+
+
+def test_unexpected_error_suggests_debug_and_debug_prints_the_trace(
+    monkeypatch, capsys, quiet_environment
+):
+    _logging_verify(monkeypatch, error=RuntimeError("unexpected state"))
+
+    assert verify_install.main([]) == 1
+    assert capsys.readouterr().err == (
+        "verify_install.py: unexpected error: unexpected state\n"
+        "rerun with a stack trace: "
+        "uv run --frozen python scripts/verify_install.py --debug\n"
+    )
+
+    monkeypatch.setenv("VERIFY_INSTALL_DEBUG", "1")
+    assert verify_install.main([]) == 1
+    assert "Traceback (most recent call last)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("interruption", "code"), [(KeyboardInterrupt, 130), (Terminated, 143)]
+)
+def test_interruptions_exit_with_the_signal_code(
+    monkeypatch, capsys, quiet_environment, interruption, code
+):
+    _logging_verify(monkeypatch, error=interruption())
+
+    assert verify_install.main([]) == code
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "verify_install.py: interrupted\n"
+
+
+@pytest.mark.parametrize(
+    "argv", [["main"], [COMMIT[:-1]], [COMMIT, COMMIT], ["--timeout", "soon"]]
+)
+def test_invalid_input_is_a_usage_error(monkeypatch, capsys, argv):
+    monkeypatch.setattr(
+        verify_install, "verify", lambda *a, **k: pytest.fail("verification ran")
+    )
+
+    with pytest.raises(SystemExit) as usage_exit:
+        verify_install.main(argv)
+
+    assert usage_exit.value.code == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err.startswith("usage: verify_install.py ")
+    assert output.err.endswith(
+        "run 'uv run --frozen python scripts/verify_install.py --help' for usage\n"
+    )
+
+
+def test_help_wins_and_lists_examples_and_exit_codes(monkeypatch, capsys):
+    monkeypatch.setattr(
+        verify_install, "verify", lambda *a, **k: pytest.fail("verification ran")
+    )
+
+    with pytest.raises(SystemExit) as help_exit:
+        verify_install.main(["not-a-sha", "--timeout", "soon", "-vh"])
+
+    assert help_exit.value.code == 0
+    help_text = capsys.readouterr().out
+    assert help_text.startswith("usage: verify_install.py ")
+    examples = help_text.split("Examples:\n", 1)[1].split("\n\n", 1)[0]
+    assert 2 <= len(examples.splitlines()) <= 5
+    for code in (0, 1, 2, 75, 130, 143):
+        assert re.search(rf"^  {code} +\S", help_text, re.MULTILINE)
+
+
+def test_options_follow_posix_parsing_rules(monkeypatch, capsys, quiet_environment):
+    calls = _logging_verify(monkeypatch, result=EVIDENCE)
+
+    assert verify_install.main(["--timeout=10m", "--", COMMIT]) == 0
+    assert verify_install.main(["--timeout", "10m", COMMIT]) == 0
+
+    assert calls == [(COMMIT, 600.0), (COMMIT, 600.0)]
+
+
+def test_every_short_flag_has_a_long_form():
+    for action in verify_install.build_parser()._actions:
+        if any(len(option) == 2 for option in action.option_strings):
+            assert any(option.startswith("--") for option in action.option_strings)
+
+
+SIGNAL_DRIVER = """
+import signal
+import sys
+import time
+from importlib import util
+from pathlib import Path
+
+signal.signal(signal.SIGINT, signal.default_int_handler)
+workspace = Path(sys.argv[1])
+spec = util.spec_from_file_location("verify_install", sys.argv[2])
+verify_install = util.module_from_spec(spec)
+spec.loader.exec_module(verify_install)
+
+
+def blocking_verify(revision=None, *, timeout):
+    (workspace / "ready").touch()
+    while True:
+        time.sleep(0.05)
+
+
+verify_install.verify = blocking_verify
+sys.exit(verify_install.main([]))
+"""
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signal delivery")
+@pytest.mark.parametrize(
+    ("signal_number", "code"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)]
+)
+def test_real_signal_exits_with_the_signal_code(signal_driver, signal_number, code):
+    status, out, err = signal_driver(SIGNAL_DRIVER, signal_number, str(MODULE_PATH))
+
+    assert (status, out, err) == (code, "", "verify_install.py: interrupted\n")

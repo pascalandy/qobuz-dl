@@ -58,7 +58,7 @@ jobs:
           uv run python --version
 
       - name: Run repository checks
-        run: uv run --frozen python scripts/check.py
+        run: uv run --frozen python scripts/check.py --verbose
 
       - name: Upload package artifacts
         if: success() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'

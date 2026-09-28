@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import configparser
 import hashlib
 import json
@@ -21,12 +20,26 @@ from pathlib import Path
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
-from qobuz_dl import downloader, qopy
+from qobuz_dl import downloader, http, qopy
 from qobuz_dl.bundle import Bundle
+from qobuz_dl.console import (
+    ExitCode,
+    Parser,
+    Terminated,
+    epilog,
+    format_command,
+    interruption_exit_code,
+    read_secret,
+    sigterm_raises,
+)
 from qobuz_dl.core import QobuzDL
+from qobuz_dl.exceptions import ApiRateLimitError
 
 ACTIVATION_ENV = "QOBUZ_DL_LIVE"
 ACTIVATION_VALUE = "I_UNDERSTAND_THIS_USES_QOBUZ"
+PROG = "live_qobuz.py"
+COMMAND = "just live-qobuz"
+RETIRED_PASSWORD_ENV = "QOBUZ_DL_LIVE_PASSWORD"
 
 _ROOT = Path(__file__).resolve().parents[1]
 _QUALITY_CHOICES = (5, 6, 7, 27)
@@ -42,13 +55,15 @@ _PHASES = (
     "metadata",
     "cleanup",
 )
-_REQUIRED_INPUTS = (
-    "QOBUZ_DL_LIVE_EMAIL",
-    "QOBUZ_DL_LIVE_PASSWORD",
-    "QOBUZ_DL_LIVE_TRACK_ID",
-    "QOBUZ_DL_LIVE_SEARCH_QUERY",
-    "QOBUZ_DL_LIVE_QUALITY",
-    "QOBUZ_DL_LIVE_REPORT",
+# Each input: (argparse destination, flag, environment fallback). The password
+# fallback names a file; the secret itself never travels through a variable.
+_INPUTS = (
+    ("email", "--email", "QOBUZ_DL_LIVE_EMAIL"),
+    ("password_file", "--password-file", "QOBUZ_DL_LIVE_PASSWORD_FILE"),
+    ("track_id", "--track-id", "QOBUZ_DL_LIVE_TRACK_ID"),
+    ("query", "--query", "QOBUZ_DL_LIVE_SEARCH_QUERY"),
+    ("quality", "--quality", "QOBUZ_DL_LIVE_QUALITY"),
+    ("output", "--output", "QOBUZ_DL_LIVE_REPORT"),
 )
 _LIMITS = (
     "one explicitly authorized Qobuz track",
@@ -83,7 +98,7 @@ class LiveInputs:
     track_id: str
     search_query: str
     quality: int
-    report_path: Path
+    report_path: Path | None
 
 
 @dataclass(frozen=True)
@@ -113,6 +128,10 @@ class VerificationOutcome:
     passed: bool
     phase: str
     reason: str
+    # A failure caused only by a temporary condition, such as a timeout.
+    retryable: bool = False
+    # Set when SIGINT or SIGTERM arrived, whatever else went wrong.
+    interruption: ExitCode | None = None
 
 
 @dataclass(frozen=True)
@@ -129,10 +148,11 @@ class InputError(Exception):
 
 
 class VerificationFailure(Exception):
-    def __init__(self, phase: str, reason: str) -> None:
+    def __init__(self, phase: str, reason: str, *, retryable: bool = False) -> None:
         super().__init__(reason)
         self.phase = phase
         self.reason = reason
+        self.retryable = retryable
 
 
 class _ControlledInterruption(Exception):
@@ -140,7 +160,18 @@ class _ControlledInterruption(Exception):
 
 
 class _ReportWriteFailure(Exception):
-    pass
+    def __init__(self, interruption: ExitCode | None = None) -> None:
+        super().__init__("report_write_failed")
+        self.interruption = interruption
+
+
+def _is_temporary(error: BaseException) -> bool:
+    """Whether ``error`` shows a temporary condition that a rerun may clear."""
+    if isinstance(error, (ApiRateLimitError, http.HttpRateLimitError, TimeoutError)):
+        return True
+    return isinstance(error, http.HttpStatusError) and (
+        error.status_code == 429 or error.status_code >= 500
+    )
 
 
 class RealBackend:
@@ -204,46 +235,69 @@ class RealBackend:
         return qobuz.download_from_id(track_id, album=False)
 
 
-def _read_inputs(environ: Mapping[str, str]) -> LiveInputs:
-    missing = [name for name in _REQUIRED_INPUTS if not environ.get(name)]
-    if missing:
+def _read_inputs(environ: Mapping[str, str], arguments, stdin) -> LiveInputs:
+    values = {}
+    for destination, _flag, name in _INPUTS:
+        value = getattr(arguments, destination)
+        values[destination] = value if value is not None else environ.get(name)
+    if not values["password_file"] and environ.get(RETIRED_PASSWORD_ENV):
         raise InputError(
-            "Missing required environment variables: " + ", ".join(missing)
+            f"{RETIRED_PASSWORD_ENV} is no longer read; put the password on the "
+            "first line of a private file and pass --password-file PATH, or pipe "
+            "it with --password-file -"
         )
+    missing = [
+        f"{flag} (or {name})"
+        for destination, flag, name in _INPUTS
+        if not values[destination]
+    ]
+    if missing:
+        raise InputError("missing required inputs: " + ", ".join(missing))
 
     try:
-        quality = int(environ["QOBUZ_DL_LIVE_QUALITY"])
+        quality = int(values["quality"])
     except ValueError:
-        raise InputError("QOBUZ_DL_LIVE_QUALITY must be 5, 6, 7, or 27") from None
+        raise InputError("--quality must be 5, 6, 7, or 27") from None
     if quality not in _QUALITY_CHOICES:
-        raise InputError("QOBUZ_DL_LIVE_QUALITY must be 5, 6, 7, or 27")
+        raise InputError("--quality must be 5, 6, 7, or 27")
 
-    query = environ["QOBUZ_DL_LIVE_SEARCH_QUERY"].strip()
+    query = values["query"].strip()
     if len(query) < 3:
-        raise InputError(
-            "QOBUZ_DL_LIVE_SEARCH_QUERY must contain at least 3 characters"
-        )
+        raise InputError("--query must contain at least 3 characters")
 
-    track_id = environ["QOBUZ_DL_LIVE_TRACK_ID"].strip()
+    track_id = values["track_id"].strip()
     if not track_id:
-        raise InputError("QOBUZ_DL_LIVE_TRACK_ID must not be blank")
+        raise InputError("--track-id must not be blank")
 
-    report_path = Path(environ["QOBUZ_DL_LIVE_REPORT"])
-    if not report_path.is_absolute():
-        raise InputError("QOBUZ_DL_LIVE_REPORT must be an absolute JSON path")
-    if report_path.suffix.lower() != ".json":
-        raise InputError("QOBUZ_DL_LIVE_REPORT must end in .json")
-    if not report_path.parent.is_dir():
-        raise InputError("QOBUZ_DL_LIVE_REPORT parent directory must exist")
+    report_path = None
+    if values["output"] != "-":
+        report_path = Path(values["output"])
+        if not report_path.is_absolute():
+            raise InputError("--output must be an absolute .json path, or -")
+        if report_path.suffix.lower() != ".json":
+            raise InputError("--output must end in .json")
+        if not report_path.parent.is_dir():
+            raise InputError("--output parent directory must exist")
 
     return LiveInputs(
-        email=environ["QOBUZ_DL_LIVE_EMAIL"],
-        password=environ["QOBUZ_DL_LIVE_PASSWORD"],
+        email=values["email"],
+        password=_read_password(values["password_file"], stdin),
         track_id=track_id,
         search_query=query,
         quality=quality,
         report_path=report_path,
     )
+
+
+def _read_password(source: str, stdin) -> str:
+    try:
+        return read_secret(source, stdin)
+    except (OSError, UnicodeError):
+        raise InputError("--password-file could not be read") from None
+    except ValueError:
+        raise InputError(
+            "--password-file must hold the password on its first line"
+        ) from None
 
 
 def _write_private_config(
@@ -320,9 +374,11 @@ def _probe_controlled_interruption(url: str, destination: Path):
         pass
     except KeyboardInterrupt:
         raise
-    except Exception:
+    except Exception as error:
         raise VerificationFailure(
-            "interruption", "interruption_request_failed"
+            "interruption",
+            "interruption_request_failed",
+            retryable=_is_temporary(error),
         ) from None
 
     if received <= 0:
@@ -697,7 +753,11 @@ def _report(
     }
 
 
-def _write_report(path: Path, report: Mapping) -> None:
+def _write_report(path: Path | None, report: Mapping) -> None:
+    if path is None:
+        sys.stdout.write(json.dumps(report, ensure_ascii=True, indent=2) + "\n")
+        sys.stdout.flush()
+        return
     descriptor, temporary_name = tempfile.mkstemp(
         dir=path.parent,
         prefix=f".{path.name}.",
@@ -736,6 +796,7 @@ def verify(
     backend_factory,
     *,
     temporary_directory_factory=tempfile.TemporaryDirectory,
+    progress=None,
 ) -> VerificationOutcome:
     phases = {phase: "pending" for phase in _PHASES}
     runtime: RuntimeFacts | None = None
@@ -743,14 +804,21 @@ def verify(
     current_phase = "runtime"
     result = "failed"
     reason = "unexpected_error"
+    retryable = False
+    interruption: ExitCode | None = None
     temporary_directory = None
     stages_passed = False
+
+    def passed(phase):
+        phases[phase] = "passed"
+        if progress is not None:
+            progress(phase)
 
     with _contained_backend_output():
         try:
             backend = backend_factory()
             runtime = backend.runtime_facts()
-            phases["runtime"] = "passed"
+            passed("runtime")
 
             current_phase = "bundle"
             temporary_directory = temporary_directory_factory(prefix="qobuz-dl-live-")
@@ -763,11 +831,11 @@ def verify(
 
             credentials = backend.bundle_credentials()
             _write_private_config(config_path, inputs, credentials)
-            phases["bundle"] = "passed"
+            passed("bundle")
 
             current_phase = "login"
             client = backend.login(config_path)
-            phases["login"] = "passed"
+            passed("login")
 
             current_phase = "search"
             search_response = client.search_tracks(inputs.search_query, 50)
@@ -778,19 +846,19 @@ def verify(
                 raise VerificationFailure("search", "authorized_track_not_found")
             if authorized_track_count != 1:
                 raise VerificationFailure("search", "authorized_track_ambiguous")
-            phases["search"] = "passed"
+            passed("search")
 
             current_phase = "signed_url"
             signed_response = client.get_track_url(inputs.track_id, inputs.quality)
             signed_url = _signed_media_url(signed_response)
-            phases["signed_url"] = "passed"
+            passed("signed_url")
 
             current_phase = "interruption"
             _probe_controlled_interruption(
                 signed_url,
                 interruption_destination,
             )
-            phases["interruption"] = "passed"
+            passed("interruption")
 
             current_phase = "download"
             download_result = backend.download_track(
@@ -804,7 +872,7 @@ def verify(
                 or download_result.reason != "downloaded"
             ):
                 raise VerificationFailure("download", "download_failed")
-            phases["download"] = "passed"
+            passed("download")
 
             current_phase = "media"
             final_path = _validated_final_path(download_result, destination)
@@ -814,14 +882,14 @@ def verify(
                 raise
             except Exception:
                 raise VerificationFailure("media", "final_media_invalid") from None
-            phases["media"] = "passed"
+            passed("media")
 
             current_phase = "metadata"
             reference = client.get_track_meta(inputs.track_id)
             expected_metadata = _expected_metadata(reference, inputs.track_id)
             if not _metadata_matches(audio, final_path, expected_metadata):
                 raise VerificationFailure("metadata", "metadata_mismatch")
-            phases["metadata"] = "passed"
+            passed("metadata")
             stages_passed = True
         except VerificationFailure as error:
             if current_phase == "runtime":
@@ -829,28 +897,33 @@ def verify(
             else:
                 current_phase = error.phase
                 reason = error.reason
+                retryable = error.retryable
             phases[current_phase] = "failed"
-        except KeyboardInterrupt:
-            reason = "interrupted"
+        except KeyboardInterrupt as error:
+            interruption = interruption_exit_code(error)
+            reason = "terminated" if isinstance(error, Terminated) else "interrupted"
             phases[current_phase] = "failed"
-        except Exception:
-            reason = (
-                "runtime_unavailable"
-                if current_phase == "runtime"
-                else "unexpected_error"
-            )
+        except Exception as error:
+            if current_phase == "runtime":
+                reason = "runtime_unavailable"
+            else:
+                reason = "unexpected_error"
+                retryable = _is_temporary(error)
             phases[current_phase] = "failed"
         finally:
             if temporary_directory is not None:
                 try:
                     temporary_directory.cleanup()
-                except (Exception, KeyboardInterrupt):
+                except (Exception, KeyboardInterrupt) as error:
+                    if isinstance(error, KeyboardInterrupt) and interruption is None:
+                        interruption = interruption_exit_code(error)
                     current_phase = "cleanup"
                     reason = "cleanup_failed"
+                    retryable = False
                     phases["cleanup"] = "failed"
                     stages_passed = False
                 else:
-                    phases["cleanup"] = "passed"
+                    passed("cleanup")
 
         if stages_passed and phases["cleanup"] == "passed":
             result = "passed"
@@ -864,16 +937,122 @@ def verify(
             passed=result == "passed",
             phase="complete" if result == "passed" else current_phase,
             reason=reason,
+            retryable=retryable and interruption is None,
+            interruption=interruption,
         )
 
     try:
-        _write_report(
-            inputs.report_path,
-            report,
-        )
-    except (Exception, KeyboardInterrupt):
-        raise _ReportWriteFailure from None
+        _write_report(inputs.report_path, report)
+    except KeyboardInterrupt as error:
+        raise _ReportWriteFailure(
+            outcome.interruption or interruption_exit_code(error)
+        ) from None
+    except Exception:
+        raise _ReportWriteFailure(outcome.interruption) from None
     return outcome
+
+
+def build_parser() -> Parser:
+    parser = Parser(
+        prog=PROG,
+        command=COMMAND,
+        description=(
+            "Verify one explicitly authorized Qobuz track against the live "
+            "service: bundle, login, search, signed URL, interrupted and "
+            "complete downloads, media, metadata, and cleanup. Writes a "
+            "sanitized JSON report and prints its path on stdout."
+        ),
+        epilog=epilog(
+            (
+                "pass show qobuz | just live-qobuz --password-file - "
+                "--output /tmp/live.json",
+                "just live-qobuz --password-file ~/.qobuz-password --output - "
+                "| jq .result",
+                "QOBUZ_DL_LIVE_TRACK_ID=123 just live-qobuz --verbose",
+            ),
+            {
+                ExitCode.OK: "verification passed; report written",
+                ExitCode.FAILURE: "verification failed; report written unless "
+                "stderr says otherwise",
+                ExitCode.USAGE: "verification disabled, or an input is missing "
+                "or invalid",
+                ExitCode.INTERRUPTED: "interrupted (SIGINT)",
+                ExitCode.TERMINATED: "terminated (SIGTERM)",
+            },
+            notes=(
+                f"Requires {ACTIVATION_ENV}={ACTIVATION_VALUE}.",
+                "Each input flag falls back to an environment variable:",
+                *(f"  {flag:<16} {name}" for _dest, flag, name in _INPUTS),
+                f"{RETIRED_PASSWORD_ENV} is retired: it would put the secret in",
+                "the environment. Never pass the password as an argument.",
+            ),
+        ),
+    )
+    parser.add_argument("--email", help="Qobuz account email")
+    parser.add_argument(
+        "--password-file",
+        metavar="PATH",
+        help="file whose first line is the account password, or - to read stdin",
+    )
+    parser.add_argument("--track-id", metavar="ID", help="authorized Qobuz track ID")
+    parser.add_argument(
+        "--query",
+        metavar="TEXT",
+        help="search text that finds exactly one copy of the authorized track",
+    )
+    parser.add_argument(
+        "--quality",
+        metavar="QUALITY",
+        help="requested quality: 5, 6, 7, or 27",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        metavar="PATH",
+        help="absolute .json path for the sanitized report, or - for stdout",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="report each passed phase on stderr",
+    )
+    return parser
+
+
+# Inputs that identify the account or the track; a hint never repeats them.
+_PRIVATE_FLAGS = ("--email", "--track-id", "--query")
+
+
+def _join_flags(flags) -> str:
+    if len(flags) <= 2:
+        return " and ".join(flags)
+    return ", ".join(flags[:-1]) + f", and {flags[-1]}"
+
+
+def _rerun_line(argv, label="rerun") -> str:
+    """The command to run next, with --verbose and without private input values.
+
+    Flags whose values were dropped are named, so the reader supplies them
+    again; inputs from the environment need nothing.
+    """
+    kept, dropped = [], []
+    arguments = iter(argv)
+    for argument in arguments:
+        name = argument.split("=", 1)[0]
+        if argument in ("-v", "--verbose"):
+            continue
+        if name in _PRIVATE_FLAGS:
+            if name not in dropped:
+                dropped.append(name)
+            if "=" not in argument:
+                next(arguments, None)
+            continue
+        kept.append(argument)
+    command = format_command((*COMMAND.split(), "--verbose", *kept))
+    if not dropped:
+        return f"{label}: {command}"
+    return f"{label} with the same {_join_flags(dropped)}: {command}"
 
 
 def main(
@@ -882,64 +1061,78 @@ def main(
     environ: Mapping[str, str] | None = None,
     backend_factory=RealBackend,
     temporary_directory_factory=tempfile.TemporaryDirectory,
+    stdin=None,
 ) -> int:
-    parser = argparse.ArgumentParser(
-        description="Verify one explicitly authorized Qobuz track.",
-        epilog=(
-            f"Set {ACTIVATION_ENV}={ACTIVATION_VALUE}.\n"
-            "Supply these variables through a private environment or secret manager:\n"
-            "  QOBUZ_DL_LIVE_EMAIL\n"
-            "  QOBUZ_DL_LIVE_PASSWORD\n"
-            "  QOBUZ_DL_LIVE_TRACK_ID\n"
-            "  QOBUZ_DL_LIVE_SEARCH_QUERY\n"
-            "  QOBUZ_DL_LIVE_QUALITY\n"
-            "  QOBUZ_DL_LIVE_REPORT\n"
-            "Use an absolute .json path for QOBUZ_DL_LIVE_REPORT. "
-            "Do not put the password in command arguments."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.parse_args(argv)
+    parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    arguments = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
+    # Bound before the backend redirects sys.stderr into its sink.
+    stderr = sys.stderr
     if environ.get(ACTIVATION_ENV) != ACTIVATION_VALUE:
-        print(
-            f"Live Qobuz verification is disabled. Set {ACTIVATION_ENV} to the "
-            "documented activation value and run `just live-qobuz`.",
-            file=sys.stderr,
+        return parser.usage_error(
+            "live Qobuz verification is disabled; set "
+            f"{ACTIVATION_ENV}={ACTIVATION_VALUE} to run it"
         )
-        return 2
+
+    def report_progress(phase):
+        print(f"{PROG}: {phase} passed", file=stderr, flush=True)
 
     try:
-        inputs = _read_inputs(environ)
-    except InputError as error:
-        print(f"Live Qobuz verification input error: {error}", file=sys.stderr)
-        return 2
-
-    try:
-        outcome = verify(
-            inputs,
-            backend_factory,
-            temporary_directory_factory=temporary_directory_factory,
-        )
-    except _ReportWriteFailure:
+        with sigterm_raises():
+            try:
+                inputs = _read_inputs(
+                    environ, arguments, sys.stdin if stdin is None else stdin
+                )
+            except InputError as error:
+                return parser.usage_error(str(error))
+            outcome = verify(
+                inputs,
+                backend_factory,
+                temporary_directory_factory=temporary_directory_factory,
+                progress=report_progress if arguments.verbose else None,
+            )
+    except _ReportWriteFailure as failure:
+        if failure.interruption is not None:
+            print(
+                f"{PROG}: interrupted [report:report_write_failed]; "
+                "no report was written",
+                file=stderr,
+            )
+            return failure.interruption
         print(
-            "Live Qobuz verification failed [report:report_write_failed]. "
-            "No report was written.",
-            file=sys.stderr,
+            f"{PROG}: verification failed [report:report_write_failed]; "
+            f"no report was written\n{_rerun_line(argv)}",
+            file=stderr,
         )
-        return 1
-    except (Exception, KeyboardInterrupt):
+        return ExitCode.FAILURE
+    except KeyboardInterrupt as interruption:
+        print(f"{PROG}: interrupted; no report was written", file=stderr)
+        return interruption_exit_code(interruption)
+    except Exception:
         print(
-            "Live Qobuz verification failed [complete:unexpected_error]. "
-            "No report was written.",
-            file=sys.stderr,
+            f"{PROG}: verification failed [complete:unexpected_error]; "
+            f"no report was written\n{_rerun_line(argv)}",
+            file=stderr,
         )
-        return 1
+        return ExitCode.FAILURE
 
+    if inputs.report_path is not None:
+        print(inputs.report_path)
+    status = f"[{outcome.phase}:{outcome.reason}]"
+    if outcome.interruption is not None:
+        print(f"{PROG}: interrupted {status}; sanitized report written", file=stderr)
+        return outcome.interruption
+    if outcome.passed:
+        if arguments.verbose:
+            print(
+                f"{PROG}: verification passed {status}; sanitized report written",
+                file=stderr,
+            )
+        return ExitCode.OK
     print(
-        "Live Qobuz verification "
-        + ("passed" if outcome.passed else "failed")
-        + f" [{outcome.phase}:{outcome.reason}]. Sanitized report written.",
-        file=sys.stderr,
+        f"{PROG}: verification failed {status}; sanitized report written\n"
+        f"{_rerun_line(argv)}",
+        file=stderr,
     )
-    return 0 if outcome.passed else 1
+    return ExitCode.FAILURE

@@ -44,21 +44,22 @@ smoke:
     uv run qobuz-dl fun --help
     uv run qobuz-dl lucky --help
 
-# Run all local quality gates
+# Run all local quality gates; prints only the verified wheel's SHA-256 on success
 check:
-    uv run --frozen python scripts/check.py
+    @uv run --frozen python scripts/check.py
 
 # Alias for CI
 ci: check
 
 # Verify the floating Git install source in isolated temporary environments (networked)
 verify-install:
-    uv run --frozen python scripts/verify_install.py
+    @uv run --frozen python scripts/verify_install.py
 
 # Verify a full 40-character Git revision in isolated temporary environments (networked)
 verify-install-revision revision:
-    uv run --frozen python scripts/verify_install.py {{ quote(revision) }}
+    @uv run --frozen python scripts/verify_install.py {{ quote(revision) }}
 
 # Run the disabled-by-default verifier for one explicitly authorized Qobuz track
-live-qobuz:
-    uv run --frozen python scripts/live_qobuz.py
+[positional-arguments]
+live-qobuz *args:
+    @uv run --frozen python scripts/live_qobuz.py "$@"

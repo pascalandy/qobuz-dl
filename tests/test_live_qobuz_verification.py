@@ -1,11 +1,13 @@
 import base64
 import hashlib
+import io
 import json
 import logging
 import os
 import platform
 import re
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -13,6 +15,7 @@ import sys
 import tempfile
 import traceback
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -20,15 +23,18 @@ from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TIT2, TPE1, TRCK
 
 from qobuz_dl import db, downloader, live_verification, metadata
+from qobuz_dl.console import Terminated
 from qobuz_dl.downloader import DownloadResult
 from qobuz_dl.live_verification import (
     ACTIVATION_ENV,
     ACTIVATION_VALUE,
     BundleCredentials,
+    LiveInputs,
     RealBackend,
     RuntimeFacts,
     _flac_frame_offset,
     main,
+    verify,
 )
 
 SENTINEL = "raw-secret-sentinel"
@@ -157,10 +163,12 @@ class FakeBackend:
 
 
 def _live_environment(tmp_path, **replacements):
+    password_file = tmp_path / "password.txt"
+    password_file.write_text("plain-text-password\n", encoding="utf-8")
     values = {
         ACTIVATION_ENV: ACTIVATION_VALUE,
         "QOBUZ_DL_LIVE_EMAIL": "listener@example.test",
-        "QOBUZ_DL_LIVE_PASSWORD": "plain-text-password",
+        "QOBUZ_DL_LIVE_PASSWORD_FILE": str(password_file),
         "QOBUZ_DL_LIVE_TRACK_ID": AUTHORIZED_TRACK_ID,
         "QOBUZ_DL_LIVE_SEARCH_QUERY": "authorized artist track",
         "QOBUZ_DL_LIVE_QUALITY": "5",
@@ -449,7 +457,13 @@ def test_default_gate_reads_no_inputs_and_constructs_no_backend(capsys):
 
     assert main([], environ=environment, backend_factory=forbidden_backend) == 2
     assert environment.reads == [ACTIVATION_ENV]
-    assert capsys.readouterr().err.startswith("Live Qobuz verification is disabled.")
+    error = capsys.readouterr().err
+    assert error.startswith("usage: live_qobuz.py ")
+    assert (
+        "live_qobuz.py: error: live Qobuz verification is disabled; set "
+        f"{ACTIVATION_ENV}={ACTIVATION_VALUE} to run it\n"
+        "run 'just live-qobuz --help' for usage\n"
+    ) in error
 
 
 def test_help_and_unsupported_arguments_do_not_read_environment(capsys):
@@ -490,7 +504,9 @@ def test_invalid_inputs_fail_before_backend_or_secret_output(
 
     assert main([], environ=environment, backend_factory=forbidden_backend) == 2
     error = capsys.readouterr().err
-    assert error.startswith("Live Qobuz verification input error:")
+    assert error.startswith("usage: live_qobuz.py ")
+    assert "\nlive_qobuz.py: error: " in error
+    assert error.endswith("run 'just live-qobuz --help' for usage\n")
     assert "listener@example.test" not in error
     assert "plain-text-password" not in error
 
@@ -526,10 +542,11 @@ def test_runtime_failure_writes_sanitized_report_before_sensitive_work(
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [runtime:runtime_unavailable]. "
-        "Sanitized report written.\n"
+        "live_qobuz.py: verification failed [runtime:runtime_unavailable]; "
+        "sanitized report written\n"
+        "rerun: just live-qobuz --verbose\n"
     )
     report = _report(tmp_path)
     assert report["sha"] is None
@@ -668,10 +685,11 @@ def test_runtime_provenance_failures_are_sanitized_before_sensitive_work(
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [runtime:runtime_unavailable]. "
-        "Sanitized report written.\n"
+        "live_qobuz.py: verification failed [runtime:runtime_unavailable]; "
+        "sanitized report written\n"
+        "rerun: just live-qobuz --verbose\n"
     )
     report = _report(tmp_path)
     assert report["sha"] is None
@@ -712,14 +730,13 @@ def test_runtime_keyboard_interrupt_is_sanitized_without_sensitive_work(
             backend_factory=InterruptedRuntimeBackend,
             temporary_directory_factory=recording_temporary_directory,
         )
-        == 1
+        == 130
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [runtime:interrupted]. "
-        "Sanitized report written.\n"
+        "live_qobuz.py: interrupted [runtime:interrupted]; sanitized report written\n"
     )
     report = _report(tmp_path)
     assert report["sha"] is None
@@ -760,10 +777,8 @@ def test_fake_http_drives_the_complete_production_path_and_sanitized_report(
     assert main([], environ=environment, backend_factory=lambda: backend) == 0
 
     output = capsys.readouterr()
-    assert output.out == ""
-    assert output.err == (
-        "Live Qobuz verification passed [complete:ok]. Sanitized report written.\n"
-    )
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
+    assert output.err == ""
     report_path = tmp_path / "live-report.json"
     report = _report(tmp_path)
     assert report == {
@@ -1228,10 +1243,11 @@ def test_backend_output_and_raw_request_failure_are_contained(tmp_path, capsys):
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [bundle:unexpected_error]. "
-        "Sanitized report written.\n"
+        "live_qobuz.py: verification failed [bundle:unexpected_error]; "
+        "sanitized report written\n"
+        "rerun: just live-qobuz --verbose\n"
     )
     assert SENTINEL not in output.err
     assert SENTINEL not in json.dumps(_report(tmp_path))
@@ -1269,10 +1285,8 @@ def test_progress_output_is_contained(tmp_path, monkeypatch, capsys):
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
-    assert output.err == (
-        "Live Qobuz verification passed [complete:ok]. Sanitized report written.\n"
-    )
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
+    assert output.err == ""
     assert SENTINEL not in output.err
     assert SENTINEL not in json.dumps(_report(tmp_path))
 
@@ -1288,13 +1302,13 @@ def test_keyboard_interrupt_is_sanitized_after_temporary_cleanup(tmp_path, capsy
             environ=_live_environment(tmp_path),
             backend_factory=InterruptedBackend,
         )
-        == 1
+        == 130
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [bundle:interrupted]. Sanitized report written.\n"
+        "live_qobuz.py: interrupted [bundle:interrupted]; sanitized report written\n"
     )
     report = _report(tmp_path)
     assert report["reason"] == "interrupted"
@@ -1312,14 +1326,13 @@ def test_keyboard_interrupt_during_final_download_is_sanitized_and_cleaned(
 
     assert (
         main([], environ=_live_environment(tmp_path), backend_factory=lambda: backend)
-        == 1
+        == 130
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [download:interrupted]. "
-        "Sanitized report written.\n"
+        "live_qobuz.py: interrupted [download:interrupted]; sanitized report written\n"
     )
     report = _report(tmp_path)
     assert report["reason"] == "interrupted"
@@ -1346,10 +1359,11 @@ def test_tagging_exception_output_is_contained(tmp_path, monkeypatch, capsys):
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [download:download_failed]. "
-        "Sanitized report written.\n"
+        "live_qobuz.py: verification failed [download:download_failed]; "
+        "sanitized report written\n"
+        "rerun: just live-qobuz --verbose\n"
     )
     assert SENTINEL not in output.err
     assert SENTINEL not in json.dumps(_report(tmp_path))
@@ -1952,10 +1966,11 @@ def test_cleanup_failure_overrides_success_and_writes_failed_report(
     )
 
     output = capsys.readouterr()
-    assert output.out == ""
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
     assert output.err == (
-        "Live Qobuz verification failed [cleanup:cleanup_failed]. "
-        "Sanitized report written.\n"
+        "live_qobuz.py: verification failed [cleanup:cleanup_failed]; "
+        "sanitized report written\n"
+        "rerun: just live-qobuz --verbose\n"
     )
     report = _report(tmp_path)
     assert report["result"] == "failed"
@@ -1987,8 +2002,9 @@ def test_atomic_report_failure_preserves_previous_report(tmp_path, monkeypatch, 
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err == (
-        "Live Qobuz verification failed [report:report_write_failed]. "
-        "No report was written.\n"
+        "live_qobuz.py: verification failed [report:report_write_failed]; "
+        "no report was written\n"
+        "rerun: just live-qobuz --verbose\n"
     )
     assert report_path.read_text(encoding="utf-8") == '{"previous": true}\n'
     assert list(tmp_path.glob(".live-report.json.*.tmp")) == []
@@ -2024,9 +2040,471 @@ def test_runtime_report_write_failure_preserves_previous_report(
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err == (
-        "Live Qobuz verification failed [report:report_write_failed]. "
-        "No report was written.\n"
+        "live_qobuz.py: verification failed [report:report_write_failed]; "
+        "no report was written\n"
+        "rerun: just live-qobuz --verbose\n"
     )
     assert SENTINEL not in output.err
     assert report_path.read_text(encoding="utf-8") == '{"previous": true}\n'
     assert list(tmp_path.glob(".live-report.json.*.tmp")) == []
+
+
+def _passing_backend(monkeypatch):
+    backend = FakeBackend()
+    _install_media_only_http(monkeypatch)
+    _install_cbr_mp3_inspection(monkeypatch)
+    return backend
+
+
+def _forbidden_backend():
+    raise AssertionError("the verifier constructed its network backend")
+
+
+def test_flags_replace_environment_inputs_and_accept_equals_values(
+    tmp_path, monkeypatch, capsys
+):
+    backend = _passing_backend(monkeypatch)
+    password_file = tmp_path / "password.txt"
+    password_file.write_text("plain-text-password\n", encoding="utf-8")
+    report_path = tmp_path / "flags.json"
+    environment = RecordingEnvironment({ACTIVATION_ENV: ACTIVATION_VALUE})
+
+    status = main(
+        [
+            "--email=listener@example.test",
+            "--password-file",
+            str(password_file),
+            "--track-id",
+            AUTHORIZED_TRACK_ID,
+            "--query=authorized artist track",
+            "--quality=5",
+            "--output",
+            str(report_path),
+        ],
+        environ=environment,
+        backend_factory=lambda: backend,
+    )
+
+    assert status == 0
+    output = capsys.readouterr()
+    assert output.out == f"{report_path}\n"
+    assert output.err == ""
+    assert json.loads(report_path.read_text(encoding="utf-8"))["result"] == "passed"
+    assert environment.reads == [ACTIVATION_ENV]
+    assert (
+        hashlib.md5(b"plain-text-password", usedforsecurity=False).hexdigest()
+        in backend.config_snapshot
+    )
+
+
+def test_password_from_stdin_and_report_on_stdout_form_one_json_object(
+    tmp_path, monkeypatch, capsys
+):
+    backend = _passing_backend(monkeypatch)
+    environment = _live_environment(tmp_path, QOBUZ_DL_LIVE_REPORT="-")
+    del environment["QOBUZ_DL_LIVE_PASSWORD_FILE"]
+
+    status = main(
+        ["-vo", "-", "--password-file", "-"],
+        environ=environment,
+        backend_factory=lambda: backend,
+        stdin=io.StringIO("plain-text-password\nignored second line\n"),
+    )
+
+    assert status == 0
+    output = capsys.readouterr()
+    report = json.loads(output.out)
+    assert isinstance(report, dict)
+    assert report["result"] == "passed"
+    assert not (tmp_path / "live-report.json").exists()
+    assert "ignored second line" not in backend.config_snapshot
+    assert (
+        hashlib.md5(b"plain-text-password", usedforsecurity=False).hexdigest()
+        in backend.config_snapshot
+    )
+    assert output.err.endswith(
+        "live_qobuz.py: verification passed [complete:ok]; sanitized report written\n"
+    )
+
+
+def test_retired_password_variable_alone_is_a_usage_error(tmp_path, capsys):
+    environment = _live_environment(tmp_path)
+    del environment["QOBUZ_DL_LIVE_PASSWORD_FILE"]
+    environment[live_verification.RETIRED_PASSWORD_ENV] = "plain-text-password"
+
+    assert main([], environ=environment, backend_factory=_forbidden_backend) == 2
+
+    error = capsys.readouterr().err
+    assert (
+        "live_qobuz.py: error: QOBUZ_DL_LIVE_PASSWORD is no longer read; put the "
+        "password on the first line of a private file and pass --password-file "
+        "PATH, or pipe it with --password-file -\n"
+    ) in error
+    assert "plain-text-password" not in error
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        (None, "--password-file could not be read"),
+        ("\nsecond line\n", "--password-file must hold the password on its first"),
+    ],
+)
+def test_unreadable_or_empty_password_file_is_a_usage_error(
+    tmp_path, capsys, content, message
+):
+    environment = _live_environment(tmp_path)
+    password_file = tmp_path / "password.txt"
+    if content is None:
+        password_file.unlink()
+    else:
+        password_file.write_text(content, encoding="utf-8")
+
+    assert main([], environ=environment, backend_factory=_forbidden_backend) == 2
+
+    assert f"live_qobuz.py: error: {message}" in capsys.readouterr().err
+
+
+def test_help_wins_over_invalid_arguments_and_lists_exit_codes(capsys):
+    environment = RecordingEnvironment({})
+
+    with pytest.raises(SystemExit) as help_exit:
+        main(["--quality", "9", "--unknown", "-h"], environ=environment)
+
+    assert help_exit.value.code == 0
+    help_text = capsys.readouterr().out
+    assert help_text.startswith("usage: live_qobuz.py ")
+    examples = help_text.split("Examples:\n", 1)[1].split("\n\n", 1)[0]
+    assert 2 <= len(examples.splitlines()) <= 5
+    for code in (0, 1, 2, 130, 143):
+        assert re.search(rf"^  {code} +\S", help_text, re.MULTILINE)
+    assert environment.reads == []
+
+
+def test_double_dash_ends_options(capsys):
+    with pytest.raises(SystemExit) as usage_exit:
+        main(["--", "--verbose"], environ=RecordingEnvironment({}))
+
+    assert usage_exit.value.code == 2
+    error = capsys.readouterr().err
+    # Python versions differ on whether the message repeats the "--".
+    assert re.search(
+        r"^live_qobuz\.py: error: unrecognized arguments: (?:-- )?--verbose$",
+        error,
+        re.MULTILINE,
+    )
+    assert error.endswith("run 'just live-qobuz --help' for usage\n")
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+def test_verbosity_changes_only_stderr(tmp_path, monkeypatch, capsys, fails):
+    runs = []
+    for arguments in ([], ["-v"], ["--verbose"]):
+        backend = _passing_backend(monkeypatch)
+        if fails:
+            backend.client.search_items = []
+        status = main(
+            arguments,
+            environ=_live_environment(tmp_path),
+            backend_factory=lambda: backend,
+        )
+        output = capsys.readouterr()
+        runs.append((status, output.out, output.err))
+
+    assert {(status, out) for status, out, _err in runs} == {
+        (1 if fails else 0, f"{tmp_path / 'live-report.json'}\n")
+    }
+    default_err, short_err, long_err = (err for _status, _out, err in runs)
+    assert short_err == long_err
+    if fails:
+        assert default_err == (
+            "live_qobuz.py: verification failed [search:authorized_track_not_found]; "
+            "sanitized report written\n"
+            "rerun: just live-qobuz --verbose\n"
+        )
+        assert short_err == (
+            "live_qobuz.py: runtime passed\n"
+            "live_qobuz.py: bundle passed\n"
+            "live_qobuz.py: login passed\n"
+            "live_qobuz.py: cleanup passed\n" + default_err
+        )
+    else:
+        assert default_err == ""
+        assert short_err == "".join(
+            f"live_qobuz.py: {phase} passed\n" for phase in live_verification._PHASES
+        ) + (
+            "live_qobuz.py: verification passed [complete:ok]; "
+            "sanitized report written\n"
+        )
+
+
+@pytest.mark.parametrize(
+    ("interruption", "code"), [(KeyboardInterrupt, 130), (Terminated, 143)]
+)
+def test_signal_while_reading_the_password_writes_no_report(
+    tmp_path, capsys, interruption, code
+):
+    class InterruptedStdin:
+        def readline(self):
+            raise interruption
+
+    environment = _live_environment(tmp_path)
+    del environment["QOBUZ_DL_LIVE_PASSWORD_FILE"]
+
+    status = main(
+        ["--password-file", "-"],
+        environ=environment,
+        backend_factory=_forbidden_backend,
+        stdin=InterruptedStdin(),
+    )
+
+    assert status == code
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "live_qobuz.py: interrupted; no report was written\n"
+    assert not (tmp_path / "live-report.json").exists()
+
+
+def test_sigterm_during_backend_work_exits_143_with_a_report(tmp_path, capsys):
+    class TerminatedBackend(FakeBackend):
+        def bundle_credentials(self):
+            raise Terminated
+
+    status = main(
+        [], environ=_live_environment(tmp_path), backend_factory=TerminatedBackend
+    )
+
+    assert status == 143
+    output = capsys.readouterr()
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
+    assert output.err == (
+        "live_qobuz.py: interrupted [bundle:terminated]; sanitized report written\n"
+    )
+    report = _report(tmp_path)
+    assert report["reason"] == "terminated"
+    assert report["phases"]["bundle"] == "failed"
+    assert report["phases"]["cleanup"] == "passed"
+
+
+@pytest.mark.parametrize(
+    ("interruption", "code"), [(KeyboardInterrupt, 130), (Terminated, 143)]
+)
+def test_signal_during_cleanup_keeps_the_signal_exit_and_records_cleanup(
+    tmp_path, monkeypatch, capsys, interruption, code
+):
+    backend = _passing_backend(monkeypatch)
+
+    class InterruptedCleanupDirectory:
+        def __init__(self, prefix):
+            self.directory = tempfile.TemporaryDirectory(prefix=prefix)
+            self.name = self.directory.name
+
+        def cleanup(self):
+            self.directory.cleanup()
+            raise interruption
+
+    status = main(
+        [],
+        environ=_live_environment(tmp_path),
+        backend_factory=lambda: backend,
+        temporary_directory_factory=InterruptedCleanupDirectory,
+    )
+
+    assert status == code
+    output = capsys.readouterr()
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
+    assert output.err == (
+        "live_qobuz.py: interrupted [cleanup:cleanup_failed]; "
+        "sanitized report written\n"
+    )
+    report = _report(tmp_path)
+    assert report["result"] == "failed"
+    assert report["reason"] == "cleanup_failed"
+    assert report["phases"]["metadata"] == "passed"
+
+
+@pytest.mark.parametrize(
+    ("interruption", "code"), [(KeyboardInterrupt, 130), (Terminated, 143)]
+)
+def test_signal_during_report_persistence_keeps_the_previous_report(
+    tmp_path, monkeypatch, capsys, interruption, code
+):
+    backend = _passing_backend(monkeypatch)
+    report_path = tmp_path / "live-report.json"
+    report_path.write_text('{"previous": true}\n', encoding="utf-8")
+
+    def interrupted_replace(source, destination):
+        raise interruption
+
+    monkeypatch.setattr(os, "replace", interrupted_replace)
+
+    status = main(
+        [], environ=_live_environment(tmp_path), backend_factory=lambda: backend
+    )
+
+    assert status == code
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == (
+        "live_qobuz.py: interrupted [report:report_write_failed]; "
+        "no report was written\n"
+    )
+    assert report_path.read_text(encoding="utf-8") == '{"previous": true}\n'
+    assert list(tmp_path.glob(".live-report.json.*.tmp")) == []
+
+
+def _verification_inputs(tmp_path):
+    return LiveInputs(
+        email="listener@example.test",
+        password="plain-text-password",
+        track_id=AUTHORIZED_TRACK_ID,
+        search_query="authorized artist track",
+        quality=5,
+        report_path=tmp_path / "live-report.json",
+    )
+
+
+def _media_status(monkeypatch, status):
+    def failing_urlopen(request, timeout):
+        raise HTTPError(request.full_url, status, "failure", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr("qobuz_dl.http.urlopen", failing_urlopen)
+
+
+@pytest.mark.parametrize(("status", "retryable"), [(503, True), (404, False)])
+def test_media_failure_carries_retryability(tmp_path, monkeypatch, status, retryable):
+    _media_status(monkeypatch, status)
+
+    outcome = verify(_verification_inputs(tmp_path), FakeBackend)
+
+    assert (outcome.phase, outcome.reason) == (
+        "interruption",
+        "interruption_request_failed",
+    )
+    assert outcome.retryable is retryable
+    assert "retryable" not in _report(tmp_path)
+
+
+def test_cleanup_failure_overrides_a_temporary_failure(tmp_path, monkeypatch):
+    _media_status(monkeypatch, 503)
+
+    class FailingCleanupDirectory:
+        def __init__(self, prefix):
+            self.directory = tempfile.TemporaryDirectory(prefix=prefix)
+            self.name = self.directory.name
+
+        def cleanup(self):
+            self.directory.cleanup()
+            raise OSError(SENTINEL)
+
+    outcome = verify(
+        _verification_inputs(tmp_path),
+        FakeBackend,
+        temporary_directory_factory=FailingCleanupDirectory,
+    )
+
+    assert (outcome.phase, outcome.reason, outcome.retryable) == (
+        "cleanup",
+        "cleanup_failed",
+        False,
+    )
+
+
+SIGNAL_DRIVER = """
+import signal
+import sys
+import time
+from pathlib import Path
+
+from qobuz_dl import live_verification
+from qobuz_dl.live_verification import BundleCredentials, RuntimeFacts
+
+signal.signal(signal.SIGINT, signal.default_int_handler)
+workspace = Path(sys.argv[1])
+password_file = workspace / "password.txt"
+password_file.write_text("plain-text-password\\n", encoding="utf-8")
+
+
+class BlockingBackend:
+    def runtime_facts(self):
+        return RuntimeFacts(sha="0" * 40, system="Linux", machine="x", python="3")
+
+    def bundle_credentials(self):
+        (workspace / "ready").touch()
+        while True:
+            time.sleep(0.05)
+
+
+sys.exit(
+    live_verification.main(
+        [],
+        environ={
+            live_verification.ACTIVATION_ENV: live_verification.ACTIVATION_VALUE,
+            "QOBUZ_DL_LIVE_EMAIL": "listener@example.test",
+            "QOBUZ_DL_LIVE_PASSWORD_FILE": str(password_file),
+            "QOBUZ_DL_LIVE_TRACK_ID": "123456",
+            "QOBUZ_DL_LIVE_SEARCH_QUERY": "authorized artist track",
+            "QOBUZ_DL_LIVE_QUALITY": "5",
+            "QOBUZ_DL_LIVE_REPORT": str(workspace / "live-report.json"),
+        },
+        backend_factory=BlockingBackend,
+    )
+)
+"""
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signal delivery")
+@pytest.mark.parametrize(
+    ("signal_name", "code", "reason"),
+    [("SIGINT", 130, "interrupted"), ("SIGTERM", 143, "terminated")],
+)
+def test_real_signal_during_backend_work_exits_with_the_signal_code(
+    tmp_path, signal_driver, signal_name, code, reason
+):
+    status, out, err = signal_driver(SIGNAL_DRIVER, getattr(signal, signal_name))
+
+    assert status == code
+    assert out == f"{tmp_path / 'live-report.json'}\n"
+    assert err == (
+        f"live_qobuz.py: interrupted [bundle:{reason}]; sanitized report written\n"
+    )
+    assert _report(tmp_path)["reason"] == reason
+
+
+def test_failure_hints_never_repeat_private_inputs(tmp_path, capsys):
+    password_file = tmp_path / "password.txt"
+    password_file.write_text("plain-text-password\n", encoding="utf-8")
+    report = tmp_path / "flags.json"
+
+    class RuntimeFailureBackend(FakeBackend):
+        def runtime_facts(self):
+            raise RuntimeError(SENTINEL)
+
+    status = main(
+        [
+            "-v",
+            "--email",
+            "private@example.test",
+            "--track-id=987654",
+            "--query",
+            "private search words",
+            "--password-file",
+            str(password_file),
+            "--quality",
+            "5",
+            "-o",
+            str(report),
+        ],
+        environ=RecordingEnvironment({ACTIVATION_ENV: ACTIVATION_VALUE}),
+        backend_factory=RuntimeFailureBackend,
+    )
+
+    assert status == 1
+    error = capsys.readouterr().err
+    for private in ("private@example.test", "987654", "private search words"):
+        assert private not in error
+    assert error.endswith(
+        "rerun with the same --email, --track-id, and --query: "
+        f"just live-qobuz --verbose --password-file {password_file} "
+        f"--quality 5 -o {report}\n"
+    )
