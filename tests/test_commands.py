@@ -1437,7 +1437,7 @@ def test_path_that_stdout_cannot_encode_is_escaped_not_fatal(
         _scripted_runtime([_finalized("Música/01. Canción.flac")]),
     )
     raw = io.BytesIO()
-    ascii_stdout = io.TextIOWrapper(raw, encoding="ascii")
+    ascii_stdout = io.TextIOWrapper(raw, encoding="ascii", newline="\n")
     monkeypatch.setattr(sys, "stdout", ascii_stdout)
 
     assert cli.main() == 0
