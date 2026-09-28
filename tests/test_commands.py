@@ -1,3 +1,4 @@
+import io
 import os
 import subprocess
 import sys
@@ -1418,3 +1419,25 @@ def test_fun_downloads_the_interactive_queue_through_the_result_path(
         ("album", "a8"),
     ]
     assert capsys.readouterr().out == "fun.flac\n"
+
+
+def test_path_that_stdout_cannot_encode_is_escaped_not_fatal(
+    monkeypatch, tmp_path, capsys
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/a1"],
+        _scripted_runtime([_finalized("Música/01. Canción.flac")]),
+    )
+    raw = io.BytesIO()
+    ascii_stdout = io.TextIOWrapper(raw, encoding="ascii")
+    monkeypatch.setattr(sys, "stdout", ascii_stdout)
+
+    assert cli.main() == 0
+
+    ascii_stdout.flush()
+    assert raw.getvalue() == b"M\\xfasica/01. Canci\\xf3n.flac\n"
+    assert "set PYTHONUTF8=1" in capsys.readouterr().err

@@ -3,12 +3,12 @@ import getpass
 import hashlib
 import logging
 import os
-import re
 import sys
 import tempfile
 import traceback
+from collections import Counter
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 
 from qobuz_dl import envelope, http
@@ -22,6 +22,7 @@ from qobuz_dl.commands import (
     qobuz_dl_args,
 )
 from qobuz_dl.console import (
+    DIAGNOSTIC_FLAGS,
     HELP_FLAGS,
     ExitCode,
     color_enabled,
@@ -37,6 +38,7 @@ from qobuz_dl.console import (
     sigterm_raises,
     stderr_logging,
     subcommand_parsers,
+    without_flags,
 )
 from qobuz_dl.core import (
     QobuzDL,
@@ -369,7 +371,6 @@ def _quality_fallback_enabled(cli_fallback, config_no_fallback):
 
 
 MIN_QUERY_LENGTH = 3
-_OLD_NUMBER_FLAG = re.compile(r"-n\d+")
 
 
 @dataclass
@@ -383,13 +384,31 @@ class _Session:
     run: RunResult | None = None
     data: dict | None = None
 
+    # The argument list without options that only change diagnostics, so a
+    # printed or JSON hint is the same at every verbosity.
+    portable_argv: list = field(default_factory=list)
+
     @property
     def retry_command(self):
-        return format_command((PROG, *self.argv))
+        return format_command((PROG, *self.portable_argv))
+
+    def command_with(self, option):
+        return format_command((PROG, option, *self.portable_argv))
 
 
 def _print_path(path):
-    print(path, flush=True)
+    """Print one finalized path; a stdout that cannot encode it gets escapes."""
+    line = f"{path}\n"
+    try:
+        sys.stdout.write(line)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        sys.stdout.write(line.encode(encoding, "backslashreplace").decode(encoding))
+        logger.warning(
+            "stdout cannot encode a finalized path, so it was printed with "
+            "escapes; set PYTHONUTF8=1 to print it exactly"
+        )
+    sys.stdout.flush()
 
 
 def _download_search_results(qobuz, urls, query, *, preview=False):
@@ -467,15 +486,29 @@ def _validate_operands(parser, arguments):
     return ()
 
 
+def _old_count_flag(lucky, token, following):
+    """Whether ``token`` uses -n with a count, alone or in a short cluster."""
+    if not token.startswith("-") or token.startswith("--") or len(token) < 2:
+        return False
+    letters = token[1:]
+    for position, letter in enumerate(letters):
+        action = lucky._option_string_actions.get(f"-{letter}")
+        if action is None or action.nargs != 0:
+            return False
+        if letter == "n":
+            rest = letters[position + 1 :]
+            return rest.isdigit() if rest else following.isdigit()
+    return False
+
+
 def _reject_old_number_flag(parser, argv):
     """``lucky -n 3`` once meant three results; -n is now --dry-run."""
+    lucky = subcommand_parsers(parser)["lucky"]
     tokens = argv[: argv.index("--")] if "--" in argv else argv
     for index, token in enumerate(tokens):
         following = tokens[index + 1] if index + 1 < len(tokens) else ""
-        if (token == "-n" and following.isdigit()) or _OLD_NUMBER_FLAG.fullmatch(token):
-            subcommand_parsers(parser)["lucky"].error(
-                "-n now means --dry-run; use --limit N"
-            )
+        if _old_count_flag(lucky, token, following):
+            lucky.error("-n now means --dry-run; use --limit N")
 
 
 def _operation(arguments):
@@ -583,6 +616,44 @@ def _purge(session, database_file):
     logger.info(f"{GREEN}The database was deleted.")
     session.data = {"database_path": database_file, "deleted": True}
     return ExitCode.OK
+
+
+def _failure_lines(run, *, dry_run=False):
+    """Describe the unsatisfied items and problems of a run, one line each."""
+    unsatisfied = [
+        item for item in run.items if item.classification in ("permanent", "temporary")
+    ]
+    lines = []
+    if unsatisfied:
+        counts = Counter(item.result.reason for item in unsatisfied)
+        reasons = ", ".join(
+            reason if count == 1 else f"{reason} ({count})"
+            for reason, count in counts.items()
+        )
+        verb = "would not be downloaded" if dry_run else "could not be downloaded"
+        lines.append(f"{len(unsatisfied)} of {len(run.items)} items {verb}: {reasons}")
+    lines.extend(problem.message for problem in run.problems)
+    return lines
+
+
+def _report_run(color, session, code, arguments):
+    """Say what failed in a run that exits 1 or 75, then what to run next."""
+    if session.run is None or code not in (ExitCode.FAILURE, ExitCode.TEMPORARY):
+        return
+    if code == ExitCode.TEMPORARY:
+        hint = f"retry: {session.retry_command}"
+    elif arguments.verbose or arguments.debug:
+        hint = None
+    else:
+        hint = f"see why: {session.command_with('--verbose')}"
+    lines = [
+        f"{PROG}: {line}"
+        for line in _failure_lines(session.run, dry_run=session.dry_run)
+    ]
+    if hint:
+        lines.append(hint)
+    sys.stderr.write(render(redact("\n".join(lines)), color) + "\n")
+    sys.stderr.flush()
 
 
 def _run(parser, arguments, session):
@@ -748,6 +819,7 @@ def main(argv=None):
         json=arguments.json,
         dry_run=arguments.dry_run,
         operation=_operation(arguments),
+        portable_argv=without_flags(parser, argv, DIAGNOSTIC_FLAGS),
     )
     debug = arguments.debug or env_flag(DEBUG_ENV)
     if debug:
@@ -763,6 +835,7 @@ def main(argv=None):
         try:
             with sigterm_raises():
                 code = _run(parser, arguments, session)
+            _report_run(color, session, code, arguments)
         except KeyboardInterrupt as interruption:
             message = "interrupted; finished files were kept"
             _report(color, message)
@@ -789,7 +862,7 @@ def main(argv=None):
             if debug:
                 trace = "".join(traceback.format_exception(error))
                 sys.stderr.write(render(redact(trace), color))
-            rerun = format_command((PROG, "--debug", *argv))
+            rerun = session.command_with("--debug")
             _report(
                 color,
                 f"unexpected error: {error}",
@@ -800,7 +873,10 @@ def main(argv=None):
                 envelope.problem("unexpected_error", str(error), hint=rerun)
             )
         if session.json:
-            _write_json(session, code, problems)
+            try:
+                _write_json(session, code, problems)
+            except OSError as error:
+                _report(color, f"could not write the JSON result: {error}")
         return code
 
 

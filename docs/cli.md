@@ -65,6 +65,8 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --h
 
 An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`.
 
+A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict` (`would not be` in a dry run), then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise.
+
 Login failures exit `1`, or `75` when the login or web-bundle request failed for a temporary reason. Errors name what failed and, when there is one, the command to run next. Stack traces appear only with `--debug`, and every message masks email, password, token, and request-signature values. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
 
 ## Machine-readable output
@@ -88,7 +90,7 @@ With `--json`, stdout holds exactly one JSON object and nothing else, whatever t
 | Any usage error | `operation` is `null` and `status` is `usage_error` |
 | `-h`, `--help`, `--version` | Human text wins; no JSON |
 
-An interrupted run prints the partial object with `status: "interrupted"`. A temporary problem carries the command to retry in `hint`. `--json` after `--` is a source, not an option.
+An interrupted run prints the partial object with `status: "interrupted"`. A temporary problem carries the command to retry in `hint`. `--json` after `--` is a source, not an option. The object escapes non-ASCII text, so any stdout encoding can carry it; masks credentials in `source` fields; and builds `hint` commands without `-v`, `--debug`, or `--no-color`, so it is identical at every verbosity.
 
 ## Dry run
 

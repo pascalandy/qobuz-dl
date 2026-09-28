@@ -181,6 +181,63 @@ def scan_options(
     return scan
 
 
+# Options that change only what reaches stderr, never stdout or the exit code.
+DIAGNOSTIC_FLAGS = frozenset({"-v", "--verbose", "--debug", "--no-color"})
+
+
+def without_flags(
+    parser: argparse.ArgumentParser, argv: Sequence[str], flags: frozenset[str]
+) -> list[str]:
+    """Return ``argv`` without the value-less ``flags``, also inside clusters.
+
+    Like ``scan_options``, it skips option values, follows the subcommand, and
+    keeps everything from ``--`` on, so ``-vn`` becomes ``-n`` while the value
+    in ``-lv`` stays.
+    """
+    kept: list[str] = []
+    current = parser
+    subcommands = subcommand_parsers(parser)
+    chosen = False
+    skip_value = False
+    for index, argument in enumerate(argv):
+        if skip_value:
+            skip_value = False
+            if not _looks_like_option(argument):
+                kept.append(argument)
+                continue
+        if argument == "--":
+            kept.extend(argv[index:])
+            break
+        if argument.startswith("--"):
+            name, has_value, _value = argument.partition("=")
+            if name in flags and not has_value:
+                continue
+            skip_value = bool(_takes_value(current, name)) and not has_value
+            kept.append(argument)
+        elif argument.startswith("-") and len(argument) > 1:
+            letters = argument[1:]
+            remaining = ""
+            for position, letter in enumerate(letters):
+                option = f"-{letter}"
+                takes_value = _takes_value(current, option)
+                if takes_value is False and option in flags:
+                    continue
+                if takes_value is False:
+                    remaining += letter
+                    continue
+                remaining += letters[position:]
+                skip_value = bool(takes_value) and position == len(letters) - 1
+                break
+            if remaining:
+                kept.append(f"-{remaining}")
+        else:
+            if not chosen and argument in subcommands:
+                chosen = True
+                current = subcommands[argument]
+            kept.append(argument)
+    return kept
+
+
 class Parser(argparse.ArgumentParser):
     """ArgumentParser with the shared usage-error format and no abbreviations.
 
@@ -198,6 +255,8 @@ class Parser(argparse.ArgumentParser):
 
     def usage_error(self, message: str) -> ExitCode:
         """Print the usage-error format to stderr and return the usage code."""
+        # A rejected argument, such as a URL, can carry a credential.
+        message = redact(message)
         hint = f"run '{self.command} --help' for usage"
         self.print_usage(sys.stderr)
         sys.stderr.write(f"{self.prog}: error: {message}\n{hint}\n")

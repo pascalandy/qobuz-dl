@@ -42,7 +42,7 @@ def problem(code, message, *, source=None, retryable=False, hint=None):
         "code": code,
         "severity": "error",
         "message": redact(message),
-        "source": source,
+        "source": None if source is None else redact(source),
         "retryable": retryable,
         "hint": None if hint is None else redact(hint),
     }
@@ -59,7 +59,7 @@ def _item(item):
     result = item.result
     if isinstance(result, PlannedDestination):
         return {
-            "source": item.source,
+            "source": redact(item.source),
             "kind": item.kind,
             "item_id": item.item_id,
             "state": "planned",
@@ -70,7 +70,7 @@ def _item(item):
             "exists": result.exists,
         }
     return {
-        "source": item.source,
+        "source": redact(item.source),
         "kind": item.kind,
         "item_id": item.item_id,
         "state": result.state,
@@ -109,5 +109,6 @@ def run_problems(run, retry_hint=None):
 
 def write(value, stream=None):
     stream = sys.stdout if stream is None else stream
-    stream.write(json.dumps(value, ensure_ascii=False) + "\n")
+    # ASCII escapes keep the object writable whatever the stdout encoding.
+    stream.write(json.dumps(value, ensure_ascii=True) + "\n")
     stream.flush()

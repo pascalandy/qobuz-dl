@@ -305,3 +305,23 @@ def test_sigterm_raises_terminated_and_restores_the_previous_handler():
 )
 def test_redact_masks_credentials_in_every_encoding(text, expected):
     assert console.redact(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["-v", "dl", "x", "--debug"], ["dl", "x"]),
+        (["dl", "-vn", "x"], ["dl", "-n", "x"]),
+        (["-vn", "dl", "x"], ["-n", "dl", "x"]),
+        (["dl", "-d", "-v", "x"], ["dl", "-d", "x"]),
+        (["dl", "-dv", "x"], ["dl", "-dv", "x"]),
+        (["--no-color", "dl", "--", "-v"], ["dl", "--", "-v"]),
+        (["dl", "--verbose=1"], ["dl", "--verbose=1"]),
+    ],
+)
+def test_without_flags_drops_only_diagnostic_options(argv, expected):
+    from qobuz_dl.commands import qobuz_dl_args
+
+    parser = qobuz_dl_args()
+
+    assert console.without_flags(parser, argv, console.DIAGNOSTIC_FLAGS) == expected
