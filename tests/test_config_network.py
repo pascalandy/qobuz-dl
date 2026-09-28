@@ -35,10 +35,19 @@ def _write_config(path):
 
 @pytest.fixture
 def home(monkeypatch, tmp_path):
+    """A private home; on Windows, APPDATA points inside it too."""
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("APPDATA", str(home / "AppData"))
     return home
+
+
+def _default_config(home):
+    """Where the default lookup finds config on this platform."""
+    if os.name == "nt":
+        return home / "AppData" / "qobuz-dl" / "config.ini"
+    return home / ".config" / "qobuz-dl" / "config.ini"
 
 
 class FakeBundle:
@@ -97,7 +106,7 @@ def test_default_lookup_prefers_xdg_then_legacy_then_creates_at_xdg(
 
 
 def test_flag_beats_environment_beats_default(monkeypatch, home, tmp_path, capsys):
-    default = _write_config(home / ".config" / "qobuz-dl" / "config.ini")
+    default = _write_config(_default_config(home))
     from_env = _write_config(tmp_path / "env" / "config.ini")
     from_flag = _write_config(tmp_path / "flag" / "config.ini")
 
@@ -117,7 +126,7 @@ def test_flag_beats_environment_beats_default(monkeypatch, home, tmp_path, capsy
 def test_missing_explicit_config_exits_2_and_never_touches_the_default(
     monkeypatch, home, tmp_path, capsys, terminal_stdin, source
 ):
-    default = _write_config(home / ".config" / "qobuz-dl" / "config.ini")
+    default = _write_config(_default_config(home))
     before = (default.read_bytes(), _mode(default), _mode(default.parent))
     missing = tmp_path / "missing" / "config.ini"
     argv = ["dl", URL]
@@ -259,7 +268,7 @@ def test_unreadable_password_file_is_a_usage_error(
 
     assert exc.value.code == 2
     assert "--password-file" in capsys.readouterr().err
-    assert not (home / ".config" / "qobuz-dl" / "config.ini").exists()
+    assert not _default_config(home).exists()
 
 
 @posix_only
