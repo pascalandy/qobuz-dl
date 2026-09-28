@@ -1,6 +1,8 @@
+import io
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -668,3 +670,127 @@ def test_plain_dry_run_prints_candidate_paths_once(dry_run_world, capsys):
     ]
     assert output.err == ""
     assert _snapshot(root) == before
+
+
+def test_json_sources_are_redacted(monkeypatch, tmp_path, capsys):
+    config_file, _database = _paths(monkeypatch, tmp_path)
+    _write_config(config_file)
+    secret_url = f"{URL}?user_auth_token=SECRET_SENTINEL"
+    monkeypatch.setattr(
+        cli,
+        "QobuzDL",
+        _scripted(
+            [
+                RunItem(
+                    secret_url, "track", "1", DownloadResult("failed", "path_conflict")
+                ),
+                RunProblem("no_tracks", "empty", secret_url),
+            ]
+        ),
+    )
+
+    _code, document, error = _json_run(["dl", secret_url, "--json"], capsys)
+
+    serialized = json.dumps(document)
+    assert "SECRET_SENTINEL" not in serialized + error
+    assert document["data"]["items"][0]["source"] == f"{URL}?user_auth_token=<redacted>"
+
+
+def test_json_stays_one_writable_object_on_an_ascii_stdout(monkeypatch, tmp_path):
+    config_file, _database = _paths(monkeypatch, tmp_path)
+    _write_config(config_file)
+    monkeypatch.setattr(
+        cli,
+        "QobuzDL",
+        _scripted([_item("finalized", "downloaded", ["Música/01. Canción.flac"])]),
+    )
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="ascii"))
+
+    assert cli.main(["dl", URL, "--json"]) == 0
+
+    sys.stdout.flush()
+    document = json.loads(raw.getvalue().decode("ascii"))
+    assert document["data"]["items"][0]["paths"] == ["Música/01. Canción.flac"]
+
+
+@pytest.mark.parametrize("failure", ["temporary", "unexpected"])
+def test_json_stdout_is_identical_at_every_verbosity(
+    monkeypatch, tmp_path, capsys, failure
+):
+    config_file, _database = _paths(monkeypatch, tmp_path)
+    _write_config(config_file)
+    if failure == "temporary":
+        runtime = _scripted([RunProblem("rate_limited", "limit", URL, retryable=True)])
+    else:
+        runtime = _scripted([RuntimeError("unexpected state")])
+    monkeypatch.setattr(cli, "QobuzDL", runtime)
+
+    outputs = set()
+    for flags in ([], ["-v"], ["--debug"], ["-v", "--no-color"]):
+        code, document, _error = _json_run(["dl", URL, "--json", *flags], capsys)
+        outputs.add((code, json.dumps(document, sort_keys=True)))
+
+    assert len(outputs) == 1
+    ((code, serialized),) = outputs
+    hint = json.loads(serialized)["problems"][-1]["hint"]
+    if failure == "temporary":
+        assert (code, hint) == (75, f"qobuz-dl dl {URL} --json")
+    else:
+        assert (code, hint) == (1, f"qobuz-dl --debug dl {URL} --json")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["lucky", "-vn", "3", "query"],
+        ["lucky", "-vn3", "query"],
+        ["lucky", "query", "-en", "2"],
+    ],
+)
+def test_clustered_old_count_flag_is_rejected(monkeypatch, capsys, argv):
+    monkeypatch.setattr(
+        cli, "_resolve_config_paths", lambda: pytest.fail("reached config")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(argv)
+
+    assert exc.value.code == 2
+    assert "-n now means --dry-run; use --limit N" in capsys.readouterr().err
+
+
+def test_clusters_with_n_as_dry_run_still_parse():
+    from qobuz_dl.commands import qobuz_dl_args
+
+    parser = qobuz_dl_args()
+
+    arguments = parser.parse_args(["-vn", "dl", URL])
+    assert (arguments.verbose, arguments.dry_run) == (True, True)
+    arguments = parser.parse_args(["lucky", "3", "feet", "-vn"])
+    assert (arguments.dry_run, arguments.QUERY) == (True, ["3", "feet"])
+
+
+def test_dry_run_failure_summary_says_would(monkeypatch, tmp_path, capsys):
+    config_file, _database = _paths(monkeypatch, tmp_path)
+    _write_config(config_file)
+
+    class Previewing:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def initialize_client(self, *args):
+            pass
+
+        def preview_sources(self, sources):
+            self.run_result.add_item(_item("ignored", "demo"))
+            return self.run_result
+
+    monkeypatch.setattr(cli, "QobuzDL", Previewing)
+
+    assert cli.main(["dl", URL, "--dry-run"]) == 1
+
+    assert capsys.readouterr().err == (
+        "qobuz-dl: 1 of 1 items would not be downloaded: demo\n"
+        f"see why: qobuz-dl --verbose dl {URL} --dry-run\n"
+    )

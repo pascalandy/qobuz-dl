@@ -22,7 +22,7 @@ Canonical details: [`docs/development.md`](docs/development.md)
 - For automation contracts, read the [agent operation design](docs/feat/2026-09-12-agent-ergonomics/design-agent-ergonomics.md) and its linked implementation plan; proposed commands are not available until implemented
 - For current work, query [epic #20](https://github.com/pascalandy/qobuz-dl/issues/20) and open PRs with `gh`; verify base/head commits and distinguish accepted policy, open implementation, and code in this checkout
 - Keep discoveries in their owning test or canonical document; use GitHub for live work status and dated artifacts for historical evidence
-- Default investigation to help, source, and offline fixtures; `--show-config` in a terminal can initialize missing config, while `QobuzDL` construction creates output/state
+- Default investigation to help, source, and offline fixtures; `--show-config` in a terminal can initialize missing config; `QobuzDL` construction opens history state, and the first real download creates the output directory; `--dry-run` writes nothing
 - Independent experiments use separate temporary state and output paths through test fixtures; the current CLI has no `--state-dir` flag and concurrent library writers are not supported
 
 ## Testing and quality rules

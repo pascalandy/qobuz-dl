@@ -33,7 +33,7 @@ gh pr list --state open --limit 100 --json number,title,url,baseRefName,headRefN
 
 Inspect relevant PR bodies, checks, and exact commits before depending on them. A child PR's base may be another unmerged branch. The [agent operation plan](feat/2026-09-12-agent-ergonomics/impl-plan-agent-ergonomics.md) records the observed overlap with current design work, not a live queue.
 
-For safe offline investigation, use `uv run qobuz-dl --help` and the focused tests in the architecture's ownership map. A bare invocation exits `2` without touching config; `--show-config` can create missing config and prompt when stdin is a terminal. `QobuzDL` construction creates the output root and can initialize history. Use test fixtures with temporary paths for experiments; a different `--directory` does not isolate CLI credentials or history.
+For safe offline investigation, use `uv run qobuz-dl --help` and the focused tests in the architecture's ownership map. A bare invocation exits `2` without touching config; `--show-config` can create missing config and prompt when stdin is a terminal. `QobuzDL` construction can initialize history, and the first real download creates the output root; `--dry-run` writes nothing. Use test fixtures with temporary paths for experiments; a different `--directory` does not isolate CLI credentials or history.
 
 ## Development versus production CLI
 

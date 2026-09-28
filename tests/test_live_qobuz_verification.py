@@ -2521,3 +2521,42 @@ def test_timeout_reaches_every_media_request(tmp_path, monkeypatch):
 
     assert status == 0
     assert timeouts == [120, 120]
+
+
+def test_failure_hints_never_repeat_private_inputs(tmp_path, capsys):
+    password_file = tmp_path / "password.txt"
+    password_file.write_text("plain-text-password\n", encoding="utf-8")
+    report = tmp_path / "flags.json"
+
+    class RuntimeFailureBackend(FakeBackend):
+        def runtime_facts(self):
+            raise RuntimeError(SENTINEL)
+
+    status = main(
+        [
+            "-v",
+            "--email",
+            "private@example.test",
+            "--track-id=987654",
+            "--query",
+            "private search words",
+            "--password-file",
+            str(password_file),
+            "--quality",
+            "5",
+            "-o",
+            str(report),
+        ],
+        environ=RecordingEnvironment({ACTIVATION_ENV: ACTIVATION_VALUE}),
+        backend_factory=RuntimeFailureBackend,
+    )
+
+    assert status == 1
+    error = capsys.readouterr().err
+    for private in ("private@example.test", "987654", "private search words"):
+        assert private not in error
+    assert error.endswith(
+        "rerun with the same --email, --track-id, and --query: "
+        f"just live-qobuz --verbose --password-file {password_file} "
+        f"--quality 5 -o {report}\n"
+    )

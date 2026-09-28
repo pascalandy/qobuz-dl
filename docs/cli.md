@@ -46,7 +46,9 @@ Color is off when stderr is not a terminal, with `NO_COLOR`, with `TERM=dumb`, o
 | `130` | Interrupted with Ctrl-C (SIGINT); files finalized before the interrupt are kept and their paths were already printed |
 | `143` | Terminated with SIGTERM, with the same guarantees |
 
-An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`. Login and web-bundle failures exit `1`, or `75` when the request failed for a temporary reason. An error names what failed and, when there is one, the command to run next, such as `retry: qobuz-dl dl URL`. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
+An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`.
+
+A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict` (`would not be` in a dry run), then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise. A hint never repeats an `--email` value; it names the flag instead. Login and web-bundle failures exit `1`, or `75` when the request failed for a temporary reason. An error names what failed and, when there is one, the command to run next, such as `retry: qobuz-dl dl URL`. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
 
 ## Machine-readable output
 
@@ -70,7 +72,7 @@ With `--json`, stdout holds exactly one JSON object and nothing else, whatever t
 | Any usage error | `operation` is `null` and `status` is `usage_error` |
 | `-h`, `--help`, `--version` | Human text wins; no JSON |
 
-An interrupted run prints the partial object with `status: "interrupted"`. A temporary problem carries the command to retry in `hint`. `--json` after `--` is a source, not an option.
+An interrupted run prints the partial object with `status: "interrupted"`. A temporary problem carries the command to retry in `hint`. `--json` after `--` is a source, not an option. The object escapes non-ASCII text, so any stdout encoding can carry it; masks credentials in `source` fields; and builds `hint` commands without `-v`, `--debug`, or `--no-color`, so it is identical at every verbosity.
 
 ## Dry run
 
@@ -82,7 +84,7 @@ A dry run writes nothing: no folder, audio, cover, booklet, M3U, config, or hist
 
 ## Setup, config, and history
 
-`--reset` prompts for the account, folder, and quality in a terminal. With `--email EMAIL --password-file PATH`, or `--password-file -` for stdin, it needs no terminal and uses the default folder and quality. `--config PATH` or `QOBUZ_DL_CONFIG` selects the config file and the database beside it; a missing explicit config exits `2` rather than falling back. See [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live) for lookup order and permissions.
+`--reset` prompts for the account, folder, and quality in a terminal. With `--email EMAIL --password-file PATH`, or `--password-file -` for stdin, it needs no terminal and uses the default folder and quality. `--config PATH` or `QOBUZ_DL_CONFIG` selects the config file and the database beside it; a missing explicit config exits `2` rather than falling back, even for `--purge`. See [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live) for lookup order and permissions.
 
 `--purge` deletes the downloaded-IDs database. It exits `0` whether the database was deleted or already absent, reports which with `--verbose`, and neither creates config nor initializes the Qobuz client. A deletion failure exits `1`, reports the database path, and advises checking its permissions. Previously tracked releases may download again.
 
