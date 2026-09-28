@@ -19,7 +19,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 - [Installation](installation.md): explicit fork source, no-install and persistent usage, reproducible revisions, config persistence, and install verification.
 - [Examples](examples.md) — download mode, Last.fm playlists, interactive mode, lucky mode, and duplicate tracking.
 - [Use cases](use-cases.md) — goal-oriented local-library workflows for account setup, hi-res downloads, discovery, organization, duplicate tracking, and maintenance.
-- [CLI reference](cli.md) — top-level CLI usage and command overview.
+- [CLI reference](cli.md) — output streams, exit codes, `--json`, `--dry-run`, source rules, retries, and naming behavior; options live in `--help`.
 - [Module usage](module-usage.md) — importing `qobuz-dl` as a library.
 
 ## Maintainer documentation

@@ -42,11 +42,11 @@ The runner performs these checks in order:
 1. Check Ruff formatting.
 2. Run Ruff linting.
 3. Run the pytest suite.
-4. From the checkout, run `qobuz-dl --help`, `qobuz-dl --version`, `qobuz-dl dl --help`, `qobuz-dl fun --help`, `qobuz-dl lucky --help`, `qdl --help`, and `qdl --version`.
+4. From the checkout, run `qobuz-dl --help`, `qobuz-dl --version`, `qobuz-dl dl --help`, `qobuz-dl fun --help`, `qobuz-dl lucky --help`, `qobuz-dl help dl`, `qdl --help`, and `qdl --version`.
 5. Build exactly one wheel and one source distribution in a temporary directory.
 6. Create a temporary virtual environment and install the exact wheel by its absolute path.
 7. From an empty directory outside the checkout, verify that `qobuz_dl` imports from the temporary environment.
-8. Repeat the seven CLI probes with the installed `qobuz-dl` and `qdl` entry points. Both version commands must print the exact package version.
+8. Repeat the eight CLI probes with the installed `qobuz-dl` and `qdl` entry points. Both version commands must print the exact package version.
 9. Copy the verified wheel and the source distribution to `dist/`.
 
 On success, the runner prints one line on stdout, the verified wheel's SHA-256 digest and `dist/` path in `sha256sum` format, and nothing on stderr. When a gate fails, stderr shows that gate's captured output, a line naming the failed command, and the command that reruns it; the exit status is `1`. A gate that ran inside the temporary workspace reruns as `uv run --frozen python scripts/check.py --verbose`.

@@ -2,6 +2,17 @@
 
 Status: proposed system contract, not implemented CLI behavior. This design builds on the accepted history policy and the open work mapped in the [implementation plan](impl-plan-agent-ergonomics.md). The [current architecture](../../architecture.md) describes the checked-out runtime separately.
 
+## Superseded by the CLI contract
+
+[Issue #90](https://github.com/pascalandy/qobuz-dl/issues/90) applied one command-line contract to every entry point, and it wins over this design on flags and exit codes. The implemented behavior is documented in the [CLI reference](../../cli.md); this section records the differences:
+
+- Exit codes are `0`, `1`, `2`, `75`, `130`, and `143`. There is no exit `3`: partial success with a lasting failure exits `1`, and a run whose failures were all temporary exits `75`. SIGTERM exits `143`
+- `--json` reuses this design's envelope (`schema_version`, `operation`, `status`, `data`, `problems`) for `dl`, `lucky`, `--show-config`, `--purge`, and unattended `--reset`. `status` is `ok`, `failed`, `interrupted`, or `usage_error`, and every usage error, including a missing config in machine mode, is a `usage_error` object with exit `2`
+- `-n/--dry-run` prints candidate destinations from read-only lookups instead of a saved plan; `inspect`, `search`, `plan`, `dl --plan`, budgets, and `--state-dir` remain proposals
+- `--config PATH` and `QOBUZ_DL_CONFIG` select the config file and the database beside it, pending any `--state-dir`
+
+The rest of this document is unchanged and still proposed.
+
 ## Purpose and choice
 
 An agent should be able to establish which program it is driving, inspect the work it will perform, limit that work, and verify the resulting music files. A maintainer should find each decision and its proof in one place.
@@ -116,6 +127,8 @@ Machine stdout contains one JSON object with `schema_version`, `operation`, `sta
 Each problem has a stable code, severity, affected source or item, safe message, retryability, and a recovery hint. Severity distinguishes warnings from errors. Keep the item reason from `DownloadResult`; a human message is not a second status field. Optional media facts use explicit absence when unknown or inapplicable. A zero byte count means zero observed bytes, not unknown size.
 
 Diagnostics and bounded progress go to stderr. JSON contains no ANSI sequences, prompts, raw HTTP bodies, credential-bearing URLs, or tracebacks. `--json` covers parser and startup failures too. Honor `NO_COLOR` for human output. Keep human text free to improve while maintaining the versioned machine contract.
+
+The CLI contract replaced this table; see [Superseded by the CLI contract](#superseded-by-the-cli-contract).
 
 | Exit | Proposed interpretation |
 | --- | --- |
