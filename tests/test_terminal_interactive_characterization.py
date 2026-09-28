@@ -46,7 +46,7 @@ def test_colored_log_messages_reset_after_each_record():
 
 
 def test_interactive_builtin_prompts_return_selected_urls_without_download(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ):
     answers = iter(
         [
@@ -57,13 +57,7 @@ def test_interactive_builtin_prompts_return_selected_urls_without_download(
             "2",  # Lossless quality
         ]
     )
-    prompts = []
-
-    def fake_input(prompt):
-        prompts.append(prompt)
-        return next(answers)
-
-    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
 
     qdl = QobuzDL(directory=tmp_path, interactive_limit=3)
     qdl.search_by_type = lambda query, item_type, limit: [
@@ -75,11 +69,17 @@ def test_interactive_builtin_prompts_return_selected_urls_without_download(
     assert qdl.interactive(download=False) == ["https://play.qobuz.com/track/123"]
     assert qdl.quality == 6
     assert downloaded == []
-    assert "I'll search for" in prompts[0]
-    assert "Items to download" in prompts[2]
+    output = capsys.readouterr()
+    # Prompts and menus go to stderr; stdout stays for results.
+    assert output.out == ""
+    assert "I'll search for [number]: " in output.err
+    assert "Items to download: " in output.err
+    assert "1. alpha beta result\n" in output.err
 
 
-def test_interactive_quality_prompt_defaults_to_current_quality(tmp_path, monkeypatch):
+def test_interactive_quality_prompt_defaults_to_current_quality(
+    tmp_path, monkeypatch, capsys
+):
     answers = iter(
         [
             "1",  # Albums
@@ -89,13 +89,7 @@ def test_interactive_quality_prompt_defaults_to_current_quality(tmp_path, monkey
             "",  # accept current quality default
         ]
     )
-    prompts = []
-
-    def fake_input(prompt):
-        prompts.append(prompt)
-        return next(answers)
-
-    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
 
     qdl = QobuzDL(directory=tmp_path, quality=27, interactive_limit=1)
     qdl.search_by_type = lambda query, item_type, limit: [
@@ -104,12 +98,12 @@ def test_interactive_quality_prompt_defaults_to_current_quality(tmp_path, monkey
 
     assert qdl.interactive(download=False) == ["https://play.qobuz.com/album/123"]
     assert qdl.quality == 27
-    assert "Quality [default 4]" in prompts[-1]
+    assert capsys.readouterr().err.endswith("Quality [default 4]: ")
 
 
 def test_interactive_multiselect_accepts_commas_and_ranges(tmp_path, monkeypatch):
     answers = iter(["2", "alpha beta", "1,3-4", "n", "2"])
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
 
     qdl = QobuzDL(directory=tmp_path, interactive_limit=4)
     qdl.search_by_type = lambda query, item_type, limit: [
@@ -138,7 +132,7 @@ def test_interactive_search_loop_retries_empty_selection_and_dedupes_in_order(
             "",  # accept current quality default
         ]
     )
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
 
     qdl = QobuzDL(directory=tmp_path, quality=6, interactive_limit=4)
     search_calls = []
@@ -170,8 +164,8 @@ def test_interactive_search_loop_retries_empty_selection_and_dedupes_in_order(
     assert qdl.quality == 6
 
 
-def test_interactive_keyboard_interrupt_cancels_cleanly(tmp_path, monkeypatch):
-    def fake_input(prompt):
+def test_interactive_keyboard_interrupt_propagates_without_work(tmp_path, monkeypatch):
+    def fake_input(*args):
         raise KeyboardInterrupt
 
     monkeypatch.setattr("builtins.input", fake_input)
@@ -184,4 +178,5 @@ def test_interactive_keyboard_interrupt_cancels_cleanly(tmp_path, monkeypatch):
         f"download dispatched after keyboard interrupt: {urls}"
     )
 
-    assert qdl.interactive(download=False) is None
+    with pytest.raises(KeyboardInterrupt):
+        qdl.interactive(download=False)

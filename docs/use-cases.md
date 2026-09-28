@@ -58,7 +58,7 @@ The current implementation stores config and duplicate-tracking state under one 
 
 These paths come from the running process: non-Windows systems use the current user's home directory plus `.config`, and Windows uses the nonempty `APPDATA` environment variable. When `APPDATA` is present, `qobuz-dl` keeps the existing `%APPDATA%\qobuz-dl\config.ini` and `%APPDATA%\qobuz-dl\qobuz_dl.db` paths. The CLI does not currently use `XDG_CONFIG_HOME` or macOS `~/Library/Application Support`.
 
-On Windows, `--help`, `--version`, and command-specific help remain available when `APPDATA` is missing or empty. A command that needs the config or database exits with status `1` and writes `APPDATA is not set. Set APPDATA to your Windows application-data directory and retry.` to standard error. The CLI exits before prompts, config or database changes, and network requests.
+On Windows, `--help`, `--version`, and command-specific help remain available when `APPDATA` is missing or empty. A command that needs the config or database exits with status `1` and writes `qobuz-dl: APPDATA is not set. Set APPDATA to your Windows application-data directory and retry.` to standard error. The CLI exits before prompts, config or database changes, and network requests.
 
 The config file stores:
 
@@ -139,13 +139,7 @@ Show the config path, database path, and redacted config values:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --show-config
 ```
 
-Short form:
-
-```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -sc
-```
-
-Note: this confirms local configuration exists. If no config exists yet, normal first-run config creation runs before the paths and redacted values are printed. `--show-config` exits before initializing the Qobuz client, so it is not a dedicated login-validation command. Account access is validated when a Qobuz command initializes and talks to Qobuz.
+Note: this confirms local configuration exists. If no config exists yet, normal first-run config creation runs in a terminal before the paths and redacted values are printed; without a terminal, the command exits `2` and suggests `--reset`. `--show-config` exits before initializing the Qobuz client, so it is not a dedicated login-validation command. Account access is validated when a Qobuz command initializes and talks to Qobuz.
 
 ### Reset authentication/config
 
@@ -309,7 +303,7 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type 
 Download the first N matches:
 
 ```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type album --number 3 "search terms"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type album --limit 3 "search terms"
 ```
 
 ## 5. Download preferences and configuration
@@ -394,8 +388,8 @@ Short forms:
 
 ```sh
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/ALBUM_ID \
-  -ff "{albumartist} - {album} ({year})" \
-  -tf "{tracknumber}. {tracktitle}"
+  --folder-format "{albumartist} - {album} ({year})" \
+  --track-format "{tracknumber}. {tracktitle}"
 ```
 
 Common pattern keys include:
@@ -488,7 +482,7 @@ Short form:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -p
 ```
 
-`--purge` is idempotent for scripts. When the database exists, it exits with status `0` and writes `The database was deleted.` to standard error. When the database is already absent, it exits with status `0` and writes `The database is already absent.` to standard error. A deletion failure exits nonzero, reports the database path, and advises checking its permissions. Purge does not create `config.ini` or initialize the Qobuz client.
+`--purge` is idempotent for scripts: it exits with status `0` whether it deleted the database or found it already absent, and prints nothing. With `--verbose`, it writes `The database was deleted.` or `The database is already absent.` to standard error. A deletion failure exits `1`, reports the database path, and advises checking its permissions. Purge does not create `config.ini` or initialize the Qobuz client.
 
 ### View or edit persistent defaults
 

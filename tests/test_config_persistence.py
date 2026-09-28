@@ -8,8 +8,19 @@ import pytest
 import qobuz_dl.cli as cli
 
 
+class _QuietRuntime:
+    def __init__(self, directory, *args, **kwargs):
+        self.directory = directory
+
+    def initialize_client(self, *args):
+        pass
+
+    def download_sources(self, sources):
+        pass
+
+
 @pytest.fixture
-def config_file(monkeypatch, tmp_path):
+def config_file(monkeypatch, tmp_path, terminal_stdin):
     path = tmp_path / "qobuz-dl" / "config.ini"
     database = path.parent / "qobuz_dl.db"
     monkeypatch.setattr(
@@ -18,7 +29,7 @@ def config_file(monkeypatch, tmp_path):
         lambda: (str(path), str(database)),
     )
     answers = iter(["new@example.com", "My Music", "27"])
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: "password")
 
     class FakeBundle:
@@ -33,25 +44,25 @@ def config_file(monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits required")
-@pytest.mark.parametrize("arguments", [[], ["--reset"]])
+@pytest.mark.parametrize("arguments", [["--show-config"], ["--reset"]])
 def test_new_config_is_private_with_permissive_umask(
     monkeypatch, config_file, arguments
 ):
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", *arguments])
     previous_umask = os.umask(0)
     try:
-        with pytest.raises(SystemExit) as exc:
-            cli.main()
+        assert cli.main() == 0
     finally:
         os.umask(previous_umask)
 
-    assert exc.value.code in (None, 0)
     assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
     assert stat.S_IMODE(config_file.parent.stat().st_mode) == 0o700
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits required")
-@pytest.mark.parametrize("arguments", [[], ["--show-config"]])
+@pytest.mark.parametrize(
+    "arguments", [["dl", "https://play.qobuz.com/album/abc1"], ["--show-config"]]
+)
 def test_startup_repairs_permissions_without_rewriting_config(
     monkeypatch, config_file, arguments
 ):
@@ -70,11 +81,10 @@ def test_startup_repairs_permissions_without_rewriting_config(
     config_file.write_bytes(original)
     config_file.chmod(0o644)
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", *arguments])
+    monkeypatch.setattr(cli, "QobuzDL", _QuietRuntime)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    assert cli.main() == 0
 
-    assert exc.value.code in (None, 0)
     assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
     assert stat.S_IMODE(config_file.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(config_file.parent.parent.stat().st_mode) == ancestor_mode
@@ -124,21 +134,16 @@ def test_failed_reset_preserves_previous_config_and_removes_partial_write(
         monkeypatch.setattr(cli.os, operation, fail_operation)
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--reset"])
 
-    with pytest.raises(
-        KeyboardInterrupt if failure is KeyboardInterrupt else SystemExit
-    ) as exc:
-        cli.main()
+    assert cli.main() == (130 if failure is KeyboardInterrupt else 1)
 
     assert config_file.read_bytes() == original
     assert sorted(path.name for path in config_file.parent.iterdir()) == ["config.ini"]
     if os.name == "posix":
         assert write_modes == ([] if operation == "chmod" else [0o600])
     output = capsys.readouterr()
-    diagnostic = f"{exc.value}\n{output.out}\n{output.err}\n{caplog.text}"
+    diagnostic = f"{output.out}\n{output.err}\n{caplog.text}"
     assert "new-secret-one" not in diagnostic
     assert "new@example.com" not in diagnostic
-    if failure is not KeyboardInterrupt:
-        assert exc.value.code not in (None, 0)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits required")
@@ -163,10 +168,8 @@ def test_successful_reset_preserves_prompt_values_and_database(
     database.write_bytes(b"existing duplicate tracking state")
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--reset"])
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    assert cli.main() == 0
 
-    assert exc.value.code in (None, 0)
     config = configparser.ConfigParser()
     config.read(config_file)
     values = config["DEFAULT"]

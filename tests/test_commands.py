@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-import traceback
 from pathlib import Path
 
 import pytest
@@ -9,7 +8,6 @@ import pytest
 import qobuz_dl.cli as cli
 from qobuz_dl import http
 from qobuz_dl.cli import _quality_fallback_enabled, _redacted_config_text
-from qobuz_dl.color import GREEN, RESET
 from qobuz_dl.commands import QUALITY_CHOICES, qobuz_dl_args
 from qobuz_dl.core import RunItem
 from qobuz_dl.downloader import DownloadResult
@@ -87,14 +85,11 @@ def _run_config_failure(monkeypatch, capsys, caplog, config_file, argv):
         argv,
         _UnexpectedRuntime,
     )
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+
+    assert cli.main() == 1
 
     output = capsys.readouterr()
-    formatted_exception = "".join(
-        traceback.format_exception(exc.type, exc.value, exc.tb)
-    )
-    return f"{formatted_exception}\n{output.out}\n{output.err}\n{caplog.text}"
+    return f"{output.out}\n{output.err}\n{caplog.text}"
 
 
 def test_parser_accepts_top_level_flags():
@@ -169,34 +164,30 @@ def test_help_and_version_do_not_initialize_config(monkeypatch, tmp_path, argv):
     assert not config_file.exists()
 
 
-def test_no_argument_first_run_creates_config_then_prints_help(
-    monkeypatch, tmp_path, capsys
+@pytest.mark.parametrize("argv", [[], ["-v"], ["--no-color", "--debug"]])
+def test_bare_invocation_exits_2_with_a_first_run_hint(
+    monkeypatch, capsys, terminal_stdin, argv
 ):
-    config_path = tmp_path / "config"
-    config_file = config_path / "config.ini"
-    reset_calls = []
-
-    class UnexpectedClient:
-        def __init__(self, *args, **kwargs):
-            pytest.fail("no-argument startup must not initialize the Qobuz client")
-
-    def fake_reset(target):
-        reset_calls.append(target)
-        _write_valid_config(Path(target))
-
-    monkeypatch.setattr(sys, "argv", ["qobuz-dl"])
-    _stub_config_paths(monkeypatch, config_file)
-    monkeypatch.setattr(cli, "_reset_config", fake_reset)
-    monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", *argv])
+    monkeypatch.setattr(
+        cli,
+        "_resolve_config_paths",
+        lambda: pytest.fail("a bare invocation must not resolve config"),
+    )
+    monkeypatch.setattr(cli, "_reset_config", lambda target: pytest.fail("reset"))
 
     with pytest.raises(SystemExit) as exc:
         cli.main()
 
-    output = capsys.readouterr().out
-    assert exc.value.code == 0
-    assert reset_calls == [str(config_file)]
-    assert config_file.is_file()
-    assert "Download and organize Qobuz music" in output
+    output = capsys.readouterr()
+    assert exc.value.code == 2
+    assert output.out == ""
+    assert output.err.startswith("usage: qobuz-dl ")
+    assert output.err.endswith(
+        "qobuz-dl: error: choose a command, such as 'qobuz-dl dl URL'; "
+        "for first-time setup, run 'qobuz-dl --reset'\n"
+        "run 'qobuz-dl --help' for usage\n"
+    )
 
 
 def test_parser_accepts_download_command_with_common_options():
@@ -218,7 +209,7 @@ def test_parser_accepts_download_command_with_common_options():
     assert args.SOURCE == ["https://play.qobuz.com/album/example"]
     assert args.quality == 27
     assert args.directory == "Music"
-    assert args.no_db is True
+    assert args.db is False
 
 
 def test_parser_accepts_interactive_command_limit():
@@ -234,13 +225,14 @@ def test_parser_accepts_lucky_command_query_and_type():
     parser = qobuz_dl_args()
 
     args = parser.parse_args(
-        ["lucky", "joy", "division", "--type", "artist", "--number", "2"]
+        ["lucky", "joy", "division", "--type", "artist", "--limit", "2"]
     )
 
     assert args.command == "lucky"
     assert args.QUERY == ["joy", "division"]
     assert args.type == "artist"
-    assert args.number == 2
+    assert args.limit == 2
+    assert parser.parse_args(["lucky", "joy", "--number", "3"]).limit == 3
 
 
 def test_top_level_help_is_complete_and_agent_readable(capsys):
@@ -267,13 +259,13 @@ def test_subcommand_help_documents_supported_inputs_and_flags(capsys):
     with pytest.raises(SystemExit) as exc:
         parser.parse_args(["dl", "--help"])
 
-    output = capsys.readouterr().out
+    output = " ".join(capsys.readouterr().out.split())
     assert exc.value.code == 0
     assert "Qobuz album/track/artist/label/playlist URLs" in output
     assert "Last.fm playlist URLs" in output
     assert "local text files containing one URL per line" in output
     assert "audio quality: 5=MP3 320" in output
-    assert "disable duplicate tracking for this run" in output
+    assert "disables duplicate tracking for this run" in output
     assert "folder naming pattern" in output
 
 
@@ -321,11 +313,11 @@ def test_version_flag_exits_successfully(capsys):
     assert output.startswith("qobuz-dl ")
 
 
-def test_quality_fallback_is_disabled_by_flag_or_config():
-    assert _quality_fallback_enabled(False, False) is True
-    assert _quality_fallback_enabled(True, False) is False
-    assert _quality_fallback_enabled(False, True) is False
-    assert _quality_fallback_enabled(True, True) is False
+def test_quality_fallback_flag_overrides_config_either_way():
+    assert _quality_fallback_enabled(None, False) is True
+    assert _quality_fallback_enabled(None, True) is False
+    assert _quality_fallback_enabled(False, False) is False
+    assert _quality_fallback_enabled(True, True) is True
 
 
 def test_show_config_redacts_sensitive_values(tmp_path):
@@ -367,7 +359,7 @@ def test_reset_config_creates_parent_directory(monkeypatch, tmp_path):
         def get_secrets(self):
             return {"america": "secret-one", "europe": "secret-two"}
 
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: "hidden-password")
     monkeypatch.setattr(cli, "Bundle", FakeBundle)
 
@@ -397,7 +389,7 @@ def test_reset_config_leaves_duplicate_database_in_place(monkeypatch, tmp_path):
         def get_secrets(self):
             return {"america": "secret-one", "europe": "secret-two"}
 
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: "hidden-password")
     monkeypatch.setattr(cli, "Bundle", FakeBundle)
 
@@ -406,7 +398,9 @@ def test_reset_config_leaves_duplicate_database_in_place(monkeypatch, tmp_path):
     assert database_file.read_bytes() == b"existing duplicate state"
 
 
-def test_reset_exits_before_client_initialization(monkeypatch, tmp_path):
+def test_reset_exits_before_client_initialization(
+    monkeypatch, tmp_path, terminal_stdin
+):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
     _write_valid_config(config_file)
@@ -425,14 +419,12 @@ def test_reset_exits_before_client_initialization(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    assert cli.main() == 0
 
-    assert exc.value.code == "reset-complete"
     assert reset_calls == [str(config_file)]
 
 
-def test_first_run_reset_only_resets_once(monkeypatch, tmp_path):
+def test_first_run_reset_only_resets_once(monkeypatch, tmp_path, terminal_stdin):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
     reset_calls = []
@@ -450,10 +442,8 @@ def test_first_run_reset_only_resets_once(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    assert cli.main() == 0
 
-    assert exc.value.code == "reset-complete"
     assert reset_calls == [str(config_file)]
 
 
@@ -471,11 +461,9 @@ def test_show_config_exits_before_client_initialization(monkeypatch, tmp_path, c
     _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    assert cli.main() == 0
 
     output = capsys.readouterr().out
-    assert exc.value.code is None
     assert f"Configuration: {config_file}" in output
     assert f"Database: {database_file}" in output
     assert "user@example.com" not in output
@@ -486,8 +474,17 @@ def test_show_config_exits_before_client_initialization(monkeypatch, tmp_path, c
     assert "secrets = <redacted>" in output
 
 
-def test_show_config_with_purge_does_not_initialize_first_run_config(
-    monkeypatch, tmp_path, capsys
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--show-config", "--purge"],
+        ["--reset", "--purge"],
+        ["--purge", "dl", "https://play.qobuz.com/album/a1"],
+        ["--show-config", "lucky", "some query"],
+    ],
+)
+def test_conflicting_actions_exit_2_without_touching_config(
+    monkeypatch, tmp_path, capsys, argv
 ):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
@@ -502,7 +499,7 @@ def test_show_config_with_purge_does_not_initialize_first_run_config(
     def fail_if_reset(target):
         pytest.fail(f"purge must not reset config: {target}")
 
-    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--show-config", "--purge"])
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", *argv])
     _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
@@ -510,16 +507,16 @@ def test_show_config_with_purge_does_not_initialize_first_run_config(
     with pytest.raises(SystemExit) as exc:
         cli.main()
 
-    output = capsys.readouterr().out
-    assert exc.value.code is None
+    output = capsys.readouterr()
+    assert exc.value.code == 2
+    assert output.out == ""
+    assert " cannot be combined with " in output.err
     assert not config_file.exists()
     assert database_file.exists()
-    assert f"Configuration: {config_file}" in output
-    assert f"Database: {database_file}" in output
 
 
 def test_download_first_run_creates_config_once_then_initializes_client(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, terminal_stdin
 ):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
@@ -556,7 +553,7 @@ def test_download_first_run_creates_config_once_then_initializes_client(
     monkeypatch.setattr(cli, "_reset_config", fake_reset)
     monkeypatch.setattr(cli, "QobuzDL", FakeQobuzDL)
 
-    cli.main()
+    assert cli.main() == 0
 
     assert reset_calls == [str(config_file)]
     assert initialized[0] == (
@@ -583,7 +580,7 @@ def test_download_first_run_creates_config_once_then_initializes_client(
 
 
 def test_download_corrupted_config_reports_recovery_without_client(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, capsys
 ):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
@@ -606,11 +603,10 @@ def test_download_corrupted_config_reports_recovery_without_client(
     _stub_config_paths(monkeypatch, config_file)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    assert cli.main() == 1
 
-    message = str(exc.value)
-    assert "Your config file is corrupted:" in message
+    message = capsys.readouterr().err
+    assert message.startswith("qobuz-dl: Your config file is corrupted:")
     assert (
         "Run 'uvx --from git+https://github.com/pascalandy/qobuz-dl.git "
         "qobuz-dl -r' to fix this"
@@ -672,7 +668,7 @@ def test_invalid_config_quality_is_safe_and_stops_before_runtime(
 
 
 def test_invalid_config_limit_is_safe_and_stops_before_runtime(
-    monkeypatch, tmp_path, capsys, caplog
+    monkeypatch, tmp_path, capsys, caplog, terminal_stdin
 ):
     config_file = tmp_path / "config" / "config.ini"
     _write_valid_config(config_file)
@@ -883,7 +879,9 @@ def test_no_cover_configparser_boolean_vocabulary_is_accepted(
 
 
 @pytest.mark.parametrize("limit", [0, -5])
-def test_zero_and_negative_config_limits_are_preserved(monkeypatch, tmp_path, limit):
+def test_zero_and_negative_config_limits_are_preserved(
+    monkeypatch, tmp_path, terminal_stdin, limit
+):
     config_file = tmp_path / "config" / "config.ini"
     _write_valid_config(config_file)
     _replace_config_value(config_file, "default_limit", str(limit))
@@ -998,7 +996,7 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
     ],
 )
 def test_purge_only_removes_database_and_exits_successfully(
-    monkeypatch, tmp_path, caplog, database_exists, message
+    monkeypatch, tmp_path, capsys, database_exists, message
 ):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
@@ -1014,19 +1012,18 @@ def test_purge_only_removes_database_and_exits_successfully(
         def __init__(self, *args, **kwargs):
             pytest.fail("purge must not initialize the Qobuz client")
 
-    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--purge"])
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "--purge", "--verbose"])
     _stub_config_paths(monkeypatch, config_file, database_file)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
-    result = cli.main()
+    assert cli.main() == 0
 
-    assert result is None
     assert not database_file.exists()
     assert media_file.read_bytes() == b"local media"
-    assert caplog.messages == [f"{GREEN}{message}{RESET}"]
+    assert capsys.readouterr() == ("", f"{message}\n")
 
 
-def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path, caplog):
+def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path, capsys):
     config_path = tmp_path / "config"
     config_file = config_path / "config.ini"
     database_file = config_path / "qobuz_dl.db"
@@ -1045,12 +1042,11 @@ def test_first_run_purge_does_not_initialize_config(monkeypatch, tmp_path, caplo
     monkeypatch.setattr(cli, "_reset_config", fail_if_reset)
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
 
-    result = cli.main()
+    assert cli.main() == 0
 
-    assert result is None
     assert not config_file.exists()
     assert not database_file.exists()
-    assert caplog.messages == [f"{GREEN}The database was deleted.{RESET}"]
+    assert capsys.readouterr() == ("", "")
 
 
 def test_real_console_script_purge_is_idempotent_success_without_config(tmp_path):
@@ -1081,12 +1077,12 @@ def test_real_console_script_purge_is_idempotent_success_without_config(tmp_path
 
     assert present.returncode == 0
     assert present.stdout == ""
-    assert "The database was deleted." in present.stderr
+    assert present.stderr == ""
     assert not database_file.exists()
     assert not config_file.exists()
 
     absent = subprocess.run(
-        [str(console_script), "--purge"],
+        [str(console_script), "--purge", "--verbose"],
         env=environment,
         text=True,
         capture_output=True,
@@ -1095,13 +1091,13 @@ def test_real_console_script_purge_is_idempotent_success_without_config(tmp_path
 
     assert absent.returncode == 0
     assert absent.stdout == ""
-    assert "The database is already absent." in absent.stderr
+    assert absent.stderr == "The database is already absent.\n"
     assert not database_file.exists()
     assert not config_file.exists()
 
 
 def test_purge_deletion_error_exits_nonzero_without_initialization(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, capsys
 ):
     config_path = tmp_path / "missing-config"
     config_file = config_path / "config.ini"
@@ -1130,14 +1126,14 @@ def test_purge_deletion_error_exits_nonzero_without_initialization(
     monkeypatch.setattr(cli, "QobuzDL", UnexpectedClient)
     monkeypatch.setattr(cli.os, "remove", deny_removal)
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    assert cli.main() == 1
 
-    assert exc.value.code == (
-        f"Unable to delete database at {database_file}. Check its permissions."
+    error = capsys.readouterr().err
+    assert error == (
+        f"qobuz-dl: Unable to delete database at {database_file}. "
+        "Check its permissions.\n"
     )
-    assert exc.value.code != 0
-    assert raw_error not in str(exc.value)
+    assert raw_error not in error
     assert not config_path.exists()
     assert not config_file.exists()
 
@@ -1171,6 +1167,10 @@ def test_command_dispatch_preserves_unrelated_hidden_temporaries(tmp_path, outco
         with pytest.raises(RuntimeError) as exc_info:
             cli._handle_commands(FakeQobuz(), arguments, ["source"])
         assert exc_info.value is runtime_error
+    elif outcome == "keyboard-interrupt":
+        # The CLI no longer swallows an interrupt; main() turns it into 130.
+        with pytest.raises(KeyboardInterrupt):
+            cli._handle_commands(FakeQobuz(), arguments, ["source"])
     else:
         cli._handle_commands(FakeQobuz(), arguments, ["source"])
 
@@ -1399,7 +1399,7 @@ def test_lucky_downloads_its_results_through_validated_sources(monkeypatch, tmp_
 
 
 def test_fun_downloads_the_interactive_queue_through_the_result_path(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, terminal_stdin
 ):
     config_file = tmp_path / "config" / "config.ini"
     _write_valid_config(config_file)

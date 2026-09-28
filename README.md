@@ -83,7 +83,7 @@ See [Use cases](docs/use-cases.md) for library-building workflows, and [Examples
 ## Usage
 
 ```text
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [-r | -p | --show-config] [-v] [--debug] [--no-color] [--no-input] [--version] {fun,dl,lucky,help} ...
 ```
 
 Commands:
@@ -91,6 +91,7 @@ Commands:
 * `fun` — interactively search Qobuz and queue downloads
 * `dl` — download Qobuz/Last.fm URLs or URLs from a text file
 * `lucky` — search Qobuz and download the first matching results
+* `help` — show help for a command; `help dl` matches `dl --help`
 
 Run command-level help for detailed options:
 

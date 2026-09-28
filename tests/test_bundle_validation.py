@@ -1,5 +1,6 @@
 import base64
 import configparser
+import io
 import sys
 import traceback
 
@@ -270,6 +271,11 @@ def test_three_seed_order_starts_with_second_then_preserves_discovery(monkeypatc
     ]
 
 
+class _Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
 def configure_cli(monkeypatch, tmp_path, records, arguments):
     config_file = tmp_path / "qobuz-dl" / "config.ini"
     database = config_file.parent / "qobuz_dl.db"
@@ -279,8 +285,9 @@ def configure_cli(monkeypatch, tmp_path, records, arguments):
         lambda: (str(config_file), str(database)),
     )
     monkeypatch.setattr(sys, "argv", ["qobuz-dl", *arguments])
+    monkeypatch.setattr(sys, "stdin", _Terminal())
     answers = iter(["user@example.com", "My Music", "27"])
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: "password")
     install_fake_http(monkeypatch, bundle_js(*records))
 
@@ -299,23 +306,23 @@ def invalid_bundle_records(sentinel):
     return credential_records([("america", tuple(america)), ("europe", europe)])
 
 
-def test_invalid_first_run_does_not_create_configuration(monkeypatch, tmp_path):
+def test_invalid_first_run_does_not_create_configuration(monkeypatch, tmp_path, capsys):
     records = invalid_bundle_records("invalid-first-run-sentinel")
-    config_file, database = configure_cli(monkeypatch, tmp_path, records, [])
+    config_file, database = configure_cli(
+        monkeypatch, tmp_path, records, ["dl", "https://play.qobuz.com/album/abc1"]
+    )
 
-    with pytest.raises(SystemExit) as exc_info:
-        cli.main()
+    assert cli.main() == 1
 
-    assert exc_info.value.code not in (None, 0)
-    assert "Unable to create configuration from the Qobuz web bundle:" in str(
-        exc_info.value
+    assert "Unable to create configuration from the Qobuz web bundle:" in (
+        capsys.readouterr().err
     )
     assert not config_file.exists()
     assert not database.exists()
 
 
 def test_invalid_reset_preserves_bytes_and_reports_safe_bundle_failure(
-    monkeypatch, tmp_path, caplog
+    monkeypatch, tmp_path, caplog, capsys
 ):
     sentinel = "private-bundle-sentinel"
     records = invalid_bundle_records(sentinel)
@@ -326,12 +333,10 @@ def test_invalid_reset_preserves_bytes_and_reports_safe_bundle_failure(
     config_file.write_bytes(config_bytes)
     database.write_bytes(database_bytes)
 
-    with pytest.raises(SystemExit) as exc_info:
-        cli.main()
+    assert cli.main() == 1
 
-    rendered = "".join(traceback.format_exception(exc_info.value))
-    diagnostic = f"{exc_info.value}\n{caplog.text}\n{rendered}"
-    assert exc_info.value.code not in (None, 0)
+    output = capsys.readouterr()
+    diagnostic = f"{output.out}\n{output.err}\n{caplog.text}"
     assert "Unable to create configuration from the Qobuz web bundle:" in diagnostic
     assert "Configuration was not saved." in diagnostic
     assert "Config file updated" not in diagnostic
@@ -355,10 +360,8 @@ def test_valid_bundle_persists_exact_app_id_and_ordered_secrets(monkeypatch, tmp
         ["--reset"],
     )
 
-    with pytest.raises(SystemExit) as exc_info:
-        cli.main()
+    assert cli.main() == 0
 
-    assert exc_info.value.code in (None, 0)
     config = configparser.ConfigParser()
     config.read(config_file, encoding="utf-8")
     assert config["DEFAULT"]["app_id"] == APP_ID

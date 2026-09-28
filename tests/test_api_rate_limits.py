@@ -510,8 +510,8 @@ def test_cfg_setup_stops_before_trying_the_next_secret_after_rate_limit():
     assert len(session.calls) == 3
 
 
-def test_cli_initialization_exits_with_sanitized_rate_limit_message(
-    tmp_path, monkeypatch
+def test_cli_initialization_rate_limit_exits_75_with_sanitized_message(
+    tmp_path, monkeypatch, capsys
 ):
     config_file = tmp_path / "config.ini"
     config_file.write_text(
@@ -558,11 +558,13 @@ def test_cli_initialization_exits_with_sanitized_rate_limit_message(
     )
     monkeypatch.setattr(cli, "QobuzDL", RateLimitedQobuzDL)
 
-    with pytest.raises(SystemExit) as exc_info:
-        cli.main()
+    assert cli.main() == 75
 
-    message = str(exc_info.value)
-    assert "Qobuz API rate limit retries exhausted." in message
+    message = capsys.readouterr().err
+    assert message == (
+        "qobuz-dl: Qobuz API rate limit retries exhausted.\n"
+        "retry: qobuz-dl dl https://play.qobuz.com/album/album1\n"
+    )
     assert "password-sentinel" not in message
     assert "app-secret-sentinel" not in message
 

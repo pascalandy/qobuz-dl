@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from qobuz_dl import downloader, http, qopy
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import CYAN, OFF, RED, RESET, YELLOW
-from qobuz_dl.console import ExitCode
+from qobuz_dl.console import ExitCode, prompt, say
 from qobuz_dl.db import DownloadHistory
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.sanitize import sanitize_filename
@@ -337,29 +337,29 @@ class LastFmPlaylistParser(HTMLParser):
         self._reset_row(active=False)
 
 
-def _select_one(options, prompt, *, label=str, default_index=None):
+def _select_one(options, question, *, label=str, default_index=None):
     for index, option in enumerate(options, start=1):
         default_marker = " [default]" if default_index == index - 1 else ""
-        print(f"{index}. {label(option)}{default_marker}")
+        say(f"{index}. {label(option)}{default_marker}")
     while True:
-        choice = input(prompt).strip()
+        choice = prompt(question).strip()
         if not choice and default_index is not None:
             return options[default_index]
         try:
             index = int(choice)
         except ValueError:
-            print("Enter a number from the list.")
+            say("Enter a number from the list.")
             continue
         if 1 <= index <= len(options):
             return options[index - 1]
-        print("Enter a number from the list.")
+        say("Enter a number from the list.")
 
 
-def _select_many(options, prompt, *, label=str):
+def _select_many(options, question, *, label=str):
     for index, option in enumerate(options, start=1):
-        print(f"{index}. {label(option)}")
+        say(f"{index}. {label(option)}")
     while True:
-        raw = input(prompt).strip()
+        raw = prompt(question).strip()
         if not raw:
             return []
         selected = []
@@ -374,7 +374,7 @@ def _select_many(options, prompt, *, label=str):
                 else:
                     selected.append(int(part))
         except ValueError:
-            print("Enter comma-separated numbers or ranges like 1,3-5.")
+            say("Enter comma-separated numbers or ranges like 1,3-5.")
             continue
         if all(1 <= index <= len(options) for index in selected):
             deduped = []
@@ -382,17 +382,17 @@ def _select_many(options, prompt, *, label=str):
                 if index not in deduped:
                     deduped.append(index)
             return [options[index - 1] for index in deduped]
-        print("Enter numbers from the list.")
+        say("Enter numbers from the list.")
 
 
-def _confirm(prompt):
+def _confirm(question):
     while True:
-        answer = input(f"{prompt} [y/N] ").strip().lower()
+        answer = prompt(f"{question} [y/N] ").strip().lower()
         if answer in {"y", "yes"}:
             return True
         if answer in {"", "n", "no"}:
             return False
-        print("Enter yes or no.")
+        say("Enter yes or no.")
 
 
 class QobuzDL:
@@ -758,71 +758,65 @@ class QobuzDL:
             {"q_string": "Hi-Res > 96 kHz", "q": 27},
         ]
 
-        try:
-            item_types = ["Albums", "Tracks", "Artists", "Playlists"]
-            selected_type = _select_one(
-                item_types,
-                "I'll search for [number]: ",
-            )[:-1].lower()
-            logger.info(f"{YELLOW}Ok, we'll search for {selected_type}s{RESET}")
-            final_url_list = []
-            while True:
-                query = input(f"{CYAN}Enter your search: [Ctrl + c to quit]{RESET}\n- ")
-                logger.info(f"{YELLOW}Searching...{RESET}")
-                options = self.search_by_type(
-                    query, selected_type, self.interactive_limit
-                )
-                if not options:
-                    logger.info(f"{OFF}Nothing found{RESET}")
-                    continue
-                print(
-                    f'*** RESULTS FOR "{query.title()}" ***\n'
-                    "Select item numbers to add to the queue. "
-                    "Use commas and ranges (example: 1,3-5).\n"
-                    "Press Enter without a selection to try another search."
-                )
-                selected_items = _select_many(
-                    options,
-                    "Items to download: ",
-                    label=lambda option: option.get("text"),
-                )
-                if selected_items:
-                    final_url_list.extend(item["url"] for item in selected_items)
-                    if not _confirm(
-                        "Items were added to queue to be downloaded. Keep searching?"
-                    ):
-                        break
-                else:
-                    logger.info(f"{YELLOW}Ok, try again...{RESET}")
-                    continue
-            if final_url_list:
-                print(
-                    "Select the quality (the quality will be automatically "
-                    "downgraded if the selected is not found)."
-                )
-                current_quality = int(self.quality)
-                default_quality_index = next(
-                    (
-                        index
-                        for index, quality in enumerate(qualities)
-                        if quality["q"] == current_quality
-                    ),
-                    1,
-                )
-                self.quality = _select_one(
-                    qualities,
-                    f"Quality [default {default_quality_index + 1}]: ",
-                    default_index=default_quality_index,
-                    label=lambda option: option.get("q_string"),
-                )["q"]
+        item_types = ["Albums", "Tracks", "Artists", "Playlists"]
+        selected_type = _select_one(
+            item_types,
+            "I'll search for [number]: ",
+        )[:-1].lower()
+        say(f"{YELLOW}Ok, we'll search for {selected_type}s{RESET}")
+        final_url_list = []
+        while True:
+            query = prompt(f"{CYAN}Enter your search: [Ctrl + c to quit]{RESET}\n- ")
+            say(f"{YELLOW}Searching...{RESET}")
+            options = self.search_by_type(query, selected_type, self.interactive_limit)
+            if not options:
+                say(f"{OFF}Nothing found{RESET}")
+                continue
+            say(
+                f'*** RESULTS FOR "{query.title()}" ***\n'
+                "Select item numbers to add to the queue. "
+                "Use commas and ranges (example: 1,3-5).\n"
+                "Press Enter without a selection to try another search."
+            )
+            selected_items = _select_many(
+                options,
+                "Items to download: ",
+                label=lambda option: option.get("text"),
+            )
+            if selected_items:
+                final_url_list.extend(item["url"] for item in selected_items)
+                if not _confirm(
+                    "Items were added to queue to be downloaded. Keep searching?"
+                ):
+                    break
+            else:
+                say(f"{YELLOW}Ok, try again...{RESET}")
+                continue
+        if final_url_list:
+            say(
+                "Select the quality (the quality will be automatically "
+                "downgraded if the selected is not found)."
+            )
+            current_quality = int(self.quality)
+            default_quality_index = next(
+                (
+                    index
+                    for index, quality in enumerate(qualities)
+                    if quality["q"] == current_quality
+                ),
+                1,
+            )
+            self.quality = _select_one(
+                qualities,
+                f"Quality [default {default_quality_index + 1}]: ",
+                default_index=default_quality_index,
+                label=lambda option: option.get("q_string"),
+            )["q"]
 
-                if download:
-                    self.download_list_of_urls(final_url_list)
+            if download:
+                self.download_list_of_urls(final_url_list)
 
-                return final_url_list
-        except KeyboardInterrupt:
-            logger.info(f"{YELLOW}Bye")
-            return
+            return final_url_list
 
     def download_lastfm_pl(self, playlist_url):
         # Apparently, last fm API doesn't have a playlist endpoint. If you

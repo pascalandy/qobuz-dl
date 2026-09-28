@@ -791,7 +791,10 @@ class Download:
                     self.embed_art,
                 )
             except Exception as e:
-                logger.error(f"{RED}Error tagging the file: {e}", exc_info=True)
+                logger.error(
+                    f"{RED}Error tagging the file: {e}",
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
                 finalized_paths = (final_file,) if os.path.isfile(final_file) else ()
                 return self._emit(
                     "track",
@@ -896,7 +899,10 @@ class Download:
                     finalize=False,
                 )
             except Exception as error:
-                logger.error(f"{RED}Error tagging the file: {error}", exc_info=True)
+                logger.error(
+                    f"{RED}Error tagging the file: {error}",
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
                 raise _TransactionFailure("tagging_error") from error
 
             transaction.fsync_staged()

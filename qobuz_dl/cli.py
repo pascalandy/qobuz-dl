@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import tempfile
+import traceback
 from contextlib import suppress
 from dataclasses import dataclass
 from io import StringIO
@@ -12,8 +13,27 @@ from io import StringIO
 from qobuz_dl import http
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
-from qobuz_dl.commands import QUALITY_CHOICES, RESET_COMMAND, qobuz_dl_args
-from qobuz_dl.console import subcommand_parsers
+from qobuz_dl.commands import (
+    DEBUG_ENV,
+    PROG,
+    QUALITY_CHOICES,
+    RESET_COMMAND,
+    qobuz_dl_args,
+)
+from qobuz_dl.console import (
+    ExitCode,
+    color_enabled,
+    configure_prompts,
+    env_flag,
+    format_command,
+    interruption_exit_code,
+    prompt,
+    redact,
+    render,
+    sigterm_raises,
+    stderr_logging,
+    subcommand_parsers,
+)
 from qobuz_dl.core import (
     QobuzDL,
     RunProblem,
@@ -23,12 +43,17 @@ from qobuz_dl.core import (
     parse_source_url,
 )
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK, validate_cover_options
-from qobuz_dl.exceptions import ApiRateLimitError, BundleError
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
+from qobuz_dl.exceptions import (
+    ApiRateLimitError,
+    AuthenticationError,
+    BundleError,
+    IneligibleError,
+    InvalidAppIdError,
+    InvalidAppSecretError,
 )
+
+logger = logging.getLogger(__name__)
+PACKAGE_LOGGER = "qobuz_dl"
 
 SENSITIVE_CONFIG_KEYS = {
     "app_id",
@@ -154,9 +179,24 @@ def _classify_startup(arguments):
     )
 
 
-def _ensure_config_exists(config_file):
+class _Failure(Exception):
+    """Ends the run: ``qobuz-dl: message``, then ``hint`` when given."""
+
+    def __init__(self, message, *, hint=None, code=ExitCode.FAILURE):
+        super().__init__(message)
+        self.hint = hint
+        self.code = code
+
+
+class _MissingConfig(Exception):
+    pass
+
+
+def _ensure_config_exists(config_file, *, interactive=True):
     _secure_config_path(config_file)
     if not os.path.isfile(config_file):
+        if not interactive:
+            raise _MissingConfig
         _reset_config(config_file)
 
 
@@ -246,17 +286,17 @@ def _redacted_config_text(config_file):
 
 def _reset_config(config_file):
     _secure_config_path(config_file)
-    logging.info(f"{YELLOW}Creating config file: {config_file}")
+    logger.info(f"{YELLOW}Creating config file: {config_file}")
     config = configparser.ConfigParser()
-    config["DEFAULT"]["email"] = input("Enter your email:\n- ")
+    config["DEFAULT"]["email"] = prompt("Enter your email:\n- ")
     password = getpass.getpass("Enter your password (input is hidden): ")
     config["DEFAULT"]["password"] = hashlib.md5(password.encode("utf-8")).hexdigest()
     config["DEFAULT"]["default_folder"] = (
-        input("Folder for downloads (leave empty for default 'Qobuz Downloads')\n- ")
+        prompt("Folder for downloads (leave empty for default 'Qobuz Downloads')\n- ")
         or "Qobuz Downloads"
     )
     config["DEFAULT"]["default_quality"] = (
-        input(
+        prompt(
             "Download quality (5, 6, 7, 27) "
             "[320, LOSSLESS, 24B <96KHZ, 24B >96KHZ]"
             "\n(leave empty for default '6')\n- "
@@ -271,7 +311,7 @@ def _reset_config(config_file):
     config["DEFAULT"]["embed_art"] = "false"
     config["DEFAULT"]["no_cover"] = "false"
     config["DEFAULT"]["no_database"] = "false"
-    logging.info(f"{YELLOW}Getting tokens. Please wait...")
+    logger.info(f"{YELLOW}Getting tokens. Please wait...")
     bundle = Bundle()
     config["DEFAULT"]["app_id"] = str(bundle.get_app_id())
     config["DEFAULT"]["secrets"] = ",".join(bundle.get_secrets().values())
@@ -279,15 +319,20 @@ def _reset_config(config_file):
     config["DEFAULT"]["track_format"] = DEFAULT_TRACK
     config["DEFAULT"]["smart_discography"] = "false"
     _write_config(config_file, config)
-    logging.info(
+    logger.info(
         f"{GREEN}Config file updated. Edit more options in {config_file}"
         "\nso you don't have to call custom flags every time you run "
         "a qobuz-dl command."
     )
 
 
-def _quality_fallback_enabled(cli_no_fallback, config_no_fallback):
-    return not (cli_no_fallback or config_no_fallback)
+def _choose(cli_value, config_value):
+    """A ``--flag``/``--no-flag`` value wins; ``None`` keeps the config value."""
+    return config_value if cli_value is None else cli_value
+
+
+def _quality_fallback_enabled(cli_fallback, config_no_fallback):
+    return _choose(cli_fallback, not config_no_fallback)
 
 
 MIN_QUERY_LENGTH = 3
@@ -327,7 +372,7 @@ def _handle_commands(qobuz, arguments, sources=()):
             qobuz.download_sources(sources)
         elif arguments.command == "lucky":
             qobuz.lucky_type = arguments.type
-            qobuz.lucky_limit = arguments.number
+            qobuz.lucky_limit = arguments.limit
             _download_search_results(
                 qobuz, qobuz.lucky_mode(query, download=False), query
             )
@@ -338,19 +383,14 @@ def _handle_commands(qobuz, arguments, sources=()):
                 _download_search_results(qobuz, urls, "interactive selection")
 
     except ApiRateLimitError as error:
-        logging.error(f"{RED}{error}")
+        logger.error(f"{RED}{error}")
         run.add_problem(RunProblem("rate_limited", str(error), query, retryable=True))
     except http.HttpError as error:
-        logging.error(f"{RED}Request failed: {error}")
+        logger.error(f"{RED}Request failed: {error}")
         run.add_problem(
             RunProblem(
                 "request_error", str(error), query, retryable=http.is_retryable(error)
             )
-        )
-    except KeyboardInterrupt:
-        logging.info(
-            f"{RED}Interrupted by user\n{YELLOW}Already downloaded items will "
-            "be skipped if you try to download the same releases again."
         )
     return run.exit_code()
 
@@ -370,84 +410,151 @@ def _validate_operands(parser, arguments):
     return ()
 
 
-def main():
-    parser = qobuz_dl_args()
-    arguments = parser.parse_args()
-    sources = ()
-    if arguments.command is not None:
-        try:
-            validate_cover_options(arguments.embed_art, arguments.no_cover)
-        except ValueError as error:
-            parser.error(str(error))
-        sources = _validate_operands(parser, arguments)
+def _interactive(arguments):
+    stdin = sys.stdin
+    return not arguments.no_input and bool(stdin and stdin.isatty())
+
+
+def _check_usage(parser, arguments, interactive):
+    """Reject every usage error before config, login, or writes."""
+    actions = [
+        flag
+        for flag, chosen in (
+            ("--reset", arguments.reset),
+            ("--purge", arguments.purge),
+            ("--show-config", arguments.show_config),
+            (f"'{arguments.command}'", arguments.command is not None),
+        )
+        if chosen
+    ]
+    if len(actions) > 1:
+        parser.error(f"{actions[0]} cannot be combined with {actions[1]}")
+    if not actions:
+        parser.error(
+            "choose a command, such as 'qobuz-dl dl URL'; "
+            "for first-time setup, run 'qobuz-dl --reset'"
+        )
+    if arguments.reset and not interactive:
+        parser.error("--reset prompts for your account; run it in a terminal")
+    if arguments.command == "fun" and not interactive:
+        subcommand_parsers(parser)["fun"].error(
+            "fun needs an interactive terminal; use 'qobuz-dl lucky QUERY' "
+            "or 'qobuz-dl dl URL' instead"
+        )
+    if arguments.command is None:
+        return ()
+    try:
+        validate_cover_options(arguments.embed_art is True, arguments.cover is False)
+    except ValueError as error:
+        parser.error(str(error))
+    return _validate_operands(parser, arguments)
+
+
+def _login(qobuz, config_values, retry):
+    try:
+        qobuz.initialize_client(
+            config_values["email"],
+            config_values["password"],
+            config_values["app_id"],
+            config_values["secrets"],
+        )
+    except (
+        AuthenticationError,
+        IneligibleError,
+        InvalidAppIdError,
+        InvalidAppSecretError,
+    ) as error:
+        raise _Failure(f"login failed: {error}") from None
+    except ApiRateLimitError as error:
+        raise _Failure(str(error), hint=retry, code=ExitCode.TEMPORARY) from None
+    except http.HttpError as error:
+        if http.is_retryable(error):
+            raise _Failure(
+                f"login failed: {error}", hint=retry, code=ExitCode.TEMPORARY
+            ) from None
+        raise _Failure(f"login failed: {error}") from None
+
+
+def _run(parser, arguments, argv):
+    interactive = _interactive(arguments)
+    sources = _check_usage(parser, arguments, interactive)
+    retry = f"retry: {format_command((PROG, *argv))}"
     try:
         config_file, database_file = _resolve_config_paths()
     except _ConfigPathError:
-        sys.exit(
+        raise _Failure(
             "APPDATA is not set. Set APPDATA to your Windows application-data "
             "directory and retry."
-        )
+        ) from None
     startup = _classify_startup(arguments)
 
     config_values = None
     redacted_config = None
     try:
         if arguments.reset:
-            sys.exit(_reset_config(config_file))
+            _reset_config(config_file)
+            return ExitCode.OK
         if startup.needs_config:
-            _ensure_config_exists(config_file)
+            _ensure_config_exists(config_file, interactive=interactive)
             if startup.needs_auth or arguments.show_config:
                 config_values = _load_config_values(config_file)
         if arguments.show_config:
             redacted_config = _redacted_config_text(config_file)
+    except _MissingConfig:
+        parser.error(
+            f"no config file at {config_file}; create it in a terminal with "
+            "'qobuz-dl --reset'"
+        )
     except _ConfigStorageError:
-        sys.exit(
-            f"{RED}Unable to access configuration securely. "
+        raise _Failure(
+            "Unable to access configuration securely. "
             "Check its directory permissions and available disk space."
-        )
+        ) from None
     except BundleError as error:
-        sys.exit(
-            f"{RED}Unable to create configuration from the Qobuz web bundle: "
+        raise _Failure(
+            "Unable to create configuration from the Qobuz web bundle: "
             f"{error}. Configuration was not saved."
-        )
+        ) from None
+    except http.HttpError as error:
+        raise _Failure(
+            f"Unable to read the Qobuz web bundle: {error}. "
+            "Configuration was not saved.",
+            hint=retry if http.is_retryable(error) else None,
+            code=(ExitCode.TEMPORARY if http.is_retryable(error) else ExitCode.FAILURE),
+        ) from None
     except _ConfigValidationError as error:
-        sys.exit(
-            f"{RED}Your config file is corrupted: {error}! "
+        raise _Failure(
+            f"Your config file is corrupted: {error}! "
             f"Run '{RESET_COMMAND}' to fix this "
             "(or 'qobuz-dl -r' if installed)."
-        )
-
-    if arguments.command is None and not arguments.show_config and not arguments.purge:
-        parser.print_help()
-        sys.exit(0)
+        ) from None
 
     if arguments.show_config:
         print(f"Configuration: {config_file}\nDatabase: {database_file}\n---")
         print(redacted_config)
-        sys.exit()
+        return ExitCode.OK
 
     if arguments.purge:
         try:
             os.remove(database_file)
         except FileNotFoundError:
-            logging.warning(f"{GREEN}The database is already absent.")
-            return
+            logger.info(f"{GREEN}The database is already absent.")
+            return ExitCode.OK
         except OSError:
-            sys.exit(
+            raise _Failure(
                 f"Unable to delete database at {database_file}. Check its permissions."
-            )
-        logging.warning(f"{GREEN}The database was deleted.")
-        return
+            ) from None
+        logger.info(f"{GREEN}The database was deleted.")
+        return ExitCode.OK
 
-    if startup.needs_auth:
-        arguments = qobuz_dl_args(
-            config_values["default_quality"],
-            config_values["default_limit"],
-            config_values["default_folder"],
-        ).parse_args()
+    arguments = qobuz_dl_args(
+        config_values["default_quality"],
+        config_values["default_limit"],
+        config_values["default_folder"],
+    ).parse_args(argv)
 
-    embed_art = arguments.embed_art or config_values["embed_art"]
-    no_cover = arguments.no_cover or config_values["no_cover"]
+    embed_art = _choose(arguments.embed_art, config_values["embed_art"])
+    no_cover = not _choose(arguments.cover, not config_values["no_cover"])
     try:
         validate_cover_options(embed_art, no_cover)
     except ValueError as error:
@@ -457,33 +564,78 @@ def main():
         arguments.directory,
         arguments.quality,
         embed_art,
-        ignore_singles_eps=arguments.albums_only or config_values["albums_only"],
-        no_m3u_for_playlists=arguments.no_m3u or config_values["no_m3u"],
+        ignore_singles_eps=_choose(arguments.albums_only, config_values["albums_only"]),
+        no_m3u_for_playlists=not _choose(arguments.m3u, not config_values["no_m3u"]),
         quality_fallback=_quality_fallback_enabled(
-            arguments.no_fallback,
+            arguments.fallback,
             config_values["no_fallback"],
         ),
-        cover_og_quality=arguments.og_cover or config_values["og_cover"],
+        cover_og_quality=_choose(arguments.og_cover, config_values["og_cover"]),
         no_cover=no_cover,
-        downloads_db=None
-        if config_values["no_database"] or arguments.no_db
-        else database_file,
+        downloads_db=database_file
+        if _choose(arguments.db, not config_values["no_database"])
+        else None,
         folder_format=arguments.folder_format or config_values["folder_format"],
         track_format=arguments.track_format or config_values["track_format"],
-        smart_discography=(
-            arguments.smart_discography or config_values["smart_discography"]
+        smart_discography=_choose(
+            arguments.smart_discography, config_values["smart_discography"]
         ),
     )
-    try:
-        qobuz.initialize_client(
-            config_values["email"],
-            config_values["password"],
-            config_values["app_id"],
-            config_values["secrets"],
-        )
-    except ApiRateLimitError as error:
-        sys.exit(f"{RED}{error}")
+    _login(qobuz, config_values, retry)
     return _handle_commands(qobuz, arguments, sources)
+
+
+def _report(color, message, hint=None):
+    lines = [f"{PROG}: {message}"]
+    if hint:
+        lines.append(hint)
+    sys.stderr.write(render(redact("\n".join(lines)), color) + "\n")
+    sys.stderr.flush()
+
+
+def main(argv=None):
+    """Run qobuz-dl and return its exit code."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = qobuz_dl_args()
+    arguments = parser.parse_args(argv)
+    if arguments.command == "help":
+        topic = arguments.topic
+        target = subcommand_parsers(parser)[topic] if topic else parser
+        target.print_help()
+        return ExitCode.OK
+
+    debug = arguments.debug or env_flag(DEBUG_ENV)
+    if debug:
+        level = logging.DEBUG
+    elif arguments.verbose:
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+    color = not arguments.no_color and color_enabled(sys.stderr)
+    configure_prompts(color=color)
+    with stderr_logging(logging.getLogger(PACKAGE_LOGGER), level, color):
+        try:
+            with sigterm_raises():
+                return _run(parser, arguments, argv)
+        except KeyboardInterrupt as interruption:
+            _report(color, "interrupted; finished files were kept")
+            return interruption_exit_code(interruption)
+        except _Failure as failure:
+            _report(color, str(failure), failure.hint)
+            return failure.code
+        except EOFError:
+            _report(color, "input ended before the prompt was answered")
+            return ExitCode.USAGE
+        except Exception as error:
+            if debug:
+                trace = "".join(traceback.format_exception(error))
+                sys.stderr.write(render(redact(trace), color))
+            _report(
+                color,
+                f"unexpected error: {error}",
+                "rerun with a stack trace: " + format_command((PROG, "--debug", *argv)),
+            )
+            return ExitCode.FAILURE
 
 
 if __name__ == "__main__":

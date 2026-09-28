@@ -15,7 +15,7 @@ import pytest
 import qobuz_dl.cli as cli
 
 APPDATA_DIAGNOSTIC = (
-    "APPDATA is not set. Set APPDATA to your Windows application-data "
+    "qobuz-dl: APPDATA is not set. Set APPDATA to your Windows application-data "
     "directory and retry."
 )
 ENVIRONMENT_SECRET = "simulated-environment-secret"
@@ -54,7 +54,7 @@ try:
 finally:
     builtins.__import__ = real_import
 
-if not callable(package.main) or package.main is not cli.main:
+if not callable(package.main) or not callable(cli.main):
     raise AssertionError("package and CLI entry points did not import")
 
 
@@ -70,7 +70,7 @@ cli._reset_config = unexpected
 cli.Bundle = unexpected
 cli.QobuzDL = unexpected
 sys.argv = ["qobuz-dl", *sys.argv[1:]]
-package.main()
+sys.exit(package.main())
 """
 
 
@@ -107,6 +107,7 @@ def _run_simulated_windows_cli(tmp_path, argv, appdata):
         [sys.executable, "-I", "-c", SIMULATED_WINDOWS_CHILD, *argv],
         cwd=sandbox,
         env=environment,
+        stdin=subprocess.DEVNULL,
         text=True,
         capture_output=True,
         check=False,
@@ -152,15 +153,12 @@ def test_simulated_windows_metadata_routes_ignore_missing_appdata(
 @pytest.mark.parametrize(
     "argv",
     [
-        pytest.param([], id="no-args"),
-        pytest.param(["--reset"], id="reset"),
         pytest.param(["--purge"], id="purge"),
         pytest.param(["--show-config"], id="show-config"),
         pytest.param(
             ["dl", "https://play.qobuz.com/album/example"],
             id="dl",
         ),
-        pytest.param(["fun"], id="fun"),
         pytest.param(["lucky", "example"], id="lucky"),
     ],
 )
@@ -176,6 +174,26 @@ def test_simulated_windows_continuing_routes_report_missing_appdata_safely(
         result.stderr,
         side_effects,
     ) == (1, "", f"{APPDATA_DIAGNOSTIC}\n", [])
+
+
+@pytest.mark.parametrize("appdata", [None, ""], ids=["missing", "empty"])
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        pytest.param([], "choose a command", id="no-args"),
+        pytest.param(["--reset"], "run it in a terminal", id="reset"),
+        pytest.param(["fun"], "fun needs an interactive terminal", id="fun"),
+    ],
+)
+def test_simulated_windows_usage_errors_precede_config_path_resolution(
+    tmp_path, appdata, argv, message
+):
+    result, side_effects = _run_simulated_windows_cli(tmp_path, argv, appdata)
+
+    _assert_no_diagnostic_leak(result, tmp_path)
+    assert (result.returncode, result.stdout, side_effects) == (2, "", [])
+    assert message in result.stderr
+    assert APPDATA_DIAGNOSTIC not in result.stderr
 
 
 @pytest.mark.parametrize("appdata", [None, ""], ids=["missing", "empty"])

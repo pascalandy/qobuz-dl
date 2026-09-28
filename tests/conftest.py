@@ -1,8 +1,22 @@
+import io
 import subprocess
 import sys
 import time
 
 import pytest
+
+
+class _Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+@pytest.fixture
+def terminal_stdin(monkeypatch):
+    """Make stdin an interactive terminal, so commands may prompt."""
+    stdin = _Terminal()
+    monkeypatch.setattr(sys, "stdin", stdin)
+    return stdin
 
 
 @pytest.fixture
