@@ -31,7 +31,7 @@ For the plaintext prompt, stored password digest, and current login transport, s
 | `-n`, `--dry-run` | Log in and look up metadata, then print where each track would go without writing anything. See [Dry run](#dry-run). |
 | `-c`, `--config PATH` | Use this config file and the database beside it; `QOBUZ_DL_CONFIG` does the same. See [config lookup](use-cases.md#where-authconfig-and-the-database-live). |
 | `--timeout DURATION` | Time limit for each network request, such as `30`, `45s`, or `2m`; the default is 30 seconds. It applies to API, web-bundle, media, and Last.fm requests. |
-| `--email EMAIL`, `--password-file PATH` | With `--reset`, create the config without prompts, using the default folder and quality; `--password-file -` reads the password from stdin. |
+| `--email EMAIL`, `--password-file PATH` | With `--reset`, create the config without prompts, using the default folder and quality; `--password-file -` reads the password from stdin. A retry hint never repeats the email; it names `--email` instead. |
 
 `--reset`, `--purge`, `--show-config`, and a command are mutually exclusive; combining them exits `2`. `-v` through `--timeout` work before or after a command name, as in `qobuz-dl -v dl URL` or `qobuz-dl dl URL -v`. Long options must be spelled out; abbreviations exit `2`.
 
@@ -68,6 +68,8 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --h
 
 An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`.
 
+A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict` (`would not be` in a dry run), then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise.
+
 Login failures exit `1`, or `75` when the login or web-bundle request failed for a temporary reason. Errors name what failed and, when there is one, the command to run next. Stack traces appear only with `--debug`, and every message masks email, password, token, and request-signature values. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
 
 ## Machine-readable output
@@ -92,7 +94,7 @@ With `--json`, stdout holds exactly one JSON object and nothing else, whatever t
 | Any usage error | `operation` is `null` and `status` is `usage_error` |
 | `-h`, `--help`, `--version` | Human text wins; no JSON |
 
-An interrupted run prints the partial object with `status: "interrupted"`. A temporary problem carries the command to retry in `hint`. `--json` after `--` is a source, not an option.
+An interrupted run prints the partial object with `status: "interrupted"`. A temporary problem carries the command to retry in `hint`. `--json` after `--` is a source, not an option. The object escapes non-ASCII text, so any stdout encoding can carry it; masks credentials in `source` fields; and builds `hint` commands without `-v`, `--debug`, or `--no-color`, so it is identical at every verbosity.
 
 ## Dry run
 

@@ -3,12 +3,12 @@ import getpass
 import hashlib
 import logging
 import os
-import re
 import sys
 import tempfile
 import traceback
+from collections import Counter
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 
 from qobuz_dl import envelope, http
@@ -23,6 +23,7 @@ from qobuz_dl.commands import (
     qobuz_dl_args,
 )
 from qobuz_dl.console import (
+    DIAGNOSTIC_FLAGS,
     HELP_FLAGS,
     ExitCode,
     color_enabled,
@@ -39,6 +40,7 @@ from qobuz_dl.console import (
     sigterm_raises,
     stderr_logging,
     subcommand_parsers,
+    without_flags,
 )
 from qobuz_dl.core import (
     QobuzDL,
@@ -413,7 +415,6 @@ def _quality_fallback_enabled(cli_fallback, config_no_fallback):
 
 
 MIN_QUERY_LENGTH = 3
-_OLD_NUMBER_FLAG = re.compile(r"-n\d+")
 
 
 @dataclass
@@ -427,13 +428,38 @@ class _Session:
     run: RunResult | None = None
     data: dict | None = None
 
+    # The argument list without options that only change diagnostics, so a
+    # printed or JSON hint is the same at every verbosity.
+    portable_argv: list = field(default_factory=list)
+    # Options whose values a hint never repeats, such as --email.
+    withheld: list = field(default_factory=list)
+
     @property
     def retry_command(self):
-        return format_command((PROG, *self.argv))
+        return format_command((PROG, *self.portable_argv))
+
+    def command_with(self, option):
+        return format_command((PROG, option, *self.portable_argv))
+
+    def hint(self, label, command):
+        if not self.withheld:
+            return f"{label}: {command}"
+        return f"{label} with the same {' and '.join(self.withheld)}: {command}"
 
 
 def _print_path(path):
-    print(path, flush=True)
+    """Print one finalized path; a stdout that cannot encode it gets escapes."""
+    line = f"{path}\n"
+    try:
+        sys.stdout.write(line)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        sys.stdout.write(line.encode(encoding, "backslashreplace").decode(encoding))
+        logger.warning(
+            "stdout cannot encode a finalized path, so it was printed with "
+            "escapes; set PYTHONUTF8=1 to print it exactly"
+        )
+    sys.stdout.flush()
 
 
 def _download_search_results(qobuz, urls, query, *, preview=False):
@@ -525,15 +551,63 @@ def _validate_operands(parser, arguments):
     return ()
 
 
+def _old_count_flag(lucky, token, following):
+    """Whether ``token`` uses -n with a count, alone or in a short cluster."""
+    if not token.startswith("-") or token.startswith("--") or len(token) < 2:
+        return False
+    letters = token[1:]
+    for position, letter in enumerate(letters):
+        action = lucky._option_string_actions.get(f"-{letter}")
+        if action is None or action.nargs != 0:
+            return False
+        if letter == "n":
+            rest = letters[position + 1 :]
+            return rest.isdigit() if rest else following.isdigit()
+    return False
+
+
 def _reject_old_number_flag(parser, argv):
     """``lucky -n 3`` once meant three results; -n is now --dry-run."""
+    lucky = subcommand_parsers(parser)["lucky"]
     tokens = argv[: argv.index("--")] if "--" in argv else argv
     for index, token in enumerate(tokens):
         following = tokens[index + 1] if index + 1 < len(tokens) else ""
-        if (token == "-n" and following.isdigit()) or _OLD_NUMBER_FLAG.fullmatch(token):
-            subcommand_parsers(parser)["lucky"].error(
-                "-n now means --dry-run; use --limit N"
-            )
+        if _old_count_flag(lucky, token, following):
+            lucky.error("-n now means --dry-run; use --limit N")
+
+
+# Options whose values identify the account; hints drop and name them.
+_PRIVATE_OPTIONS = ("--email",)
+
+
+def _before_double_dash(argv):
+    return argv[: argv.index("--")] if "--" in argv else argv
+
+
+def _private_options(argv):
+    tokens = _before_double_dash(argv)
+    return [
+        option
+        for option in _PRIVATE_OPTIONS
+        if any(t == option or t.startswith(f"{option}=") for t in tokens)
+    ]
+
+
+def _without_private(argv):
+    """Drop private options and their values, keeping everything after --."""
+    tokens = _before_double_dash(argv)
+    kept = []
+    skip = False
+    for token in tokens:
+        if skip:
+            skip = False
+            continue
+        name = token.split("=", 1)[0]
+        if name in _PRIVATE_OPTIONS:
+            skip = "=" not in token
+            continue
+        kept.append(token)
+    return kept + list(argv[len(tokens) :])
 
 
 def _operation(arguments):
@@ -664,6 +738,44 @@ def _purge(session, database_file):
     return ExitCode.OK
 
 
+def _failure_lines(run, *, dry_run=False):
+    """Describe the unsatisfied items and problems of a run, one line each."""
+    unsatisfied = [
+        item for item in run.items if item.classification in ("permanent", "temporary")
+    ]
+    lines = []
+    if unsatisfied:
+        counts = Counter(item.result.reason for item in unsatisfied)
+        reasons = ", ".join(
+            reason if count == 1 else f"{reason} ({count})"
+            for reason, count in counts.items()
+        )
+        verb = "would not be downloaded" if dry_run else "could not be downloaded"
+        lines.append(f"{len(unsatisfied)} of {len(run.items)} items {verb}: {reasons}")
+    lines.extend(problem.message for problem in run.problems)
+    return lines
+
+
+def _report_run(color, session, code, arguments):
+    """Say what failed in a run that exits 1 or 75, then what to run next."""
+    if session.run is None or code not in (ExitCode.FAILURE, ExitCode.TEMPORARY):
+        return
+    if code == ExitCode.TEMPORARY:
+        hint = session.hint("retry", session.retry_command)
+    elif arguments.verbose or arguments.debug:
+        hint = None
+    else:
+        hint = session.hint("see why", session.command_with("--verbose"))
+    lines = [
+        f"{PROG}: {line}"
+        for line in _failure_lines(session.run, dry_run=session.dry_run)
+    ]
+    if hint:
+        lines.append(hint)
+    sys.stderr.write(render(redact("\n".join(lines)), color) + "\n")
+    sys.stderr.flush()
+
+
 def _select_config(arguments):
     """Return the config path, the database beside it, and whether it is the default.
 
@@ -716,10 +828,11 @@ def _run(parser, arguments, session):
             )
             session.data = {"config_path": config_file, "created": not existed}
             return ExitCode.OK
+        if not default_location and not os.path.isfile(config_file):
+            # An explicit config never falls back or triggers setup, and
+            # --purge never deletes a database beside a mistyped path.
+            raise _MissingConfig
         if startup.needs_config:
-            if not default_location and not os.path.isfile(config_file):
-                # An explicit config never falls back or triggers setup.
-                raise _MissingConfig
             if not arguments.dry_run:
                 _ensure_config_exists(
                     config_file,
@@ -870,6 +983,8 @@ def main(argv=None):
         json=arguments.json,
         dry_run=arguments.dry_run,
         operation=_operation(arguments),
+        portable_argv=_without_private(without_flags(parser, argv, DIAGNOSTIC_FLAGS)),
+        withheld=_private_options(argv),
     )
     debug = arguments.debug or env_flag(DEBUG_ENV)
     if debug:
@@ -885,6 +1000,7 @@ def main(argv=None):
         try:
             with sigterm_raises(), http.request_timeout(arguments.timeout):
                 code = _run(parser, arguments, session)
+            _report_run(color, session, code, arguments)
         except KeyboardInterrupt as interruption:
             message = "interrupted; finished files were kept"
             _report(color, message)
@@ -893,7 +1009,9 @@ def main(argv=None):
         except _Failure as failure:
             code = failure.code
             retry = session.retry_command if code == ExitCode.TEMPORARY else None
-            _report(color, str(failure), f"retry: {retry}" if retry else None)
+            _report(
+                color, str(failure), session.hint("retry", retry) if retry else None
+            )
             problems.append(
                 envelope.problem(
                     failure.problem,
@@ -911,7 +1029,7 @@ def main(argv=None):
             if debug:
                 trace = "".join(traceback.format_exception(error))
                 sys.stderr.write(render(redact(trace), color))
-            rerun = format_command((PROG, "--debug", *argv))
+            rerun = session.command_with("--debug")
             _report(
                 color,
                 f"unexpected error: {error}",
@@ -922,7 +1040,10 @@ def main(argv=None):
                 envelope.problem("unexpected_error", str(error), hint=rerun)
             )
         if session.json:
-            _write_json(session, code, problems)
+            try:
+                _write_json(session, code, problems)
+            except OSError as error:
+                _report(color, f"could not write the JSON result: {error}")
         return code
 
 

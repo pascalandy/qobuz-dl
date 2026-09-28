@@ -60,7 +60,7 @@ qobuz-dl picks one config file and keeps the downloaded-IDs database `qobuz_dl.d
 | Linux and macOS | `$XDG_CONFIG_HOME/qobuz-dl/config.ini`, else `~/.config/qobuz-dl/config.ini` | `qobuz_dl.db` beside the config |
 | Windows | `%APPDATA%\qobuz-dl\config.ini` | `%APPDATA%\qobuz-dl\qobuz_dl.db` |
 
-When no default config exists yet, setup creates it at the first default location. An explicit config is authoritative: if it is missing, the command exits `2` and suggests `qobuz-dl --reset --config PATH` instead of falling back to another file or starting setup. `--reset --config PATH` never touches the default config. `--config -` exits `2`. The CLI does not use macOS `~/Library/Application Support`.
+When no default config exists yet, setup creates it at the first default location. An explicit config is authoritative: if it is missing, the command exits `2` and suggests `qobuz-dl --reset --config PATH` instead of falling back to another file or starting setup. This includes `--purge`, so a mistyped `--config` never deletes the database in that folder. `--reset --config PATH` never touches the default config. `--config -` exits `2`. The CLI does not use macOS `~/Library/Application Support`.
 
 On Windows, `--help`, `--version`, and command-specific help remain available when `APPDATA` is missing or empty. A command that needs the config or database exits with status `1` and writes `qobuz-dl: APPDATA is not set. Set APPDATA to your Windows application-data directory and retry.` to standard error. The CLI exits before prompts, config or database changes, and network requests.
 

@@ -511,3 +511,63 @@ def test_dl_stdin_with_missing_config_exits_2_even_in_a_terminal(
 
     assert exc.value.code == 2
     assert "no config file at" in capsys.readouterr().err
+
+
+def test_purge_with_a_missing_explicit_config_deletes_nothing(tmp_path, capsys):
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    database = folder / "qobuz_dl.db"
+    database.write_bytes(b"someone else's history")
+    typo = folder / "confg.ini"
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--purge", "--config", str(typo)])
+
+    assert exc.value.code == 2
+    assert f"no config file at {typo}" in capsys.readouterr().err
+    assert database.read_bytes() == b"someone else's history"
+
+
+def test_purge_with_an_explicit_config_deletes_the_database_beside_it(tmp_path):
+    config = _write_config(tmp_path / "chosen" / "config.ini")
+    database = config.parent / "qobuz_dl.db"
+    database.write_bytes(b"history")
+
+    assert cli.main(["--purge", "--config", str(config)]) == 0
+
+    assert not database.exists()
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_retry_hints_never_repeat_the_email(
+    monkeypatch, home, tmp_path, capsys, json_output
+):
+    def unavailable():
+        raise http.HttpStatusError(503)
+
+    monkeypatch.setattr(cli, "Bundle", unavailable)
+    password = _password_file(tmp_path)
+    argv = [
+        "--reset",
+        "--email",
+        "private@example.test",
+        "--password-file",
+        str(password),
+    ]
+
+    code = cli.main([*argv, "--json"] if json_output else argv)
+
+    assert code == 75
+    output = capsys.readouterr()
+    assert "private@example.test" not in output.out + output.err
+    assert output.err.endswith(
+        "retry with the same --email: "
+        f"qobuz-dl --reset --password-file {password}"
+        + (" --json" if json_output else "")
+        + "\n"
+    )
+    if json_output:
+        (problem,) = json.loads(output.out)["problems"]
+        assert problem["hint"] == (
+            f"qobuz-dl --reset --password-file {password} --json"
+        )
