@@ -29,8 +29,11 @@ For the plaintext prompt, stored password digest, and current login transport, s
 | `--no-input` | Never prompt. A command that needs input exits `2` instead. |
 | `--json` | Print one JSON object on stdout instead of paths or text. Implies `--no-input`. See [Machine-readable output](#machine-readable-output). |
 | `-n`, `--dry-run` | Log in and look up metadata, then print where each track would go without writing anything. See [Dry run](#dry-run). |
+| `-c`, `--config PATH` | Use this config file and the database beside it; `QOBUZ_DL_CONFIG` does the same. See [config lookup](use-cases.md#where-authconfig-and-the-database-live). |
+| `--timeout DURATION` | Time limit for each network request, such as `30`, `45s`, or `2m`; the default is 30 seconds. It applies to API, web-bundle, media, and Last.fm requests. |
+| `--email EMAIL`, `--password-file PATH` | With `--reset`, create the config without prompts, using the default folder and quality; `--password-file -` reads the password from stdin. |
 
-`--reset`, `--purge`, `--show-config`, and a command are mutually exclusive; combining them exits `2`. The last seven options work before or after a command name, as in `qobuz-dl -v dl URL` or `qobuz-dl dl URL -v`. Long options must be spelled out; abbreviations exit `2`.
+`--reset`, `--purge`, `--show-config`, and a command are mutually exclusive; combining them exits `2`. `-v` through `--timeout` work before or after a command name, as in `qobuz-dl -v dl URL` or `qobuz-dl dl URL -v`. Long options must be spelled out; abbreviations exit `2`.
 
 ## Commands
 
@@ -84,7 +87,8 @@ With `--json`, stdout holds exactly one JSON object and nothing else, whatever t
 | `dl`, `lucky` | `data.items` lists each track or album outcome with `source`, `kind`, `item_id`, `state`, `reason`, `retryable`, `paths`, `evidence`, and `exists`; `data.totals` counts them. `evidence` is `published`, `verified`, or `filename_only`: an `existing_file` result proves only that a file with the expected name exists |
 | `--show-config` | `data` holds `config_path`, `database_path`, and the redacted `settings` |
 | `--purge` | `data` holds `database_path` and whether it was `deleted` |
-| `fun`, `--reset`, or no command | A usage-error object with exit `2`, before any prompt, login, or write |
+| `--reset` with `--email` and `--password-file` | `data` holds `config_path` and whether the file was `created` |
+| `fun`, `--reset` without `--email` and `--password-file`, or no command | A usage-error object with exit `2`, before any prompt, login, or write |
 | Any usage error | `operation` is `null` and `status` is `usage_error` |
 | `-h`, `--help`, `--version` | Human text wins; no JSON |
 
@@ -133,6 +137,8 @@ Cover art, booklets, and other extras remain single-attempt downloads. Non-429 H
 - Qobuz playlist URLs
 - Last.fm playlist URLs
 - local text files containing one URL per line; lines starting with `#` are ignored
+
+`SOURCE` may be `-` once, to read sources from stdin, one per line, like a text file; errors name `<stdin>:LINE`. Because stdin then carries sources, a missing config exits `2` instead of starting setup.
 
 qobuz-dl validates every source before it reads config or logs in. A Qobuz URL must use `https` on `play.qobuz.com`, `open.qobuz.com`, or `www.qobuz.com`, with an optional locale such as `/us-en`, then `album`, `artist`, `track`, `playlist`, or `label`, an optional slug, and the ID. A Last.fm URL must use `https` on `last.fm` or `www.last.fm`, with an optional locale, then `/user/<name>/playlists/<id>`. Query strings and fragments are ignored. Anything else must be an existing UTF-8 text file. A text file may list other text files; including the same file twice keeps both occurrences, but a file that includes itself, directly or through others, is an error. An invalid source exits `2` and names it, with `file:line` when it came from a text file.
 

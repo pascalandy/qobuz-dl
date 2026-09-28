@@ -21,12 +21,6 @@ URL = "https://play.qobuz.com/album/abc1"
 ANSI = "\x1b["
 
 
-@pytest.fixture(autouse=True)
-def plain_environment(monkeypatch):
-    for name in ("NO_COLOR", "TERM", "QOBUZ_DL_DEBUG"):
-        monkeypatch.delenv(name, raising=False)
-
-
 def _config(tmp_path, **overrides):
     values = {
         "email": "user@example.com",
@@ -425,8 +419,8 @@ def test_missing_config_without_a_terminal_exits_2(
 
     assert exc.value.code == 2
     assert capsys.readouterr().err.endswith(
-        f"qobuz-dl: error: no config file at {config_file}; create it in a "
-        "terminal with 'qobuz-dl --reset'\nrun 'qobuz-dl --help' for usage\n"
+        f"qobuz-dl: error: no config file at {config_file}; create it: "
+        "qobuz-dl --reset\nrun 'qobuz-dl --help' for usage\n"
     )
     assert not config_file.exists()
 

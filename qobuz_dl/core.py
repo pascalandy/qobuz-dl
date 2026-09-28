@@ -144,6 +144,40 @@ def _source_message(location: str | None, message: str) -> str:
     return message if location is None else f"{location}: {message}"
 
 
+class _SourceExpander:
+    """Turn texts into sources, following text files and naming locations."""
+
+    def __init__(self):
+        self.sources: list[Source] = []
+
+    def expand(self, text: str, location: str | None, active: tuple[str, ...]):
+        text = text.strip()
+        source = parse_source_url(text, location)
+        if source is not None:
+            self.sources.append(source)
+            return
+        if "://" not in text and os.path.isfile(text):
+            identity = os.path.realpath(text)
+            if identity in active:
+                raise SourceError(
+                    _source_message(location, f"{text!r} includes itself")
+                )
+            self.expand_lines(_source_lines(text, location), text, (*active, identity))
+            return
+        reason = (
+            "not a supported Qobuz or Last.fm URL"
+            if "://" in text
+            else "not a supported Qobuz or Last.fm URL, and no such file"
+        )
+        raise SourceError(_source_message(location, f"{reason}: {text!r}"))
+
+    def expand_lines(self, lines, origin: str, active: tuple[str, ...]):
+        for number, line in enumerate(lines, start=1):
+            line = line.strip()
+            if line and not line.startswith("#"):
+                self.expand(line, f"{origin}:{number}", active)
+
+
 def expand_sources(texts: Iterable[str], *, origin: str | None = None) -> list[Source]:
     """Validate command-line sources and expand text files, before any login.
 
@@ -154,35 +188,17 @@ def expand_sources(texts: Iterable[str], *, origin: str | None = None) -> list[S
     ``origin`` labels the texts, for example ``<stdin>``, so errors can name
     ``<stdin>:2``.
     """
-    sources: list[Source] = []
-
-    def expand(text: str, location: str | None, active: tuple[str, ...]):
-        text = text.strip()
-        source = parse_source_url(text, location)
-        if source is not None:
-            sources.append(source)
-            return
-        if "://" not in text and os.path.isfile(text):
-            identity = os.path.realpath(text)
-            if identity in active:
-                raise SourceError(
-                    _source_message(location, f"{text!r} includes itself")
-                )
-            for number, line in enumerate(_source_lines(text, location), start=1):
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    expand(line, f"{text}:{number}", (*active, identity))
-            return
-        reason = (
-            "not a supported Qobuz or Last.fm URL"
-            if "://" in text
-            else "not a supported Qobuz or Last.fm URL, and no such file"
-        )
-        raise SourceError(_source_message(location, f"{reason}: {text!r}"))
-
+    expander = _SourceExpander()
     for number, text in enumerate(texts, start=1):
-        expand(text, None if origin is None else f"{origin}:{number}", ())
-    return sources
+        expander.expand(text, None if origin is None else f"{origin}:{number}", ())
+    return expander.sources
+
+
+def expand_source_lines(lines: Iterable[str], origin: str) -> list[Source]:
+    """Expand one source per line, as in a text file, naming ``origin:line``."""
+    expander = _SourceExpander()
+    expander.expand_lines(lines, origin, ())
+    return expander.sources
 
 
 Classification = Literal["satisfied", "no_op", "permanent", "temporary"]
@@ -869,7 +885,7 @@ class QobuzDL:
         # Apparently, last fm API doesn't have a playlist endpoint. If you
         # find out that it has, please fix this!
         try:
-            html = http.get_text(playlist_url, timeout=10)
+            html = http.get_text(playlist_url, timeout=http.current_timeout())
         except http.HttpError as e:
             logger.error(f"{RED}Playlist download failed: {e}")
             self._record_problem(

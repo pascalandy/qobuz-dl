@@ -137,7 +137,7 @@ def test_native_windows_continuing_routes_report_missing_appdata_safely(
     ("argv", "message"),
     [
         pytest.param([], "choose a command", id="no-args"),
-        pytest.param(["--reset"], "run it in a terminal", id="reset"),
+        pytest.param(["--reset"], "--reset without a terminal needs", id="reset"),
         pytest.param(["fun"], "fun needs an interactive terminal", id="fun"),
     ],
 )

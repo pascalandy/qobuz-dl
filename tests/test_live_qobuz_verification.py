@@ -2176,7 +2176,7 @@ def test_help_wins_over_invalid_arguments_and_lists_exit_codes(capsys):
     assert help_text.startswith("usage: live_qobuz.py ")
     examples = help_text.split("Examples:\n", 1)[1].split("\n\n", 1)[0]
     assert 2 <= len(examples.splitlines()) <= 5
-    for code in (0, 1, 2, 130, 143):
+    for code in (0, 1, 2, 75, 130, 143):
         assert re.search(rf"^  {code} +\S", help_text, re.MULTILINE)
     assert environment.reads == []
 
@@ -2469,3 +2469,55 @@ def test_real_signal_during_backend_work_exits_with_the_signal_code(
         f"live_qobuz.py: interrupted [bundle:{reason}]; sanitized report written\n"
     )
     assert _report(tmp_path)["reason"] == reason
+
+
+def test_temporary_failure_exits_75_with_a_retry_command(tmp_path, monkeypatch, capsys):
+    _media_status(monkeypatch, 503)
+
+    status = main(
+        ["--timeout", "9s"],
+        environ=_live_environment(tmp_path),
+        backend_factory=FakeBackend,
+    )
+
+    assert status == 75
+    output = capsys.readouterr()
+    assert output.out == f"{tmp_path / 'live-report.json'}\n"
+    assert output.err == (
+        "live_qobuz.py: verification failed "
+        "[interruption:interruption_request_failed]; sanitized report written\n"
+        "retry: just live-qobuz --verbose --timeout 9s\n"
+    )
+
+
+def test_permanent_failure_still_exits_1(tmp_path, monkeypatch):
+    _media_status(monkeypatch, 404)
+
+    assert (
+        main([], environ=_live_environment(tmp_path), backend_factory=FakeBackend) == 1
+    )
+
+
+def test_timeout_reaches_every_media_request(tmp_path, monkeypatch):
+    backend = FakeBackend()
+    responses = [
+        FakeUrlResponse(chunks=[b"first bytes", b"unused"]),
+        FakeUrlResponse(chunks=[_mpeg_audio()]),
+    ]
+    timeouts = []
+
+    def recording_urlopen(request, timeout):
+        timeouts.append(timeout)
+        return responses.pop(0)
+
+    monkeypatch.setattr("qobuz_dl.http.urlopen", recording_urlopen)
+    _install_cbr_mp3_inspection(monkeypatch)
+
+    status = main(
+        ["--timeout=2m"],
+        environ=_live_environment(tmp_path),
+        backend_factory=lambda: backend,
+    )
+
+    assert status == 0
+    assert timeouts == [120, 120]

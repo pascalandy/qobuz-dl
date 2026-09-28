@@ -49,14 +49,18 @@ These statements document current local behavior. They do not claim that Qobuz r
 
 ### Where auth/config and the database live
 
-The current implementation stores config and duplicate-tracking state under one per-user directory:
+qobuz-dl picks one config file and keeps the downloaded-IDs database `qobuz_dl.db` beside it:
 
-| Platform/runtime | Config file | Downloaded-IDs database |
+1. `--config PATH`, if given
+2. `QOBUZ_DL_CONFIG`, if set
+3. The first existing default: `$XDG_CONFIG_HOME/qobuz-dl/config.ini` when `XDG_CONFIG_HOME` is an absolute path, then `~/.config/qobuz-dl/config.ini`; on Windows, `%APPDATA%\qobuz-dl\config.ini`
+
+| Platform/runtime | Default config file | Downloaded-IDs database |
 |---|---|---|
-| Linux and macOS | `~/.config/qobuz-dl/config.ini` | `~/.config/qobuz-dl/qobuz_dl.db` |
+| Linux and macOS | `$XDG_CONFIG_HOME/qobuz-dl/config.ini`, else `~/.config/qobuz-dl/config.ini` | `qobuz_dl.db` beside the config |
 | Windows | `%APPDATA%\qobuz-dl\config.ini` | `%APPDATA%\qobuz-dl\qobuz_dl.db` |
 
-These paths come from the running process: non-Windows systems use the current user's home directory plus `.config`, and Windows uses the nonempty `APPDATA` environment variable. When `APPDATA` is present, `qobuz-dl` keeps the existing `%APPDATA%\qobuz-dl\config.ini` and `%APPDATA%\qobuz-dl\qobuz_dl.db` paths. The CLI does not currently use `XDG_CONFIG_HOME` or macOS `~/Library/Application Support`.
+When no default config exists yet, setup creates it at the first default location. An explicit config is authoritative: if it is missing, the command exits `2` and suggests `qobuz-dl --reset --config PATH` instead of falling back to another file or starting setup. `--reset --config PATH` never touches the default config. `--config -` exits `2`. The CLI does not use macOS `~/Library/Application Support`.
 
 On Windows, `--help`, `--version`, and command-specific help remain available when `APPDATA` is missing or empty. A command that needs the config or database exits with status `1` and writes `qobuz-dl: APPDATA is not set. Set APPDATA to your Windows application-data directory and retry.` to standard error. The CLI exits before prompts, config or database changes, and network requests.
 
@@ -86,7 +90,7 @@ Before a command starts authentication or initializes the Qobuz client, the CLI 
 
 Treat the config file as a secret. The saved password digest is not plaintext, but it is credential-equivalent because the tool uses it directly for login. `--show-config` redacts `email`, `password`, `app_id`, `secrets`, `private_key`, and `user_auth_token` if those keys are present, but the actual config file contains the saved values. The current config creator does not write `user_auth_token`; Qobuz login returns that token when a command initializes, and the process keeps it in memory for that run.
 
-On POSIX systems, config creation and reset set the `qobuz-dl` directory to `0700` and `config.ini` to `0600`. Commands that load config also repair these permissions before reading it, without changing the file's contents.
+On POSIX systems, config creation and reset set `config.ini` to `0600` and any folder they create to `0700`. Commands that load config repair the file mode before reading it, without changing its contents. An existing folder is tightened to `0700` only at the default location; qobuz-dl never changes the mode of a folder you chose with `--config` or `QOBUZ_DL_CONFIG`. A dry run changes no mode.
 
 On Windows, config privacy depends on the directory's access control list. POSIX permission guarantees do not apply. If permission repair or config persistence fails, the CLI exits with a storage error that omits credentials and config contents.
 
@@ -155,7 +159,7 @@ Short form:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl -r
 ```
 
-`--reset` prompts for Qobuz email, Qobuz password, default download folder, and default quality, fetches the current Qobuz app ID and app secrets, rewrites `config.ini`, and exits before initializing the Qobuz client. It does not delete `qobuz_dl.db`; use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge` if you also want to remove duplicate-tracking history.
+`--reset` prompts for Qobuz email, Qobuz password, default download folder, and default quality, fetches the current Qobuz app ID and app secrets, rewrites `config.ini`, and exits before initializing the Qobuz client. To set up without prompts, for example in a script, pass `--email EMAIL --password-file PATH`, or `--password-file -` to read the password from the first line of stdin; the default folder and quality are used. Without a terminal, a missing `--email` or `--password-file` exits `2` and names the flag. It does not delete `qobuz_dl.db`; use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --purge` if you also want to remove duplicate-tracking history.
 
 `qobuz-dl` extracts the app ID and app secrets from the current Qobuz web bundle before it saves the config atomically. It rejects incomplete data, conflicting fragments that make the result ambiguous, and invalid secret encoding before saving. A first-run failure leaves no invalid config file, and a failed reset preserves the existing config byte for byte. The fixed `Unable to create configuration from the Qobuz web bundle: ... Configuration was not saved.` error reports a web-bundle format mismatch. It does not claim that Qobuz is down.
 

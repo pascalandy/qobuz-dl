@@ -29,6 +29,7 @@ from qobuz_dl.console import (
     epilog,
     format_command,
     interruption_exit_code,
+    parse_duration,
     read_secret,
     sigterm_raises,
 )
@@ -970,6 +971,8 @@ def build_parser() -> Parser:
                 "stderr says otherwise",
                 ExitCode.USAGE: "verification disabled, or an input is missing "
                 "or invalid",
+                ExitCode.TEMPORARY: "verification failed for a temporary reason, "
+                "such as a timeout or HTTP 5xx; report written; safe to retry",
                 ExitCode.INTERRUPTED: "interrupted (SIGINT)",
                 ExitCode.TERMINATED: "terminated (SIGTERM)",
             },
@@ -1004,6 +1007,16 @@ def build_parser() -> Parser:
         "--output",
         metavar="PATH",
         help="absolute .json path for the sanitized report, or - for stdout",
+    )
+    parser.add_argument(
+        "--timeout",
+        metavar="DURATION",
+        type=parse_duration,
+        default=http.DEFAULT_TIMEOUT,
+        help=(
+            "time limit for each network request, such as 30, 45s, or 2m "
+            f"(default: {http.DEFAULT_TIMEOUT}s)"
+        ),
     )
     parser.add_argument(
         "-v",
@@ -1043,7 +1056,7 @@ def main(
         print(f"{PROG}: {phase} passed", file=stderr, flush=True)
 
     try:
-        with sigterm_raises():
+        with sigterm_raises(), http.request_timeout(arguments.timeout):
             try:
                 inputs = _read_inputs(
                     environ, arguments, sys.stdin if stdin is None else stdin
@@ -1094,6 +1107,13 @@ def main(
                 file=stderr,
             )
         return ExitCode.OK
+    if outcome.retryable:
+        print(
+            f"{PROG}: verification failed {status}; sanitized report written\n"
+            f"retry: {_rerun_command(argv)}",
+            file=stderr,
+        )
+        return ExitCode.TEMPORARY
     print(
         f"{PROG}: verification failed {status}; sanitized report written\n"
         f"rerun: {_rerun_command(argv)}",

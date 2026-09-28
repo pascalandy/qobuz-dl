@@ -4,7 +4,9 @@ import re
 import socket
 import ssl
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -16,6 +18,27 @@ from urllib.request import Request, urlopen
 from qobuz_dl.exceptions import ApiRateLimitError
 
 DEFAULT_TIMEOUT = 30
+
+# The limit a request uses when its caller passes no timeout: every API,
+# bundle, media, and Last.fm request of one run shares it.
+_request_timeout: ContextVar[float] = ContextVar(
+    "qobuz_dl_request_timeout", default=DEFAULT_TIMEOUT
+)
+
+
+def current_timeout() -> float:
+    """Seconds a request may take when its caller gives no timeout."""
+    return _request_timeout.get()
+
+
+@contextmanager
+def request_timeout(seconds: float) -> Iterator[None]:
+    """Use ``seconds`` for every request without its own timeout, then restore."""
+    token = _request_timeout.set(seconds)
+    try:
+        yield
+    finally:
+        _request_timeout.reset(token)
 
 
 class HttpError(Exception):
@@ -256,9 +279,7 @@ def retry_rate_limited(
 
 
 class HttpClient:
-    def __init__(
-        self, headers: Mapping[str, str] | None = None, timeout=DEFAULT_TIMEOUT
-    ):
+    def __init__(self, headers: Mapping[str, str] | None = None, timeout=None):
         self.headers = dict(headers or {})
         self.timeout = timeout
 
@@ -277,8 +298,9 @@ def get(
     url: str,
     params: Mapping[str, object] | None = None,
     headers: Mapping[str, str] | None = None,
-    timeout=DEFAULT_TIMEOUT,
+    timeout=None,
 ) -> HttpResponse:
+    timeout = current_timeout() if timeout is None else timeout
     try:
         request = Request(_url_with_params(url, params), headers=dict(headers or {}))
         with urlopen(request, timeout=timeout) as response:
@@ -360,11 +382,12 @@ def stream_download(
     target,
     *,
     headers: Mapping[str, str] | None = None,
-    timeout=DEFAULT_TIMEOUT,
+    timeout=None,
     chunk_size=DEFAULT_CHUNK_SIZE,
     progress=None,
     retry_rate_limited=False,
 ) -> int:
+    timeout = current_timeout() if timeout is None else timeout
     try:
         request = Request(url, headers=dict(headers or {}))
         response = (

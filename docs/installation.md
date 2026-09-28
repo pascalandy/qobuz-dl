@@ -19,7 +19,7 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl
 
 Git must be available on `PATH` because `uv` fetches the source repository. The repository URL follows the current default branch. A later run can therefore resolve to a newer commit.
 
-The first run creates persistent qobuz-dl state under your user config directory. On Linux and macOS, the config is `~/.config/qobuz-dl/config.ini`. On Windows, it is `%APPDATA%\qobuz-dl\config.ini`. The downloaded-IDs database is `qobuz_dl.db` beside the config.
+The first run creates persistent qobuz-dl state under your user config directory. On Linux and macOS, the config is `$XDG_CONFIG_HOME/qobuz-dl/config.ini` when `XDG_CONFIG_HOME` is set, else `~/.config/qobuz-dl/config.ini`. On Windows, it is `%APPDATA%\qobuz-dl\config.ini`. The downloaded-IDs database is `qobuz_dl.db` beside the config. `--config PATH` or `QOBUZ_DL_CONFIG` selects another file; see [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live).
 
 The config and database remain after the temporary `uvx` environment exits. Later one-shot runs and persistent installs reuse them. See [Account and authentication](use-cases.md#where-authconfig-and-the-database-live) for the stored fields, security notes, and portability steps.
 
@@ -93,7 +93,7 @@ just verify-install-revision FULL_40_CHARACTER_COMMIT_SHA
 
 The verifier requires network access. It checks the resolved Git provenance, package version, console entry points, and runtime dependencies. The actual qobuz-dl probes are limited to `--help` and `--version`. Startup tests prove that these commands do not initialize or write qobuz-dl config.
 
-The verifier uses temporary uv cache, tool, bin, managed-Python, work, and temp locations. It disables uv config discovery and preserves `HOME`. It scopes `APPDATA`, `LOCALAPPDATA`, and XDG paths to temporary locations for software that honors them. On POSIX systems, the qobuz-dl config path remains under the preserved `HOME/.config`. The verifier makes no isolation claim for stateful qobuz-dl commands. See [Testing](testing.md#verify-the-public-git-install) for the full contract.
+The verifier uses temporary uv cache, tool, bin, managed-Python, work, and temp locations. It disables uv config discovery and preserves `HOME`. It scopes `APPDATA`, `LOCALAPPDATA`, and XDG paths to temporary locations for software that honors them. qobuz-dl checks `XDG_CONFIG_HOME` first, but an existing config under the preserved `HOME/.config` still wins when the temporary location holds none. The verifier makes no isolation claim for stateful qobuz-dl commands. See [Testing](testing.md#verify-the-public-git-install) for the full contract.
 
 ## Run from a local checkout
 

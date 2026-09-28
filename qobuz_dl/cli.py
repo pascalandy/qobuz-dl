@@ -15,6 +15,7 @@ from qobuz_dl import envelope, http
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
 from qobuz_dl.commands import (
+    CONFIG_ENV,
     DEBUG_ENV,
     PROG,
     QUALITY_CHOICES,
@@ -30,6 +31,7 @@ from qobuz_dl.console import (
     format_command,
     interruption_exit_code,
     prompt,
+    read_secret,
     redact,
     render,
     scan_options,
@@ -43,6 +45,7 @@ from qobuz_dl.core import (
     RunProblem,
     RunResult,
     SourceError,
+    expand_source_lines,
     expand_sources,
     parse_source_url,
 )
@@ -108,27 +111,48 @@ class _ConfigPathError(Exception):
     pass
 
 
-def _resolve_config_paths() -> tuple[str, str]:
+def _config_candidates() -> list[str]:
     if os.name == "nt":
         config_root = os.environ.get("APPDATA")
         if not config_root:
             raise _ConfigPathError
-    else:
-        config_root = os.path.join(os.path.expanduser("~"), ".config")
+        return [os.path.join(config_root, "qobuz-dl", "config.ini")]
+    roots = []
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config and os.path.isabs(xdg_config):
+        roots.append(xdg_config)
+    legacy = os.path.join(os.path.expanduser("~"), ".config")
+    if legacy not in roots:
+        roots.append(legacy)
+    return [os.path.join(root, "qobuz-dl", "config.ini") for root in roots]
 
-    config_path = os.path.join(config_root, "qobuz-dl")
-    return (
-        os.path.join(config_path, "config.ini"),
-        os.path.join(config_path, "qobuz_dl.db"),
+
+def _database_beside(config_file: str) -> str:
+    return os.path.join(os.path.dirname(config_file), "qobuz_dl.db")
+
+
+def _resolve_config_paths() -> tuple[str, str]:
+    """The default config: the first that exists, else the first candidate."""
+    candidates = _config_candidates()
+    config_file = next(
+        (candidate for candidate in candidates if os.path.isfile(candidate)),
+        candidates[0],
     )
+    return config_file, _database_beside(config_file)
 
 
-def _secure_config_path(config_file: str) -> None:
+def _secure_config_path(config_file: str, *, harden_parent: bool = True) -> None:
+    """Keep config private without taking over a folder the user chose.
+
+    A folder this creates is ``0700``. An existing folder is tightened only
+    for the default location; the config file itself is always ``0600``.
+    """
     try:
         directory = os.path.dirname(config_file)
         if directory:
+            created = not os.path.isdir(directory)
             os.makedirs(directory, mode=0o700, exist_ok=True)
-            if os.name == "posix":
+            if os.name == "posix" and (harden_parent or created):
                 os.chmod(directory, 0o700)
         if os.name == "posix":
             with suppress(FileNotFoundError):
@@ -137,8 +161,13 @@ def _secure_config_path(config_file: str) -> None:
         raise _ConfigStorageError from None
 
 
-def _write_config(config_file: str, config: configparser.ConfigParser) -> None:
-    _secure_config_path(config_file)
+def _write_config(
+    config_file: str,
+    config: configparser.ConfigParser,
+    *,
+    harden_parent: bool = True,
+) -> None:
+    _secure_config_path(config_file, harden_parent=harden_parent)
     temporary_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -199,12 +228,12 @@ class _MissingConfig(Exception):
     pass
 
 
-def _ensure_config_exists(config_file, *, interactive=True):
-    _secure_config_path(config_file)
+def _ensure_config_exists(config_file, *, interactive=True, harden_parent=True):
     if not os.path.isfile(config_file):
         if not interactive:
             raise _MissingConfig
-        _reset_config(config_file)
+        _reset_config(config_file, harden_parent=harden_parent)
+    _secure_config_path(config_file, harden_parent=harden_parent)
 
 
 def _read_config(config_file):
@@ -317,19 +346,34 @@ def _redacted_config_values(config_file):
         ) from None
 
 
-def _reset_config(config_file):
-    _secure_config_path(config_file)
+def _reset_config(config_file, *, email=None, password=None, harden_parent=True):
+    """Write a new config, prompting for anything not given.
+
+    With both ``email`` and ``password``, nothing is prompted and the default
+    folder and quality are used.
+    """
+    unattended = email is not None and password is not None
+    _secure_config_path(config_file, harden_parent=harden_parent)
     logger.info(f"{YELLOW}Creating config file: {config_file}")
     config = configparser.ConfigParser()
-    config["DEFAULT"]["email"] = prompt("Enter your email:\n- ")
-    password = getpass.getpass("Enter your password (input is hidden): ")
+    config["DEFAULT"]["email"] = (
+        email if email is not None else prompt("Enter your email:\n- ")
+    )
+    if password is None:
+        password = getpass.getpass("Enter your password (input is hidden): ")
     config["DEFAULT"]["password"] = hashlib.md5(password.encode("utf-8")).hexdigest()
     config["DEFAULT"]["default_folder"] = (
-        prompt("Folder for downloads (leave empty for default 'Qobuz Downloads')\n- ")
+        "Qobuz Downloads"
+        if unattended
+        else prompt(
+            "Folder for downloads (leave empty for default 'Qobuz Downloads')\n- "
+        )
         or "Qobuz Downloads"
     )
     config["DEFAULT"]["default_quality"] = (
-        prompt(
+        "6"
+        if unattended
+        else prompt(
             "Download quality (5, 6, 7, 27) "
             "[320, LOSSLESS, 24B <96KHZ, 24B >96KHZ]"
             "\n(leave empty for default '6')\n- "
@@ -351,7 +395,7 @@ def _reset_config(config_file):
     config["DEFAULT"]["folder_format"] = DEFAULT_FOLDER
     config["DEFAULT"]["track_format"] = DEFAULT_TRACK
     config["DEFAULT"]["smart_discography"] = "false"
-    _write_config(config_file, config)
+    _write_config(config_file, config, harden_parent=harden_parent)
     logger.info(
         f"{GREEN}Config file updated. Edit more options in {config_file}"
         "\nso you don't have to call custom flags every time you run "
@@ -452,13 +496,27 @@ def _handle_commands(qobuz, arguments, sources=(), run=None):
     return run.exit_code()
 
 
+def _dl_sources(parser, arguments):
+    dl_parser = subcommand_parsers(parser)["dl"]
+    if arguments.SOURCE.count("-") > 1:
+        dl_parser.error("'-' may appear only once")
+    sources = []
+    try:
+        for text in arguments.SOURCE:
+            if text == "-":
+                lines = sys.stdin.read().splitlines() if sys.stdin else []
+                sources.extend(expand_source_lines(lines, "<stdin>"))
+            else:
+                sources.extend(expand_sources([text]))
+    except SourceError as error:
+        dl_parser.error(str(error))
+    return sources
+
+
 def _validate_operands(parser, arguments):
     """Reject invalid sources and queries before config, login, or writes."""
     if arguments.command == "dl":
-        try:
-            return expand_sources(arguments.SOURCE)
-        except SourceError as error:
-            subcommand_parsers(parser)["dl"].error(str(error))
+        return _dl_sources(parser, arguments)
     if arguments.command == "lucky":
         if len(" ".join(arguments.QUERY).strip()) < MIN_QUERY_LENGTH:
             subcommand_parsers(parser)["lucky"].error(
@@ -488,10 +546,19 @@ def _operation(arguments):
     return arguments.command
 
 
+def _stdin_is_data(arguments):
+    """Whether stdin carries a password or sources, so nothing can prompt."""
+    if arguments.password_file == "-":
+        return True
+    return arguments.command == "dl" and "-" in arguments.SOURCE
+
+
 def _interactive(arguments):
     stdin = sys.stdin
     wants_input = not (arguments.no_input or arguments.json)
-    return wants_input and bool(stdin and stdin.isatty())
+    if not wants_input or _stdin_is_data(arguments):
+        return False
+    return bool(stdin and stdin.isatty())
 
 
 def _check_usage(parser, arguments, interactive):
@@ -515,8 +582,20 @@ def _check_usage(parser, arguments, interactive):
         )
     if arguments.dry_run and (arguments.reset or arguments.command == "fun"):
         parser.error(f"--dry-run cannot be combined with {actions[0]}")
-    if arguments.reset and not interactive:
-        parser.error("--reset prompts for your account; run it in a terminal")
+    if arguments.config == "-":
+        parser.error("--config needs a file path; standard input cannot hold config")
+    setup = [
+        (flag, value)
+        for flag, value in (
+            ("--email", arguments.email),
+            ("--password-file", arguments.password_file),
+        )
+    ]
+    if not arguments.reset and any(value for _flag, value in setup):
+        parser.error("--email and --password-file work only with --reset")
+    missing = [flag for flag, value in setup if not value]
+    if arguments.reset and not interactive and missing:
+        parser.error(f"--reset without a terminal needs {' and '.join(missing)}")
     if arguments.command == "fun" and not interactive:
         subcommand_parsers(parser)["fun"].error(
             "fun needs an interactive terminal; use 'qobuz-dl lucky QUERY' "
@@ -585,9 +664,15 @@ def _purge(session, database_file):
     return ExitCode.OK
 
 
-def _run(parser, arguments, session):
-    interactive = _interactive(arguments)
-    sources = _check_usage(parser, arguments, interactive)
+def _select_config(arguments):
+    """Return the config path, the database beside it, and whether it is the default.
+
+    An explicit config (``--config``, then the environment) is authoritative;
+    otherwise the first existing default candidate wins.
+    """
+    explicit = arguments.config or os.environ.get(CONFIG_ENV) or None
+    if explicit:
+        return explicit, _database_beside(explicit), False
     try:
         config_file, database_file = _resolve_config_paths()
     except _ConfigPathError:
@@ -596,16 +681,51 @@ def _run(parser, arguments, session):
             "directory and retry.",
             problem="appdata_missing",
         ) from None
+    return config_file, database_file, True
+
+
+def _read_password(parser, source):
+    try:
+        return read_secret(source, sys.stdin)
+    except (OSError, UnicodeError):
+        parser.error(f"--password-file could not be read: {source}")
+    except ValueError:
+        parser.error("--password-file must hold the password on its first line")
+
+
+def _run(parser, arguments, session):
+    interactive = _interactive(arguments)
+    sources = _check_usage(parser, arguments, interactive)
+    config_file, database_file, default_location = _select_config(arguments)
     startup = _classify_startup(arguments)
 
     config_values = None
     try:
         if arguments.reset:
-            _reset_config(config_file)
+            password = (
+                _read_password(parser, arguments.password_file)
+                if arguments.password_file
+                else None
+            )
+            existed = os.path.isfile(config_file)
+            _reset_config(
+                config_file,
+                email=arguments.email,
+                password=password,
+                harden_parent=default_location,
+            )
+            session.data = {"config_path": config_file, "created": not existed}
             return ExitCode.OK
         if startup.needs_config:
+            if not default_location and not os.path.isfile(config_file):
+                # An explicit config never falls back or triggers setup.
+                raise _MissingConfig
             if not arguments.dry_run:
-                _ensure_config_exists(config_file, interactive=interactive)
+                _ensure_config_exists(
+                    config_file,
+                    interactive=interactive,
+                    harden_parent=default_location,
+                )
             elif not os.path.isfile(config_file):
                 # A dry run never creates, prompts for, or repairs config.
                 raise _MissingConfig
@@ -616,10 +736,12 @@ def _run(parser, arguments, session):
         elif arguments.show_config:
             settings = _redacted_config_text(config_file)
     except _MissingConfig:
-        parser.error(
-            f"no config file at {config_file}; create it in a terminal with "
-            "'qobuz-dl --reset'"
+        create = format_command(
+            (PROG, "--reset")
+            if default_location
+            else (PROG, "--reset", "--config", config_file)
         )
+        parser.error(f"no config file at {config_file}; create it: {create}")
     except _ConfigStorageError:
         raise _Failure(
             "Unable to access configuration securely. "
@@ -761,7 +883,7 @@ def main(argv=None):
     with stderr_logging(logging.getLogger(PACKAGE_LOGGER), level, color):
         problems = []
         try:
-            with sigterm_raises():
+            with sigterm_raises(), http.request_timeout(arguments.timeout):
                 code = _run(parser, arguments, session)
         except KeyboardInterrupt as interruption:
             message = "interrupted; finished files were kept"
