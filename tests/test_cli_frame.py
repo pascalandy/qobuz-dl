@@ -12,7 +12,7 @@ import qobuz_dl.cli as cli
 from qobuz_dl import http
 from qobuz_dl.color import CYAN, YELLOW
 from qobuz_dl.commands import qobuz_dl_args
-from qobuz_dl.console import Terminated, prompt, subcommand_parsers
+from qobuz_dl.console import Terminated, format_command, prompt, subcommand_parsers
 from qobuz_dl.core import RunItem
 from qobuz_dl.downloader import DownloadResult
 from qobuz_dl.exceptions import AuthenticationError
@@ -353,26 +353,26 @@ def test_verbosity_changes_only_stderr(monkeypatch, tmp_path, capsys, outcome):
     assert runs[("--debug",)][1].err == "debug detail\nprogress line\n" + summary
 
 
+LUCKY = ("lucky", "no such record")
+SEE_WHY = f"see why: {format_command(('qobuz-dl', '--verbose', *LUCKY))}\n"
+RETRY = f"retry: {format_command(('qobuz-dl', *LUCKY))}\n"
+
+
 @pytest.mark.parametrize(
     ("outcomes", "code", "expected"),
     [
-        (
-            "no-match",
-            1,
-            'qobuz-dl: no results for "no such record"\n'
-            "see why: qobuz-dl --verbose lucky 'no such record'\n",
-        ),
+        ("no-match", 1, 'qobuz-dl: no results for "no such record"\n' + SEE_WHY),
         (
             "refusal",
             1,
             "qobuz-dl: 1 of 1 items could not be downloaded: quality_filter\n"
-            "see why: qobuz-dl --verbose lucky 'no such record'\n",
+            + SEE_WHY,
         ),
         (
             "temporary",
             75,
             "qobuz-dl: 2 of 3 items could not be downloaded: request_error (2)\n"
-            "retry: qobuz-dl lucky 'no such record'\n",
+            + RETRY,
         ),
     ],
 )
@@ -405,7 +405,7 @@ def test_failed_runs_say_what_failed_and_what_to_run_next(
     runtime.lucky_mode = lambda self, query, download=True: results(self)
     _use(monkeypatch, tmp_path, runtime)
 
-    assert cli.main(["lucky", "no such record"]) == code
+    assert cli.main(list(LUCKY)) == code
 
     assert capsys.readouterr().err == expected
 
