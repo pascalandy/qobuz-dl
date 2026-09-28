@@ -107,7 +107,8 @@ def _run_simulated_windows_cli(tmp_path, argv, appdata):
         [sys.executable, "-I", "-c", SIMULATED_WINDOWS_CHILD, *argv],
         cwd=sandbox,
         env=environment,
-        stdin=subprocess.DEVNULL,
+        # A pipe, not NUL: Windows reports the NUL device as a terminal.
+        input="",
         text=True,
         capture_output=True,
         check=False,
