@@ -47,6 +47,12 @@ def stubbed_pipeline(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _stderr(capture):
+    # Verbose gates write straight to file descriptor 2, so a Windows child's
+    # text output keeps its CRLF line endings.
+    return capture.err.replace("\r\n", "\n")
+
+
 def _success_line():
     digest = hashlib.sha256(b"wheel bytes").hexdigest()
     return f"{digest}  dist/qobuz_dl-1.0.0-py3-none-any.whl\n"
@@ -67,11 +73,12 @@ def test_verbosity_changes_only_stderr_on_success(stubbed_pipeline, capfd, flag)
     assert check_script.main([flag]) == 0
 
     output = capfd.readouterr()
+    error = _stderr(output)
     assert output.out == _success_line()
-    assert "+ " in output.err
-    assert "gate output\n" in output.err
-    assert "verified wheel sha256: " in output.err
-    assert ("finished in " in output.err) is (flag == "--debug")
+    assert "+ " in error
+    assert "gate output\n" in error
+    assert "verified wheel sha256: " in error
+    assert ("finished in " in error) is (flag == "--debug")
 
 
 def test_check_debug_environment_enables_debug(stubbed_pipeline, capfd, monkeypatch):
@@ -92,16 +99,17 @@ def test_gate_failure_exits_1_with_output_then_rerun(
     assert check_script.main(flags) == 1
 
     output = capfd.readouterr()
+    error = _stderr(output)
     assert output.out == ""
     command = check_script.format_command(failing)
     failure = (
         f"check.py: `{command}` exited with status 3\n"
         f"rerun: uv run --frozen {command}\n"
     )
-    assert "boom\n" in output.err
-    assert output.err.endswith(failure)
+    assert "boom\n" in error
+    assert error.endswith(failure)
     if not flags:
-        assert output.err == "boom\n" + failure
+        assert error == "boom\n" + failure
 
 
 def test_temporary_workspace_failures_rerun_the_durable_command(
