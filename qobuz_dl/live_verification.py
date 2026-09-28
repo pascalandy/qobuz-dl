@@ -33,7 +33,6 @@ from qobuz_dl.console import (
     sigterm_raises,
 )
 from qobuz_dl.core import QobuzDL
-from qobuz_dl.exceptions import ApiRateLimitError
 
 ACTIVATION_ENV = "QOBUZ_DL_LIVE"
 ACTIVATION_VALUE = "I_UNDERSTAND_THIS_USES_QOBUZ"
@@ -163,15 +162,6 @@ class _ReportWriteFailure(Exception):
     def __init__(self, interruption: ExitCode | None = None) -> None:
         super().__init__("report_write_failed")
         self.interruption = interruption
-
-
-def _is_temporary(error: BaseException) -> bool:
-    """Whether ``error`` shows a temporary condition that a rerun may clear."""
-    if isinstance(error, (ApiRateLimitError, http.HttpRateLimitError, TimeoutError)):
-        return True
-    return isinstance(error, http.HttpStatusError) and (
-        error.status_code == 429 or error.status_code >= 500
-    )
 
 
 class RealBackend:
@@ -378,7 +368,7 @@ def _probe_controlled_interruption(url: str, destination: Path):
         raise VerificationFailure(
             "interruption",
             "interruption_request_failed",
-            retryable=_is_temporary(error),
+            retryable=http.is_retryable(error),
         ) from None
 
     if received <= 0:
@@ -871,7 +861,11 @@ def verify(
                 download_result.state != "finalized"
                 or download_result.reason != "downloaded"
             ):
-                raise VerificationFailure("download", "download_failed")
+                raise VerificationFailure(
+                    "download",
+                    "download_failed",
+                    retryable=download_result.retryable,
+                )
             passed("download")
 
             current_phase = "media"
@@ -908,7 +902,7 @@ def verify(
                 reason = "runtime_unavailable"
             else:
                 reason = "unexpected_error"
-                retryable = _is_temporary(error)
+                retryable = http.is_retryable(error)
             phases[current_phase] = "failed"
         finally:
             if temporary_directory is not None:

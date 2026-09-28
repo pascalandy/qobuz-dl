@@ -1,11 +1,16 @@
 import logging
 import os
-from dataclasses import dataclass
+import re
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from typing import Literal
+from urllib.parse import urlsplit
 
 from qobuz_dl import downloader, http, qopy
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import CYAN, OFF, RED, RESET, YELLOW
+from qobuz_dl.console import ExitCode
 from qobuz_dl.db import DownloadHistory
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.sanitize import sanitize_filename
@@ -54,6 +59,206 @@ class LastFmTrack:
 class _PlaylistOccurrence:
     item_id: str
     result: downloader.DownloadResult
+
+
+@dataclass(frozen=True)
+class Source:
+    """One validated download source.
+
+    ``location`` names where the source came from, such as ``urls.txt:3``;
+    it is ``None`` for a command-line argument.
+    """
+
+    kind: Literal["qobuz", "lastfm"]
+    url: str
+    location: str | None = None
+    url_type: str | None = None
+    item_id: str | None = None
+
+
+class SourceError(ValueError):
+    """A source that is neither a supported URL nor a readable text file."""
+
+
+@dataclass(frozen=True)
+class _UrlShape:
+    kind: Literal["qobuz", "lastfm"]
+    hosts: frozenset[str]
+    path: re.Pattern
+
+
+# Every URL the command line accepts. Only https, only these hosts, and only
+# these paths; a query string or fragment is allowed and ignored.
+URL_SHAPES = (
+    _UrlShape(
+        "qobuz",
+        frozenset({"play.qobuz.com", "open.qobuz.com", "www.qobuz.com"}),
+        re.compile(
+            r"(?:/[a-z]{2}-[a-z]{2})?"
+            r"/(?P<type>album|artist|track|playlist|label)"
+            r"(?:/[^/]+)?"
+            r"/(?P<id>[A-Za-z0-9]+)/?"
+        ),
+    ),
+    _UrlShape(
+        "lastfm",
+        frozenset({"last.fm", "www.last.fm"}),
+        re.compile(r"(?:/[a-z]{2}(?:-[a-z]{2})?)?/user/[^/]+/playlists/[A-Za-z0-9]+/?"),
+    ),
+)
+
+
+def parse_source_url(text: str, location: str | None = None) -> Source | None:
+    """Return the ``Source`` for a supported URL, or ``None`` for anything else."""
+    try:
+        parts = urlsplit(text)
+        hostname = parts.hostname
+    except ValueError:
+        return None
+    if parts.scheme != "https" or hostname is None or parts.netloc.lower() != hostname:
+        return None
+    for shape in URL_SHAPES:
+        if hostname not in shape.hosts:
+            continue
+        match = shape.path.fullmatch(parts.path)
+        if match is None:
+            return None
+        if shape.kind == "lastfm":
+            return Source("lastfm", text, location)
+        return Source("qobuz", text, location, match["type"], match["id"])
+    return None
+
+
+def _source_lines(path: str, location: str | None) -> list[str]:
+    try:
+        with open(path, encoding="utf-8") as stream:
+            return stream.read().splitlines()
+    except (OSError, UnicodeDecodeError) as error:
+        reason = error.strerror if isinstance(error, OSError) else "not UTF-8 text"
+        raise SourceError(
+            _source_message(location, f"cannot read text file {path!r}: {reason}")
+        ) from None
+
+
+def _source_message(location: str | None, message: str) -> str:
+    return message if location is None else f"{location}: {message}"
+
+
+def expand_sources(texts: Iterable[str], *, origin: str | None = None) -> list[Source]:
+    """Validate command-line sources and expand text files, before any login.
+
+    Each text is a supported Qobuz or Last.fm URL, or an existing UTF-8 text
+    file with one source per line; blank lines and ``#`` comments are skipped.
+    Files may include other files. A file that includes itself, directly or
+    through others, is an error; including one file twice is not.
+    ``origin`` labels the texts, for example ``<stdin>``, so errors can name
+    ``<stdin>:2``.
+    """
+    sources: list[Source] = []
+
+    def expand(text: str, location: str | None, active: tuple[str, ...]):
+        text = text.strip()
+        source = parse_source_url(text, location)
+        if source is not None:
+            sources.append(source)
+            return
+        if "://" not in text and os.path.isfile(text):
+            identity = os.path.realpath(text)
+            if identity in active:
+                raise SourceError(
+                    _source_message(location, f"{text!r} includes itself")
+                )
+            for number, line in enumerate(_source_lines(text, location), start=1):
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    expand(line, f"{text}:{number}", (*active, identity))
+            return
+        reason = (
+            "not a supported Qobuz or Last.fm URL"
+            if "://" in text
+            else "not a supported Qobuz or Last.fm URL, and no such file"
+        )
+        raise SourceError(_source_message(location, f"{reason}: {text!r}"))
+
+    for number, text in enumerate(texts, start=1):
+        expand(text, None if origin is None else f"{origin}:{number}", ())
+    return sources
+
+
+Classification = Literal["satisfied", "no_op", "permanent", "temporary"]
+
+# Ignored outcomes that follow the user's own policy rather than a failure.
+_POLICY_NO_OPS = frozenset({"type_filter", "empty_release"})
+
+
+@dataclass(frozen=True)
+class RunItem:
+    """One track or album outcome, and the source that asked for it."""
+
+    source: str
+    kind: Literal["album", "track"]
+    item_id: str
+    result: downloader.DownloadResult
+
+    @property
+    def classification(self) -> Classification:
+        result = self.result
+        if result.state == "finalized":
+            return "satisfied"
+        if result.state == "ignored" and result.reason in _POLICY_NO_OPS:
+            return "no_op"
+        if result.state == "failed" and result.retryable:
+            return "temporary"
+        return "permanent"
+
+
+@dataclass(frozen=True)
+class RunProblem:
+    """A source that produced no items, such as a search with no match."""
+
+    code: str
+    message: str
+    source: str
+    retryable: bool = False
+
+    @property
+    def classification(self) -> Classification:
+        return "temporary" if self.retryable else "permanent"
+
+
+@dataclass
+class RunResult:
+    """Every outcome of one run; stdout paths and the exit code derive from it.
+
+    ``on_path`` receives each finalized path once, as soon as it is final.
+    """
+
+    on_path: Callable[[str], None] | None = None
+    items: list[RunItem] = field(default_factory=list)
+    problems: list[RunProblem] = field(default_factory=list)
+    _reported_paths: set[str] = field(default_factory=set, repr=False)
+
+    def add_item(self, item: RunItem) -> None:
+        self.items.append(item)
+        if item.result.state != "finalized":
+            return
+        for path in item.result.finalized_paths:
+            if path not in self._reported_paths:
+                self._reported_paths.add(path)
+                if self.on_path is not None:
+                    self.on_path(path)
+
+    def add_problem(self, problem: RunProblem) -> None:
+        self.problems.append(problem)
+
+    def exit_code(self) -> ExitCode:
+        """``1`` for any permanent failure, else ``75`` for temporary ones."""
+        classes = {entry.classification for entry in (*self.items, *self.problems)}
+        if "permanent" in classes:
+            return ExitCode.FAILURE
+        if "temporary" in classes:
+            return ExitCode.TEMPORARY
+        return ExitCode.OK
 
 
 def _normalize_search_query(query):
@@ -225,6 +430,8 @@ class QobuzDL:
         self.folder_format = folder_format
         self.track_format = track_format
         self.smart_discography = smart_discography
+        self.run_result = RunResult()
+        self._current_source = ""
 
     def initialize_client(self, email, pwd, app_id, secrets):
         self.client = qopy.Client(email, pwd, app_id, secrets)
@@ -242,20 +449,40 @@ class QobuzDL:
         ]  # avoid empty fields
 
     def download_from_id(self, item_id, album=True, alt_path=None):
+        kind = "album" if album else "track"
         try:
             dloader = self._new_downloader(item_id, alt_path)
             if album:
                 result = dloader.download_release()
             else:
                 result = dloader.download_track()
-        except (http.HttpError, ConnectionError):
-            result = downloader.DownloadResult("failed", "request_error")
+        except (http.HttpError, ConnectionError) as error:
+            result = downloader.DownloadResult(
+                "failed", "request_error", retryable=http.is_retryable(error)
+            )
+            self._record_outcome(kind, item_id, result)
         except NonStreamable:
             result = downloader.DownloadResult("failed", "not_streamable")
+            self._record_outcome(kind, item_id, result)
 
         if result.state == "finalized":
             self.download_history.record_legacy_id(item_id)
         return result
+
+    def _record_outcome(self, kind, item_id, result):
+        self.run_result.add_item(
+            RunItem(self._current_source, kind, str(item_id), result)
+        )
+
+    def _record_problem(self, code, message, *, retryable=False, source=None):
+        self.run_result.add_problem(
+            RunProblem(
+                code,
+                message,
+                self._current_source if source is None else source,
+                retryable,
+            )
+        )
 
     def _new_downloader(self, item_id, alt_path=None, *, verified_destinations=True):
         return downloader.Download(
@@ -272,6 +499,7 @@ class QobuzDL:
             self.track_format,
             download_history=self.download_history,
             verified_destinations=verified_destinations,
+            on_outcome=self._record_outcome,
         )
 
     def _resolve_url_download_plan(self, url):
@@ -282,7 +510,9 @@ class QobuzDL:
                 f'{RED}Invalid url: "{url}". Use urls from https://play.qobuz.com!'
             )
             return
+        return self._resolve_download_plan(url, url_type, item_id)
 
+    def _resolve_download_plan(self, url, url_type, item_id):
         if url_type == "album":
             return _DirectDownloadPlan(item_id=item_id, album=True)
         if url_type == "track":
@@ -388,11 +618,38 @@ class QobuzDL:
         if plan:
             self._execute_url_download_plan(plan)
 
+    def download_sources(self, sources: Iterable[Source]) -> RunResult:
+        """Download validated sources in order and return the run's outcomes.
+
+        A failed source is recorded as a problem and the run continues with
+        the next one. A Qobuz rate-limit abort still propagates.
+        """
+        for source in sources:
+            self._current_source = source.url
+            try:
+                if source.kind == "lastfm":
+                    self.download_lastfm_pl(source.url)
+                    continue
+                plan = self._resolve_download_plan(
+                    source.url, source.url_type, source.item_id
+                )
+                if plan:
+                    self._execute_url_download_plan(plan)
+            except http.HttpError as error:
+                logger.error(f"{RED}Could not read {source.url}: {error}")
+                self._record_problem(
+                    "request_error",
+                    f"could not read the source: {error}",
+                    retryable=http.is_retryable(error),
+                )
+        return self.run_result
+
     def download_list_of_urls(self, urls):
         if not urls or not isinstance(urls, list):
             logger.info(f"{OFF}Nothing to download")
             return
         for url in urls:
+            self._current_source = url
             if "last.fm" in url:
                 self.download_lastfm_pl(url)
             elif os.path.isfile(url):
@@ -574,12 +831,23 @@ class QobuzDL:
             html = http.get_text(playlist_url, timeout=10)
         except http.HttpError as e:
             logger.error(f"{RED}Playlist download failed: {e}")
+            self._record_problem(
+                "request_error",
+                f"could not read the Last.fm playlist: {e}",
+                retryable=http.is_retryable(e),
+                source=playlist_url,
+            )
             return
         parser = LastFmPlaylistParser()
         parser.feed(html)
 
         if not parser.tracks:
             logger.info(f"{OFF}Nothing found")
+            self._record_problem(
+                "no_tracks",
+                "the Last.fm playlist has no readable tracks",
+                source=playlist_url,
+            )
             return
 
         pl_title = sanitize_filename(parser.title)
@@ -594,6 +862,11 @@ class QobuzDL:
             results = self.search_by_type(query, "track", 1, lucky=True)
             if not results:
                 logger.info(f'{OFF}No Qobuz match for "{query}". Skipping')
+                self._record_problem(
+                    "no_match",
+                    f'no Qobuz track matches the Last.fm row "{query}"',
+                    source=playlist_url,
+                )
                 continue
             track_id = get_url_info(results[0])[1]
             if track_id:

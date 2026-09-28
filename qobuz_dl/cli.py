@@ -9,10 +9,19 @@ from contextlib import suppress
 from dataclasses import dataclass
 from io import StringIO
 
+from qobuz_dl import http
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
 from qobuz_dl.commands import QUALITY_CHOICES, RESET_COMMAND, qobuz_dl_args
-from qobuz_dl.core import QobuzDL
+from qobuz_dl.console import subcommand_parsers
+from qobuz_dl.core import (
+    QobuzDL,
+    RunProblem,
+    RunResult,
+    SourceError,
+    expand_sources,
+    parse_source_url,
+)
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK, validate_cover_options
 from qobuz_dl.exceptions import ApiRateLimitError, BundleError
 
@@ -281,34 +290,96 @@ def _quality_fallback_enabled(cli_no_fallback, config_no_fallback):
     return not (cli_no_fallback or config_no_fallback)
 
 
-def _handle_commands(qobuz, arguments):
+MIN_QUERY_LENGTH = 3
+
+
+def _print_path(path):
+    print(path, flush=True)
+
+
+def _download_search_results(qobuz, urls, query):
+    if not urls:
+        qobuz.run_result.add_problem(
+            RunProblem("no_match", f'no results for "{query}"', query)
+        )
+        return
+    sources = []
+    for url in urls:
+        source = parse_source_url(url)
+        if source is None:
+            qobuz.run_result.add_problem(
+                RunProblem(
+                    "unsupported_result", f"unsupported result URL: {url}", query
+                )
+            )
+        else:
+            sources.append(source)
+    qobuz.download_sources(sources)
+
+
+def _handle_commands(qobuz, arguments, sources=()):
+    """Run the command and return the exit code its outcomes call for."""
+    run = RunResult(on_path=_print_path)
+    qobuz.run_result = run
+    query = " ".join(getattr(arguments, "QUERY", None) or ())
     try:
         if arguments.command == "dl":
-            qobuz.download_list_of_urls(arguments.SOURCE)
+            qobuz.download_sources(sources)
         elif arguments.command == "lucky":
-            query = " ".join(arguments.QUERY)
             qobuz.lucky_type = arguments.type
             qobuz.lucky_limit = arguments.number
-            qobuz.lucky_mode(query)
+            _download_search_results(
+                qobuz, qobuz.lucky_mode(query, download=False), query
+            )
         else:
             qobuz.interactive_limit = arguments.limit
-            qobuz.interactive()
+            urls = qobuz.interactive(download=False)
+            if urls:
+                _download_search_results(qobuz, urls, "interactive selection")
 
+    except ApiRateLimitError as error:
+        logging.error(f"{RED}{error}")
+        run.add_problem(RunProblem("rate_limited", str(error), query, retryable=True))
+    except http.HttpError as error:
+        logging.error(f"{RED}Request failed: {error}")
+        run.add_problem(
+            RunProblem(
+                "request_error", str(error), query, retryable=http.is_retryable(error)
+            )
+        )
     except KeyboardInterrupt:
         logging.info(
             f"{RED}Interrupted by user\n{YELLOW}Already downloaded items will "
             "be skipped if you try to download the same releases again."
         )
+    return run.exit_code()
+
+
+def _validate_operands(parser, arguments):
+    """Reject invalid sources and queries before config, login, or writes."""
+    if arguments.command == "dl":
+        try:
+            return expand_sources(arguments.SOURCE)
+        except SourceError as error:
+            subcommand_parsers(parser)["dl"].error(str(error))
+    if arguments.command == "lucky":
+        if len(" ".join(arguments.QUERY).strip()) < MIN_QUERY_LENGTH:
+            subcommand_parsers(parser)["lucky"].error(
+                f"the search query needs at least {MIN_QUERY_LENGTH} characters"
+            )
+    return ()
 
 
 def main():
     parser = qobuz_dl_args()
     arguments = parser.parse_args()
+    sources = ()
     if arguments.command is not None:
         try:
             validate_cover_options(arguments.embed_art, arguments.no_cover)
         except ValueError as error:
             parser.error(str(error))
+        sources = _validate_operands(parser, arguments)
     try:
         config_file, database_file = _resolve_config_paths()
     except _ConfigPathError:
@@ -410,9 +481,9 @@ def main():
             config_values["app_id"],
             config_values["secrets"],
         )
-        _handle_commands(qobuz, arguments)
     except ApiRateLimitError as error:
         sys.exit(f"{RED}{error}")
+    return _handle_commands(qobuz, arguments, sources)
 
 
 if __name__ == "__main__":

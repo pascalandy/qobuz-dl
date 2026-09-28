@@ -38,6 +38,19 @@ Run command-level help for detailed options:
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --help
 ```
 
+## Results and exit codes
+
+`dl`, `lucky`, and `fun` print each finalized audio path on stdout, one per line, as soon as the file is final. A reused verified artifact counts as finalized. A path appears once per run even when several requests resolve to it. Progress and errors go to stderr.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Every requested item is finalized or skipped by your own filter, such as `--albums-only` or an empty release |
+| `1` | At least one item failed for a lasting reason, such as a quality refusal under `--no-fallback`, a demo, a path conflict, no search match, or a permanent HTTP error |
+| `2` | An invalid source, text file, or search query; nothing ran and no login happened |
+| `75` | Every failure was temporary: a timeout, a dropped connection, HTTP 5xx or `429`, or exhausted rate-limit retries. A rerun is safe because verified artifacts are reused |
+
+A permanent failure outranks a temporary one: a run with both exits `1`.
+
 ## API rate-limit retries
 
 If a known replay-safe Qobuz API read returns HTTP `429`, qobuz-dl makes up to three total attempts. The policy covers catalog metadata, searches, favorites, user playlists, and the API request that fetches a track's media URL.
@@ -48,7 +61,7 @@ The cumulative requested wait is limited to 30 seconds for each API call. If the
 
 Login requests and unknown API endpoints remain single-attempt operations. qobuz-dl does not infer a numeric Qobuz quota. Other HTTP failures, transport failures, and invalid JSON do not trigger the retry policy.
 
-When retries run out, the CLI exits nonzero with `Qobuz API rate limit retries exhausted.` The message omits response bodies, headers, and request parameters. A collection stops before it starts the next item.
+When retries run out, the CLI reports `Qobuz API rate limit retries exhausted.` and stops before the next item. It exits `75`, or `1` when an earlier item already failed for a lasting reason. The message omits response bodies, headers, and request parameters.
 
 ## Audio rate-limit retries
 
@@ -73,6 +86,8 @@ Cover art, booklets, and other extras remain single-attempt downloads. Non-429 H
 - Qobuz playlist URLs
 - Last.fm playlist URLs
 - local text files containing one URL per line; lines starting with `#` are ignored
+
+qobuz-dl validates every source before it reads config or logs in. A Qobuz URL must use `https` on `play.qobuz.com`, `open.qobuz.com`, or `www.qobuz.com`, with an optional locale such as `/us-en`, then `album`, `artist`, `track`, `playlist`, or `label`, an optional slug, and the ID. A Last.fm URL must use `https` on `last.fm` or `www.last.fm`, with an optional locale, then `/user/<name>/playlists/<id>`. Query strings and fragments are ignored. Anything else must be an existing UTF-8 text file. A text file may list other text files; including the same file twice keeps both occurrences, but a file that includes itself, directly or through others, is an error. An invalid source exits `2` and names it, with `file:line` when it came from a text file.
 
 Examples:
 

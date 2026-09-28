@@ -1,8 +1,12 @@
+import socket
+import ssl
+from http.client import IncompleteRead
 from urllib.error import HTTPError, URLError
 
 import pytest
 
 from qobuz_dl import http
+from qobuz_dl.exceptions import ApiRateLimitError
 
 
 class FakeHeaders(dict):
@@ -222,3 +226,125 @@ def test_stream_download_raises_connection_error_on_content_length_mismatch(
         http.stream_download("https://media.example.test/short.flac", target)
 
     assert target.read_bytes() == b"abc"
+
+
+def _failing_urlopen(error):
+    def fake_urlopen(request, timeout):
+        raise error
+
+    return fake_urlopen
+
+
+TEMPORARY_FAILURES = {
+    "wrapped-timeout": URLError(socket.timeout("timed out")),
+    "read-timeout": TimeoutError("The read operation timed out"),
+    "refused": URLError(ConnectionRefusedError(111, "Connection refused")),
+    "reset": ConnectionResetError(104, "Connection reset by peer"),
+    "aborted": URLError(ConnectionAbortedError(103, "Software caused abort")),
+    "dns-try-again": URLError(
+        socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+    ),
+}
+PERMANENT_FAILURES = {
+    "certificate": URLError(
+        ssl.SSLCertVerificationError(1, "certificate verify failed")
+    ),
+    "dns-unknown-host": URLError(
+        socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+    ),
+    "malformed-url": ValueError("unknown url type: 'htps'"),
+    "local-permission": PermissionError(13, "Permission denied"),
+}
+
+
+@pytest.mark.parametrize("operation", ["get", "stream"])
+@pytest.mark.parametrize("failure", TEMPORARY_FAILURES, ids=str)
+def test_temporary_transport_failures_are_retryable(
+    tmp_path, monkeypatch, operation, failure
+):
+    monkeypatch.setattr(http, "urlopen", _failing_urlopen(TEMPORARY_FAILURES[failure]))
+
+    with pytest.raises(http.HttpTransportError) as error:
+        if operation == "get":
+            http.get("https://api.example.test/track/get")
+        else:
+            http.stream_download("https://media.example.test/a.flac", tmp_path / "a")
+
+    assert http.is_retryable(error.value) is True
+
+
+@pytest.mark.parametrize("operation", ["get", "stream"])
+@pytest.mark.parametrize("failure", PERMANENT_FAILURES, ids=str)
+def test_permanent_request_failures_are_not_retryable(
+    tmp_path, monkeypatch, operation, failure
+):
+    monkeypatch.setattr(http, "urlopen", _failing_urlopen(PERMANENT_FAILURES[failure]))
+
+    with pytest.raises(http.HttpRequestError) as error:
+        if operation == "get":
+            http.get("https://api.example.test/track/get")
+        else:
+            http.stream_download("https://media.example.test/a.flac", tmp_path / "a")
+
+    assert not isinstance(error.value, http.HttpTransportError)
+    assert http.is_retryable(error.value) is False
+
+
+def test_local_file_errors_during_a_stream_are_not_retryable(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        http, "urlopen", lambda request, timeout: FakeResponse(chunks=[b"abc"])
+    )
+
+    with pytest.raises(http.HttpRequestError) as error:
+        http.stream_download(
+            "https://media.example.test/a.flac", tmp_path / "missing" / "a.flac"
+        )
+
+    assert http.is_retryable(error.value) is False
+
+
+def test_truncated_transfer_is_retryable_and_still_a_connection_error(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        http,
+        "urlopen",
+        lambda request, timeout: FakeResponse(
+            headers={"content-length": "5"}, chunks=[b"abc"]
+        ),
+    )
+
+    with pytest.raises(http.HttpTruncatedError) as error:
+        http.stream_download("https://media.example.test/a.flac", tmp_path / "a")
+
+    assert isinstance(error.value, ConnectionError)
+    assert http.is_retryable(error.value) is True
+
+
+def test_chunked_incomplete_read_is_a_truncated_transfer(tmp_path, monkeypatch):
+    class IncompleteResponse(FakeResponse):
+        def read(self, size=-1):
+            raise IncompleteRead(b"ab", 3)
+
+    monkeypatch.setattr(http, "urlopen", lambda request, timeout: IncompleteResponse())
+
+    with pytest.raises(http.HttpTruncatedError):
+        http.stream_download("https://media.example.test/a.flac", tmp_path / "a")
+
+
+@pytest.mark.parametrize(
+    ("error", "retryable"),
+    [
+        (http.HttpStatusError(500), True),
+        (http.HttpStatusError(503), True),
+        (http.HttpStatusError(429), True),
+        (http.HttpStatusError(404), False),
+        (http.HttpStatusError(400), False),
+        (http.HttpRateLimitError("exhausted"), True),
+        (ApiRateLimitError("exhausted"), True),
+        (http.HttpRequestError("certificate"), False),
+        (RuntimeError("unrelated"), False),
+    ],
+)
+def test_retryability_of_status_and_rate_limit_errors(error, retryable):
+    assert http.is_retryable(error) is retryable
