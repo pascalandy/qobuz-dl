@@ -342,9 +342,109 @@ def test_verbosity_changes_only_stderr(monkeypatch, tmp_path, capsys, outcome):
     outs = {output.out for _code, output in runs.values()}
     assert codes == {0 if outcome == "success" else 1}
     assert outs == {"Music/01. One.flac\n"}
-    assert runs[()][1].err == ""
-    assert runs[("-v",)][1].err == "progress line\n"
-    assert runs[("--debug",)][1].err == "debug detail\nprogress line\n"
+    summary = (
+        "qobuz-dl: 1 of 2 items could not be downloaded: path_conflict\n"
+        if outcome == "failure"
+        else ""
+    )
+    hint = f"see why: qobuz-dl --verbose dl {URL}\n" if outcome == "failure" else ""
+    assert runs[()][1].err == summary + hint
+    assert runs[("-v",)][1].err == "progress line\n" + summary
+    assert runs[("--debug",)][1].err == "debug detail\nprogress line\n" + summary
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "code", "expected"),
+    [
+        (
+            "no-match",
+            1,
+            'qobuz-dl: no results for "no such record"\n'
+            "see why: qobuz-dl --verbose lucky 'no such record'\n",
+        ),
+        (
+            "refusal",
+            1,
+            "qobuz-dl: 1 of 1 items could not be downloaded: quality_filter\n"
+            "see why: qobuz-dl --verbose lucky 'no such record'\n",
+        ),
+        (
+            "temporary",
+            75,
+            "qobuz-dl: 2 of 3 items could not be downloaded: request_error (2)\n"
+            "retry: qobuz-dl lucky 'no such record'\n",
+        ),
+    ],
+)
+def test_failed_runs_say_what_failed_and_what_to_run_next(
+    monkeypatch, tmp_path, capsys, outcomes, code, expected
+):
+    def results(runtime):
+        if outcomes == "no-match":
+            return []
+        return ["https://play.qobuz.com/album/r1"]
+
+    def behavior(runtime):
+        if outcomes == "refusal":
+            runtime.run_result.add_item(
+                RunItem(URL, "track", "1", DownloadResult("ignored", "quality_filter"))
+            )
+        elif outcomes == "temporary":
+            _finalize("Music/01. One.flac")(runtime)
+            for track in ("2", "3"):
+                runtime.run_result.add_item(
+                    RunItem(
+                        URL,
+                        "track",
+                        track,
+                        DownloadResult("failed", "request_error", retryable=True),
+                    )
+                )
+
+    runtime = _runtime(behavior)
+    runtime.lucky_mode = lambda self, query, download=True: results(self)
+    _use(monkeypatch, tmp_path, runtime)
+
+    assert cli.main(["lucky", "no such record"]) == code
+
+    assert capsys.readouterr().err == expected
+
+
+@pytest.mark.parametrize(
+    "argv", [["dl", URL, "-ve"], ["dl", "-ve", URL], ["-v", "dl", URL, "-e"]]
+)
+def test_short_options_cluster_across_global_and_command_options(argv):
+    arguments = qobuz_dl_args().parse_args(argv)
+
+    assert (arguments.verbose, arguments.embed_art) == (True, True)
+
+
+def test_rejected_arguments_never_echo_credentials(capsys):
+    source = "https://evil.invalid/track/1?password=SECRET_SENTINEL&user_auth_token=T0K"
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["dl", source])
+
+    assert exc.value.code == 2
+    error = capsys.readouterr().err
+    assert "SECRET_SENTINEL" not in error
+    assert "T0K" not in error
+    assert "password=<redacted>" in error
+
+
+def test_default_mp3_template_substitution_is_not_a_warning(caplog):
+    from qobuz_dl import downloader
+
+    caplog.set_level(logging.INFO, logger="qobuz_dl.downloader")
+
+    downloader._clean_format_str(
+        downloader.DEFAULT_FOLDER, downloader.DEFAULT_TRACK, "MP3"
+    )
+    assert [r.levelno for r in caplog.records] == [logging.INFO]
+
+    caplog.clear()
+    downloader._clean_format_str("{album} [{bit_depth}]", "{tracktitle}", "MP3")
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
 
 
 def test_debug_environment_variable_enables_debug(monkeypatch, tmp_path, capsys):

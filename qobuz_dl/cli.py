@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import traceback
+from collections import Counter
 from contextlib import suppress
 from dataclasses import dataclass
 from io import StringIO
@@ -346,7 +347,7 @@ def _print_path(path):
     except UnicodeEncodeError:
         encoding = getattr(sys.stdout, "encoding", None) or "ascii"
         sys.stdout.write(line.encode(encoding, "backslashreplace").decode(encoding))
-        logging.warning(
+        logger.warning(
             "stdout cannot encode a finalized path, so it was printed with "
             "escapes; set PYTHONUTF8=1 to print it exactly"
         )
@@ -486,7 +487,44 @@ def _login(qobuz, config_values, retry):
         raise _Failure(f"login failed: {error}") from None
 
 
-def _run(parser, arguments, argv):
+def _failure_lines(run):
+    """Describe the unsatisfied items and problems of a run, one line each."""
+    unsatisfied = [
+        item for item in run.items if item.classification in ("permanent", "temporary")
+    ]
+    lines = []
+    if unsatisfied:
+        counts = Counter(item.result.reason for item in unsatisfied)
+        reasons = ", ".join(
+            reason if count == 1 else f"{reason} ({count})"
+            for reason, count in counts.items()
+        )
+        lines.append(
+            f"{len(unsatisfied)} of {len(run.items)} items could not be "
+            f"downloaded: {reasons}"
+        )
+    lines.extend(problem.message for problem in run.problems)
+    return lines
+
+
+def _report_run(color, run, code, argv, arguments):
+    """Say what failed in a run that exits 1 or 75, then what to run next."""
+    if code not in (ExitCode.FAILURE, ExitCode.TEMPORARY):
+        return
+    if code == ExitCode.TEMPORARY:
+        hint = f"retry: {format_command((PROG, *argv))}"
+    elif arguments.verbose or arguments.debug:
+        hint = None
+    else:
+        hint = f"see why: {format_command((PROG, '--verbose', *argv))}"
+    lines = [f"{PROG}: {line}" for line in _failure_lines(run)]
+    if hint:
+        lines.append(hint)
+    sys.stderr.write(render(redact("\n".join(lines)), color) + "\n")
+    sys.stderr.flush()
+
+
+def _run(parser, arguments, argv, color=False):
     interactive = _interactive(arguments)
     sources = _check_usage(parser, arguments, interactive)
     retry = f"retry: {format_command((PROG, *argv))}"
@@ -593,7 +631,9 @@ def _run(parser, arguments, argv):
         ),
     )
     _login(qobuz, config_values, retry)
-    return _handle_commands(qobuz, arguments, sources)
+    code = _handle_commands(qobuz, arguments, sources)
+    _report_run(color, qobuz.run_result, code, argv, arguments)
+    return code
 
 
 def _report(color, message, hint=None):
@@ -627,7 +667,7 @@ def main(argv=None):
     with stderr_logging(logging.getLogger(PACKAGE_LOGGER), level, color):
         try:
             with sigterm_raises():
-                return _run(parser, arguments, argv)
+                return _run(parser, arguments, argv, color)
         except KeyboardInterrupt as interruption:
             _report(color, "interrupted; finished files were kept")
             return interruption_exit_code(interruption)

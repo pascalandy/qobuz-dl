@@ -1117,7 +1117,12 @@ def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, s
             "bit_depth" in fs or "sampling_rate" in fs
         ):
             default = DEFAULT_FORMATS[file_format][i]
-            logger.error(
+            # The built-in template needs this substitution for every MP3
+            # download, so only a custom pattern deserves a warning.
+            log = (
+                logger.info if fs in (DEFAULT_FOLDER, DEFAULT_TRACK) else logger.warning
+            )
+            log(
                 f"{RED}invalid format string for format {file_format}"
                 f". defaulting to {default}"
             )

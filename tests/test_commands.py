@@ -1422,7 +1422,7 @@ def test_fun_downloads_the_interactive_queue_through_the_result_path(
 
 
 def test_path_that_stdout_cannot_encode_is_escaped_not_fatal(
-    monkeypatch, tmp_path, caplog
+    monkeypatch, tmp_path, capsys
 ):
     config_file = tmp_path / "config" / "config.ini"
     _write_valid_config(config_file)
@@ -1440,4 +1440,4 @@ def test_path_that_stdout_cannot_encode_is_escaped_not_fatal(
 
     ascii_stdout.flush()
     assert raw.getvalue() == b"M\\xfasica/01. Canci\\xf3n.flac\n"
-    assert "set PYTHONUTF8=1" in caplog.text
+    assert "set PYTHONUTF8=1" in capsys.readouterr().err

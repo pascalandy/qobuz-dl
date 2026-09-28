@@ -190,6 +190,8 @@ class Parser(argparse.ArgumentParser):
 
     def usage_error(self, message: str) -> ExitCode:
         """Print the usage-error format to stderr and return the usage code."""
+        # A rejected argument, such as a URL, can carry a credential.
+        message = redact(message)
         self.print_usage(sys.stderr)
         sys.stderr.write(
             f"{self.prog}: error: {message}\nrun '{self.command} --help' for usage\n"

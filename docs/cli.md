@@ -63,6 +63,8 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --h
 
 An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`.
 
+A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict`, then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise.
+
 Login failures exit `1`, or `75` when the login or web-bundle request failed for a temporary reason. Errors name what failed and, when there is one, the command to run next. Stack traces appear only with `--debug`, and every message masks email, password, token, and request-signature values. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
 
 ## API rate-limit retries
