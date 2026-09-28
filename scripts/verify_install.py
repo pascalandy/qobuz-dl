@@ -1,16 +1,35 @@
 from __future__ import annotations
 
+import argparse
 import json
+import logging
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+from qobuz_dl.console import (
+    ExitCode,
+    Parser,
+    configure_stderr_logging,
+    env_flag,
+    epilog,
+    format_command,
+    interruption_exit_code,
+    parse_duration,
+    sigterm_raises,
+)
+
+PROG = "verify_install.py"
+COMMAND = "uv run --frozen python scripts/verify_install.py"
+DEBUG_ENV = "VERIFY_INSTALL_DEBUG"
+logger = logging.getLogger("qobuz_dl.verify_install")
 
 FORK_REPOSITORY = "https://github.com/pascalandy/qobuz-dl.git"
 FLOATING_SOURCE = f"git+{FORK_REPOSITORY}"
@@ -52,7 +71,14 @@ print(json.dumps({
 
 
 class VerificationFailure(Exception):
-    pass
+    """A failed check; ``output`` is the failing command's own diagnostic."""
+
+    def __init__(
+        self, message: str, *, temporary: bool = False, output: str = ""
+    ) -> None:
+        super().__init__(message)
+        self.temporary = temporary
+        self.output = output
 
 
 def source_for_revision(revision: str | None) -> str:
@@ -182,8 +208,9 @@ def _run(
     *,
     cwd: Path,
     env: Mapping[str, str],
+    timeout: float = SUBPROCESS_TIMEOUT_SECONDS,
 ) -> str:
-    print(f"+ {shlex.join(command)}", file=sys.stderr, flush=True)
+    logger.info("+ %s", format_command(command))
     try:
         completed = subprocess.run(
             command,
@@ -193,16 +220,16 @@ def _run(
             stderr=subprocess.PIPE,
             text=True,
             check=False,
-            timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         raise VerificationFailure(
-            f"{command[0]} timed out after {SUBPROCESS_TIMEOUT_SECONDS} seconds"
+            f"{command[0]} timed out after {timeout:g} seconds", temporary=True
         ) from None
     if completed.returncode:
-        detail = completed.stderr.strip() or completed.stdout.strip()
         raise VerificationFailure(
-            f"{command[0]} exited with status {completed.returncode}: {detail}"
+            f"`{format_command(command)}` exited with status {completed.returncode}",
+            output=completed.stderr.strip() or completed.stdout.strip(),
         )
     return completed.stdout
 
@@ -213,6 +240,7 @@ def _probe_with_uvx(
     *,
     workspace: Path,
     env: Mapping[str, str],
+    timeout: float = SUBPROCESS_TIMEOUT_SECONDS,
     refresh: bool = False,
 ) -> dict[str, Any]:
     options = ["--no-config", "--isolated", "--no-progress"]
@@ -222,6 +250,7 @@ def _probe_with_uvx(
         (uvx, *options, "--from", source, "python", "-I", "-c", PROBE),
         cwd=workspace,
         env=env,
+        timeout=timeout,
     )
     try:
         record = json.loads(output)
@@ -235,12 +264,17 @@ def _probe_with_uvx(
 
 
 def _probe_with_python(
-    python: Path, *, workspace: Path, env: Mapping[str, str]
+    python: Path,
+    *,
+    workspace: Path,
+    env: Mapping[str, str],
+    timeout: float = SUBPROCESS_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     output = _run(
         (str(python), "-I", "-c", PROBE),
         cwd=workspace,
         env=env,
+        timeout=timeout,
     )
     try:
         record = json.loads(output)
@@ -258,13 +292,16 @@ def _smoke(
     *,
     workspace: Path,
     env: Mapping[str, str],
+    timeout: float = SUBPROCESS_TIMEOUT_SECONDS,
 ) -> dict[str, str]:
-    help_output = _run((*executable, "--help"), cwd=workspace, env=env)
+    help_output = _run((*executable, "--help"), cwd=workspace, env=env, timeout=timeout)
     if "usage: qobuz-dl" not in help_output:
         raise VerificationFailure(
             f"{executable[-1]} --help did not show qobuz-dl usage"
         )
-    version_output = _run((*executable, "--version"), cwd=workspace, env=env).strip()
+    version_output = _run(
+        (*executable, "--version"), cwd=workspace, env=env, timeout=timeout
+    ).strip()
     expected = f"qobuz-dl {EXPECTED_VERSION}"
     if version_output != expected:
         raise VerificationFailure(
@@ -320,7 +357,9 @@ def _clean_environment(root: Path) -> tuple[dict[str, str], dict[str, Path]]:
     return env, paths
 
 
-def verify(revision: str | None = None) -> dict[str, Any]:
+def verify(
+    revision: str | None = None, *, timeout: float = SUBPROCESS_TIMEOUT_SECONDS
+) -> dict[str, Any]:
     uv = shutil.which("uv")
     uvx = shutil.which("uvx")
     if uv is None or uvx is None:
@@ -343,6 +382,7 @@ def verify(revision: str | None = None) -> dict[str, Any]:
             requested_source,
             workspace=paths["work"],
             env=env,
+            timeout=timeout,
         )
         resolved_commit = validate_record(one_shot, root, "one-shot")
         if revision is not None and resolved_commit != revision.lower():
@@ -363,6 +403,7 @@ def verify(revision: str | None = None) -> dict[str, Any]:
                 ),
                 workspace=paths["work"],
                 env=env,
+                timeout=timeout,
             )
         }
 
@@ -370,13 +411,16 @@ def verify(revision: str | None = None) -> dict[str, Any]:
             (uv, "tool", "install", "--no-config", "--no-progress", pinned_source),
             cwd=paths["work"],
             env=env,
+            timeout=timeout,
         )
         tool_environment = paths["tools"] / "qobuz-dl"
         python = _environment_command(tool_environment, "python")
         python_path = _lexical_path_belongs_to(python, root, "persistent interpreter")
         if not python.is_file():
             raise VerificationFailure(f"persistent interpreter is missing: {python}")
-        persistent = _probe_with_python(python, workspace=paths["work"], env=env)
+        persistent = _probe_with_python(
+            python, workspace=paths["work"], env=env, timeout=timeout
+        )
         persistent_commit = validate_record(persistent, root, "persistent")
         compare_records(one_shot, persistent)
         if persistent_commit != resolved_commit:
@@ -395,7 +439,7 @@ def verify(revision: str | None = None) -> dict[str, Any]:
                     f"persistent executable is missing: {executable}"
                 )
             persistent_commands[name] = _smoke(
-                (str(executable),), workspace=paths["work"], env=env
+                (str(executable),), workspace=paths["work"], env=env, timeout=timeout
             )
         if one_shot_commands["qobuz-dl"] != persistent_commands["qobuz-dl"]:
             raise VerificationFailure(
@@ -408,20 +452,27 @@ def verify(revision: str | None = None) -> dict[str, Any]:
                 FLOATING_SOURCE,
                 workspace=paths["work"],
                 env=env,
+                timeout=timeout,
                 refresh=True,
             )
             final_commit = validate_record(final_record, root, "final one-shot")
             if final_commit != resolved_commit:
                 raise VerificationFailure(
-                    "the floating source moved during verification; rerun to verify one commit"
+                    "the floating source moved during verification; "
+                    "rerun to verify one commit",
+                    temporary=True,
                 )
 
         return {
             "source": requested_source,
             "resolved_commit": resolved_commit,
             "tools": {
-                "uv": _run((uv, "--version"), cwd=paths["work"], env=env).strip(),
-                "uvx": _run((uvx, "--version"), cwd=paths["work"], env=env).strip(),
+                "uv": _run(
+                    (uv, "--version"), cwd=paths["work"], env=env, timeout=timeout
+                ).strip(),
+                "uvx": _run(
+                    (uvx, "--version"), cwd=paths["work"], env=env, timeout=timeout
+                ).strip(),
             },
             "one_shot": one_shot,
             "persistent": persistent,
@@ -434,21 +485,119 @@ def verify(revision: str | None = None) -> dict[str, Any]:
         }
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) > 1:
-        print("usage: verify_install.py [FULL_40_HEX_REVISION]", file=sys.stderr)
-        return 2
+def _revision(text: str) -> str:
     try:
-        evidence = verify(arguments[0] if arguments else None)
-    except KeyboardInterrupt:
-        print("install verification interrupted", file=sys.stderr)
-        return 130
+        source_for_revision(text)
+    except VerificationFailure as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+    return text
+
+
+def build_parser() -> Parser:
+    parser = Parser(
+        prog=PROG,
+        command=COMMAND,
+        description=(
+            "Install the fork from its Git source into isolated temporary "
+            "environments with uvx and uv tool, check provenance, entry points, "
+            "and runtime requirements, then print one JSON evidence object on "
+            "stdout. Uses the network."
+        ),
+        epilog=epilog(
+            (
+                "just verify-install",
+                "just verify-install-revision 0123456789abcdef0123456789abcdef01234567",
+                f"{COMMAND} --verbose",
+                f"{COMMAND} --timeout 10m | jq -r .resolved_commit",
+            ),
+            {
+                ExitCode.OK: "the install verified; evidence JSON is on stdout",
+                ExitCode.FAILURE: "verification failed",
+                ExitCode.USAGE: "usage error, such as a revision that is not a "
+                "full SHA",
+                ExitCode.TEMPORARY: "a command timed out or the floating source "
+                "moved; safe to retry",
+                ExitCode.INTERRUPTED: "interrupted (SIGINT)",
+                ExitCode.TERMINATED: "terminated (SIGTERM)",
+            },
+        ),
+    )
+    parser.add_argument(
+        "revision",
+        metavar="REVISION",
+        nargs="?",
+        type=_revision,
+        help="full 40-character commit SHA to verify (default: the floating source)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="print each command to stderr before it runs",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "like --verbose, plus stack traces for unexpected errors; also "
+            f"enabled by {DEBUG_ENV}=1"
+        ),
+    )
+    parser.add_argument(
+        "--timeout",
+        metavar="DURATION",
+        type=parse_duration,
+        default=float(SUBPROCESS_TIMEOUT_SECONDS),
+        help=(
+            "time limit for each command, such as 300, 90s, or 10m "
+            f"(default: {SUBPROCESS_TIMEOUT_SECONDS}s)"
+        ),
+    )
+    return parser
+
+
+def _rerun_command(arguments, *, debug: bool = False) -> str:
+    command = ["uv", "run", "--frozen", "python", "scripts/verify_install.py"]
+    command.append("--debug" if debug else "--verbose")
+    if arguments.timeout != SUBPROCESS_TIMEOUT_SECONDS:
+        command.extend(("--timeout", f"{arguments.timeout:g}s"))
+    if arguments.revision:
+        command.append(arguments.revision)
+    return format_command(command)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = build_parser().parse_args(argv)
+    debug = arguments.debug or env_flag(DEBUG_ENV)
+    verbose = arguments.verbose or debug
+    configure_stderr_logging(logger, logging.INFO if verbose else logging.WARNING)
+    try:
+        with sigterm_raises():
+            evidence = verify(arguments.revision, timeout=arguments.timeout)
+    except KeyboardInterrupt as interruption:
+        print(f"{PROG}: interrupted", file=sys.stderr)
+        return interruption_exit_code(interruption)
     except (OSError, VerificationFailure) as error:
-        print(f"install verification failed: {error}", file=sys.stderr)
-        return 1
+        output = getattr(error, "output", "")
+        if output:
+            print(output, file=sys.stderr)
+        print(f"{PROG}: install verification failed: {error}", file=sys.stderr)
+        if getattr(error, "temporary", False):
+            print(f"retry: {_rerun_command(arguments)}", file=sys.stderr)
+            return ExitCode.TEMPORARY
+        print(f"rerun: {_rerun_command(arguments)}", file=sys.stderr)
+        return ExitCode.FAILURE
+    except Exception as error:
+        if debug:
+            traceback.print_exc()
+        print(
+            f"{PROG}: unexpected error: {error}\n"
+            f"rerun with a stack trace: {_rerun_command(arguments, debug=True)}",
+            file=sys.stderr,
+        )
+        return ExitCode.FAILURE
     print(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
-    return 0
+    return ExitCode.OK
 
 
 if __name__ == "__main__":

@@ -47,7 +47,11 @@ The runner performs these checks in order:
 6. Create a temporary virtual environment and install the exact wheel by its absolute path.
 7. From an empty directory outside the checkout, verify that `qobuz_dl` imports from the temporary environment.
 8. Repeat the seven CLI probes with the installed `qobuz-dl` and `qdl` entry points. Both version commands must print the exact package version.
-9. Print the verified wheel's SHA-256 digest and copy the verified wheel and the source distribution to `dist/`.
+9. Copy the verified wheel and the source distribution to `dist/`.
+
+On success, the runner prints one line on stdout, the verified wheel's SHA-256 digest and `dist/` path in `sha256sum` format, and nothing on stderr. When a gate fails, stderr shows that gate's captured output, a line naming the failed command, and the command that reruns it; the exit status is `1`. A gate that ran inside the temporary workspace reruns as `uv run --frozen python scripts/check.py --verbose`.
+
+Add `--verbose` to stream each gate's command and output to stderr. Add `--debug`, or set `CHECK_DEBUG=1`, for gate timings and stack traces of unexpected errors. GitHub Actions runs the gate with `--verbose`; `just ci` stays quiet. Each gate runs in its own process group, so SIGINT or SIGTERM stops the gate and every tool it started, and the runner exits `130` or `143`. Run `uv run --frozen python scripts/check.py --help` for its flags and exit codes.
 
 Run individual checks:
 
@@ -159,6 +163,8 @@ The JSON result records the source URL, resolved commit, package and Python vers
 
 The package version is identity metadata, not revision evidence. The Git URL and resolved commit establish provenance.
 
+The verifier prints the JSON evidence object on stdout and nothing on stderr unless it fails. A failure shows the failing command's own output, the failure, and a rerun command with `--verbose`, which prints each command before it runs. `--timeout DURATION` bounds each command; the default is 300 seconds. A timeout, or a floating source that moves during verification, exits `75` because a rerun can succeed; other verification failures, including uv network errors, exit `1`, and an invalid revision exits `2`. Run `uv run --frozen python scripts/verify_install.py --help` for the flags and exit codes.
+
 `just ci` does not run this verifier. Default local and hosted CI remain offline with respect to the fork installation source and do not depend on GitHub availability.
 
 ## Prepare the live Qobuz verifier
@@ -182,23 +188,22 @@ bash -eu <<'LIVE_QOBUZ'
 receipt_dir="$(mktemp -d)"
 
 read -r -p 'Qobuz email: ' QOBUZ_DL_LIVE_EMAIL </dev/tty
-read -r -s -p 'Qobuz password: ' QOBUZ_DL_LIVE_PASSWORD </dev/tty
+read -r -s -p 'Qobuz password: ' password </dev/tty
 printf '\n'
 read -r -p 'Authorized Qobuz track ID: ' QOBUZ_DL_LIVE_TRACK_ID </dev/tty
 read -r -p 'Search query: ' QOBUZ_DL_LIVE_SEARCH_QUERY </dev/tty
 read -r -p 'Quality (5, 6, 7, or 27): ' QOBUZ_DL_LIVE_QUALITY </dev/tty
 
-export QOBUZ_DL_LIVE_EMAIL QOBUZ_DL_LIVE_PASSWORD
-export QOBUZ_DL_LIVE_TRACK_ID QOBUZ_DL_LIVE_SEARCH_QUERY QOBUZ_DL_LIVE_QUALITY
-export QOBUZ_DL_LIVE_REPORT="$receipt_dir/live-qobuz.json"
+export QOBUZ_DL_LIVE_EMAIL QOBUZ_DL_LIVE_TRACK_ID
+export QOBUZ_DL_LIVE_SEARCH_QUERY QOBUZ_DL_LIVE_QUALITY
 export QOBUZ_DL_LIVE=I_UNDERSTAND_THIS_USES_QOBUZ
 
-printf 'Sanitized receipt: %s\n' "$QOBUZ_DL_LIVE_REPORT"
-just live-qobuz
+printf '%s\n' "$password" |
+  just live-qobuz --verbose --password-file - --output "$receipt_dir/live-qobuz.json"
 LIVE_QOBUZ
 ```
 
-The subshell removes the input variables from your environment when the command ends. The verifier creates a private temporary config and separate temporary destinations for the interruption probe and the complete download. The private config disables interpolation, so it reads credential values literally. The cleanup phase attempts to remove the private config and both destinations. A passed receipt requires a `passed` cleanup status. Any cleanup failure makes the complete run fail. The report path must be an absolute path to a `.json` file in an existing directory.
+The password reaches the verifier only on standard input: `printf` is a shell builtin, so the secret never appears in a process argument or an exported variable. The verifier no longer reads `QOBUZ_DL_LIVE_PASSWORD`; if only that variable is set, it exits `2` and names `--password-file`. Every input has a flag and an environment fallback; run `just live-qobuz --help` for them and for the exit codes. The subshell removes the input variables from your environment when the command ends. The verifier creates a private temporary config and separate temporary destinations for the interruption probe and the complete download. The private config disables interpolation, so it reads credential values literally. The cleanup phase attempts to remove the private config and both destinations. A passed receipt requires a `passed` cleanup status. Any cleanup failure makes the complete run fail. The report path must be an absolute path to a `.json` file in an existing directory.
 
 After activation and input validation, `runtime` is the first receipt phase. The verifier requires its checkout root to be the exact Git top-level and `HEAD` to be a lowercase 40-character hexadecimal SHA. It completes this check before it creates the private config, extracts bundle credentials, or starts network work.
 
@@ -223,7 +228,9 @@ The JSON receipt contains its schema version, the full Git SHA, the operating sy
 
 If the runtime or Git provenance is unavailable, the receipt reports `runtime_unavailable`. Its `sha` and `platform` values are `null`. The `runtime` phase fails and every downstream phase, including `cleanup`, is skipped. The verifier does not create its temporary workspace, write its private config, or start network work. Cancellation during the runtime phase reports `interrupted` with the same null provenance and skipped downstream phases.
 
-During backend work, the verifier captures Python standard output and standard error and disables logging. The command prints only a generic result with a phase and fixed reason code. A `KeyboardInterrupt` during a verification phase becomes an `interrupted` failure. The verifier then attempts cleanup and writes a sanitized receipt. A cleanup failure replaces any earlier result with `cleanup_failed`. Only an exception during atomic receipt persistence reports `report_write_failed`. In that case, the command preserves an existing receipt. The receipt excludes the email, password, password hash, track ID, search query, app credentials, auth token, signed URL, local paths, backend output, and raw exceptions. Inspect the receipt before publication.
+During backend work, the verifier captures Python standard output and standard error and disables logging. On stdout it prints the receipt path, or the receipt itself with `--output -`. A passed run leaves stderr empty unless `--verbose` reports each passed phase. A failed run prints one line with the phase and a fixed reason code, followed by a rerun command with `--verbose`, and exits `1`. A cleanup failure replaces any earlier result with `cleanup_failed`. Only an exception during atomic receipt persistence reports `report_write_failed`. In that case, the command preserves an existing receipt.
+
+SIGINT or SIGTERM exits `130` or `143` wherever it arrives: while reading inputs, during a phase, during cleanup, or during receipt persistence. A signal during a phase records `interrupted` or `terminated`; the verifier then attempts cleanup and writes the sanitized receipt. A signal during cleanup records `cleanup_failed`, and a signal during persistence writes no receipt, but the exit status still reports the signal. The receipt excludes the email, password, password hash, track ID, search query, app credentials, auth token, signed URL, local paths, backend output, and raw exceptions. Inspect the receipt before publication.
 
 An offline test pass proves only that the verifier is prepared and disabled by default. It does not prove that Qobuz accepted the account, found the track, or delivered media. Only the authorized run in issue #48 can provide that evidence.
 

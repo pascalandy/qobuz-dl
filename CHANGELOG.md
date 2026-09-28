@@ -6,9 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Breaking
+
+- `scripts/check.py` (`just ci`) is silent on success except for one stdout line in `sha256sum` format, `<sha256>  dist/<wheel>`, which replaces `verified wheel sha256: <sha256>`. A failing gate exits `1` whatever its own status, and stderr shows its captured output followed by a rerun command. `--help` now prints help instead of running the gates. Each gate runs in its own process group, so an interrupt also stops the tools a gate started
+- `scripts/verify_install.py` exits `2` instead of `1` for an invalid revision or extra argument, and `75` instead of `1` when a command times out or the floating source moves during verification. The `+ command` echo on stderr appears only with `--verbose`
+- The live verifier (`just live-qobuz`) reads the password through `--password-file PATH|-` and rejects a lone `QOBUZ_DL_LIVE_PASSWORD` with exit `2`. It prints the report path on stdout, keeps stderr empty on success, and exits `130` or `143` instead of `1` for SIGINT or SIGTERM, including during cleanup and report writing
+
+### Added
+
+- `qobuz_dl.console` holds the command-line conventions shared by every entry point: exit codes, the usage-error format, help precedence, signal exits, color decisions, and secret input
+- `scripts/check.py` gains `-v/--verbose` and `--debug` (or `CHECK_DEBUG=1`); GitHub Actions runs it with `--verbose`
+- `scripts/verify_install.py` gains `-v/--verbose`, `--debug` (or `VERIFY_INSTALL_DEBUG=1`), and `--timeout DURATION`
+- The live verifier gains `--email`, `--password-file`, `--track-id`, `--query`, `--quality`, `-o/--output PATH|-`, and `-v/--verbose`; each input except the password falls back to its existing environment variable, and `QOBUZ_DL_LIVE_PASSWORD_FILE` names a password file
+
 ### Changed
 
 - Package maturity is now Beta while the unchanged access model continues to use app parameters derived from Qobuz's public web bundle, as documented in [Qobuz access and project status](docs/qobuz-access.md)
+- Every helper script's `--help` lists examples and exit codes, rejects abbreviated long options, and prints usage errors as usage, the error, and `run '<command> --help' for usage`
 
 ## [1.0.0] - 2026-06-12
 

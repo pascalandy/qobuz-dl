@@ -33,7 +33,7 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Quality gates
-        run: uv run --frozen python scripts/check.py
+        run: uv run --frozen python scripts/check.py --verbose
 
       - name: Verify tag matches package version
         run: |
