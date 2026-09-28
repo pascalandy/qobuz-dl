@@ -12,6 +12,13 @@ RESET_COMMAND = f"{RUN_COMMAND} -r"
 PROG = "qobuz-dl"
 DEBUG_ENV = "QOBUZ_DL_DEBUG"
 INSTALLED_NOTE = f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'."
+DRY_RUN_NOTE = (
+    "--dry-run prints candidate paths, and --json marks them 'planned' with an\n"
+    "'exists' observation. It writes no folder, file, M3U, config, or history\n"
+    "and reads no history, so the real run can still differ: transfers,\n"
+    "verification, publication, history, and earlier items in the same run\n"
+    "decide the final outcome."
+)
 COMMANDS = ("fun", "dl", "lucky", "help")
 
 DOWNLOAD_EXIT_CODES = {
@@ -84,6 +91,22 @@ def add_global_options(parser, *, suppress_defaults):
         help="never prompt; exit 2 when input is needed",
     )
     options.add_argument(
+        "--json",
+        action="store_true",
+        default=default,
+        help="print one JSON object on stdout instead of paths; implies --no-input",
+    )
+    options.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        default=default,
+        help=(
+            "log in and look up metadata, then print where each track would go, "
+            "writing nothing"
+        ),
+    )
+    options.add_argument(
         "--version",
         action="version",
         version=f"{PROG} {_package_version()}",
@@ -140,6 +163,9 @@ def lucky_args(subparsers):
             notes=(
                 INSTALLED_NOTE,
                 "A query with no results exits 1; a query under 3 characters exits 2.",
+                "-n now means --dry-run; use -l/--limit for the result count.",
+                "",
+                DRY_RUN_NOTE,
             ),
         ),
     )
@@ -160,7 +186,6 @@ def lucky_args(subparsers):
         help="number of search results to download (default: 1)",
     )
     lucky.add_argument(
-        "-n",
         "--number",
         dest="limit",
         type=positive_int,
@@ -197,6 +222,8 @@ def dl_args(subparsers):
                 "Every source is checked before login; an invalid one exits 2 and "
                 "names its file and line.",
                 "Each finalized audio path is printed on stdout.",
+                "",
+                DRY_RUN_NOTE,
                 "",
                 INSTALLED_NOTE,
             ),
@@ -351,6 +378,7 @@ def qobuz_dl_args(
                 INSTALLED_NOTE,
                 f"Use '{RUN_COMMAND} help <command>' for command-specific options.",
                 "For first-time setup, run --reset.",
+                "--json prints one object for dl, lucky, --show-config, and --purge.",
                 "Docs: https://github.com/pascalandy/qobuz-dl",
             ),
         ),

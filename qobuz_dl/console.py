@@ -99,6 +99,12 @@ class OptionScan:
     unknown_command: str | None = None
 
 
+def set_usage_error_hook(parser, hook) -> None:
+    """Call ``hook(message, hint)`` on every usage error of ``parser``."""
+    for candidate in (parser, *subcommand_parsers(parser).values()):
+        candidate.usage_error_hook = hook
+
+
 def subcommand_parsers(parser) -> dict[str, argparse.ArgumentParser]:
     """Map each subcommand name to its parser."""
     for action in parser._actions:
@@ -187,13 +193,16 @@ class Parser(argparse.ArgumentParser):
         kwargs.setdefault("formatter_class", argparse.RawDescriptionHelpFormatter)
         super().__init__(*args, **kwargs)
         self.command = command or self.prog
+        # Called with (message, hint) after the human text, for --json.
+        self.usage_error_hook = None
 
     def usage_error(self, message: str) -> ExitCode:
         """Print the usage-error format to stderr and return the usage code."""
+        hint = f"run '{self.command} --help' for usage"
         self.print_usage(sys.stderr)
-        sys.stderr.write(
-            f"{self.prog}: error: {message}\nrun '{self.command} --help' for usage\n"
-        )
+        sys.stderr.write(f"{self.prog}: error: {message}\n{hint}\n")
+        if self.usage_error_hook is not None:
+            self.usage_error_hook(message, hint)
         return ExitCode.USAGE
 
     def error(self, message):

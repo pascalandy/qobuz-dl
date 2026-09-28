@@ -81,4 +81,6 @@ print(run.exit_code())  # 0, 1, or 75, with the command-line meaning
 
 `qobuz_dl.http.is_retryable(error)` applies the same temporary-failure rule to an exception.
 
+`QobuzDL.preview_sources(sources)` is the dry run: it makes the same read-only metadata, search, and file-URL requests, records a `PlannedDestination(path, exists)` for each track a real run would publish, and writes nothing. Pass `downloads_db=None` so no history is opened. The `QobuzDL` constructor no longer creates the download directory; the first real download does, and `DownloadHistory.open` creates the folder that holds its database.
+
 Attributes, methods, and parameters are named to describe their purpose.

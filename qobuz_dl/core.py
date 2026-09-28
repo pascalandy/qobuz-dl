@@ -193,16 +193,30 @@ _POLICY_NO_OPS = frozenset({"type_filter", "empty_release"})
 
 @dataclass(frozen=True)
 class RunItem:
-    """One track or album outcome, and the source that asked for it."""
+    """One track or album outcome, and the source that asked for it.
+
+    A dry run records a ``PlannedDestination`` instead of a download result.
+    """
 
     source: str
     kind: Literal["album", "track"]
     item_id: str
-    result: downloader.DownloadResult
+    result: downloader.DownloadResult | downloader.PlannedDestination
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        """Finalized paths, or the candidate path of a planned track."""
+        if isinstance(self.result, downloader.PlannedDestination):
+            return (self.result.path,)
+        if self.result.state == "finalized":
+            return self.result.finalized_paths
+        return ()
 
     @property
     def classification(self) -> Classification:
         result = self.result
+        if isinstance(result, downloader.PlannedDestination):
+            return "satisfied"
         if result.state == "finalized":
             return "satisfied"
         if result.state == "ignored" and result.reason in _POLICY_NO_OPS:
@@ -240,9 +254,7 @@ class RunResult:
 
     def add_item(self, item: RunItem) -> None:
         self.items.append(item)
-        if item.result.state != "finalized":
-            return
-        for path in item.result.finalized_paths:
+        for path in item.paths:
             if path not in self._reported_paths:
                 self._reported_paths.add(path)
                 if self.on_path is not None:
@@ -415,7 +427,8 @@ class QobuzDL:
         smart_discography=False,
     ):
         downloader.validate_cover_options(embed_art, no_cover)
-        self.directory = create_and_return_dir(directory)
+        # The root is created by the first real download, never by a preview.
+        self.directory = os.path.normpath(directory)
         self.quality = quality
         self.embed_art = embed_art
         self.lucky_limit = lucky_limit
@@ -483,6 +496,14 @@ class QobuzDL:
                 retryable,
             )
         )
+
+    def preview_from_id(self, item_id, album=True, alt_path=None):
+        """Record where a real run would put this item's tracks; write nothing."""
+        dloader = self._new_downloader(item_id, alt_path)
+        if album:
+            dloader.preview_release()
+        else:
+            dloader.preview_track()
 
     def _new_downloader(self, item_id, alt_path=None, *, verified_destinations=True):
         return downloader.Download(
@@ -595,6 +616,16 @@ class QobuzDL:
         for item_id in plan.item_ids:
             self.download_from_id(item_id, plan.album, new_path)
 
+    def _preview_url_download_plan(self, plan):
+        if isinstance(plan, _DirectDownloadPlan):
+            self.preview_from_id(plan.item_id, plan.album)
+            return
+        collection = os.path.join(
+            self.directory, sanitize_filename(plan.collection_name)
+        )
+        for item_id in plan.item_ids:
+            self.preview_from_id(item_id, plan.album, collection)
+
     def _download_playlist_occurrences(self, item_ids, destination):
         return tuple(
             _PlaylistOccurrence(
@@ -624,16 +655,32 @@ class QobuzDL:
         A failed source is recorded as a problem and the run continues with
         the next one. A Qobuz rate-limit abort still propagates.
         """
+        return self._each_source(sources, preview=False)
+
+    def preview_sources(self, sources: Iterable[Source]) -> RunResult:
+        """Record where a real run would put every track, and write nothing.
+
+        The preview makes the same read-only metadata, search, and file-URL
+        requests as a real run. It creates no folder, M3U, cover, or audio
+        file and reads no history, so the real run can still decide
+        differently: transfers, verification, publication, history, and
+        earlier items in the same run all affect the final outcome.
+        """
+        return self._each_source(sources, preview=True)
+
+    def _each_source(self, sources, *, preview):
         for source in sources:
             self._current_source = source.url
             try:
                 if source.kind == "lastfm":
-                    self.download_lastfm_pl(source.url)
+                    self.download_lastfm_pl(source.url, preview=preview)
                     continue
                 plan = self._resolve_download_plan(
                     source.url, source.url_type, source.item_id
                 )
-                if plan:
+                if plan and preview:
+                    self._preview_url_download_plan(plan)
+                elif plan:
                     self._execute_url_download_plan(plan)
             except http.HttpError as error:
                 logger.error(f"{RED}Could not read {source.url}: {error}")
@@ -818,7 +865,7 @@ class QobuzDL:
 
             return final_url_list
 
-    def download_lastfm_pl(self, playlist_url):
+    def download_lastfm_pl(self, playlist_url, *, preview=False):
         # Apparently, last fm API doesn't have a playlist endpoint. If you
         # find out that it has, please fix this!
         try:
@@ -866,6 +913,10 @@ class QobuzDL:
             if track_id:
                 track_ids.append(track_id)
 
+        if preview:
+            for track_id in track_ids:
+                self.preview_from_id(track_id, False, pl_directory)
+            return
         occurrences = self._download_playlist_occurrences(track_ids, pl_directory)
         if not self.no_m3u_for_playlists:
             create_and_return_dir(pl_directory)

@@ -145,7 +145,7 @@ def test_cli_setup_persists_one_utf8_md5_and_forwards_it_unchanged(
         initialized_passwords.append(pwd)
         original_initialize_client(self, email, pwd, app_id, secrets)
 
-    def exercise_favorites(qobuz, arguments, sources=()):
+    def exercise_favorites(qobuz, arguments, sources=(), run=None):
         clients.append(qobuz.client)
         assert qobuz.client.get_favorite_albums(offset=0, limit=1) == {"items": []}
 

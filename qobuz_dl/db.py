@@ -342,6 +342,11 @@ class DownloadHistory:
 
         connection = None
         try:
+            # The download root, which may hold the database, is no longer
+            # created up front, so opening history creates its own folder.
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
             connection = sqlite3.connect(path, isolation_level=None)
             created = _migrate(connection)
         except (sqlite3.Error, _UnsupportedDatabaseError, OSError) as error:
