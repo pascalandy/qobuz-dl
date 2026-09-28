@@ -791,7 +791,10 @@ class Download:
                     self.embed_art,
                 )
             except Exception as e:
-                logger.error(f"{RED}Error tagging the file: {e}", exc_info=True)
+                logger.error(
+                    f"{RED}Error tagging the file: {e}",
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
                 finalized_paths = (final_file,) if os.path.isfile(final_file) else ()
                 return self._emit(
                     "track",
@@ -896,7 +899,10 @@ class Download:
                     finalize=False,
                 )
             except Exception as error:
-                logger.error(f"{RED}Error tagging the file: {error}", exc_info=True)
+                logger.error(
+                    f"{RED}Error tagging the file: {error}",
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
                 raise _TransactionFailure("tagging_error") from error
 
             transaction.fsync_staged()
@@ -1111,7 +1117,12 @@ def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, s
             "bit_depth" in fs or "sampling_rate" in fs
         ):
             default = DEFAULT_FORMATS[file_format][i]
-            logger.error(
+            # The built-in template needs this substitution for every MP3
+            # download, so only a custom pattern deserves a warning.
+            log = (
+                logger.info if fs in (DEFAULT_FOLDER, DEFAULT_TRACK) else logger.warning
+            )
+            log(
                 f"{RED}invalid format string for format {file_format}"
                 f". defaulting to {default}"
             )

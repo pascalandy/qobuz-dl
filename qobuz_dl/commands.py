@@ -1,12 +1,36 @@
 import argparse
 from importlib import metadata
 
+from qobuz_dl.console import EXIT_CODE_MEANINGS, ExitCode, Parser, epilog
+
 QUALITY_HELP = "5=MP3 320, 6=FLAC lossless, 7=24-bit <=96kHz, 27=24-bit >96kHz"
 QUALITY_CHOICES = (5, 6, 7, 27)
 LUCKY_TYPE_CHOICES = ("artist", "album", "track", "playlist")
 FORK_SOURCE = "git+https://github.com/pascalandy/qobuz-dl.git"
 RUN_COMMAND = f"uvx --from {FORK_SOURCE} qobuz-dl"
 RESET_COMMAND = f"{RUN_COMMAND} -r"
+PROG = "qobuz-dl"
+DEBUG_ENV = "QOBUZ_DL_DEBUG"
+INSTALLED_NOTE = f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'."
+COMMANDS = ("fun", "dl", "lucky", "help")
+
+DOWNLOAD_EXIT_CODES = {
+    ExitCode.OK: "every item finalized or skipped by your own filter",
+    ExitCode.FAILURE: "an item failed for a lasting reason, or login failed",
+    ExitCode.USAGE: EXIT_CODE_MEANINGS[ExitCode.USAGE]
+    + ", including an invalid source",
+    ExitCode.TEMPORARY: "every failure was temporary; safe to retry",
+    ExitCode.INTERRUPTED: EXIT_CODE_MEANINGS[ExitCode.INTERRUPTED],
+    ExitCode.TERMINATED: EXIT_CODE_MEANINGS[ExitCode.TERMINATED],
+}
+TOP_LEVEL_EXIT_CODES = {
+    ExitCode.OK: "success",
+    ExitCode.FAILURE: "runtime failure, such as a failed item, login, or config",
+    ExitCode.USAGE: "usage error, including an invalid source or a bare invocation",
+    ExitCode.TEMPORARY: "temporary failure; safe to retry",
+    ExitCode.INTERRUPTED: EXIT_CODE_MEANINGS[ExitCode.INTERRUPTED],
+    ExitCode.TERMINATED: EXIT_CODE_MEANINGS[ExitCode.TERMINATED],
+}
 
 
 def _package_version():
@@ -14,6 +38,57 @@ def _package_version():
         return metadata.version("qobuz-dl")
     except metadata.PackageNotFoundError:
         return "unknown"
+
+
+def positive_int(text):
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid count {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"the count must be at least 1, not {value}")
+    return value
+
+
+def add_global_options(parser, *, suppress_defaults):
+    """Register the options every command accepts, before or after its name.
+
+    Subcommand parsers use ``SUPPRESS`` defaults so an option given before
+    the command is not reset when the subcommand parser runs.
+    """
+    default = argparse.SUPPRESS if suppress_defaults else False
+    options = parser.add_argument_group("global options")
+    options.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=default,
+        help="show progress on stderr",
+    )
+    options.add_argument(
+        "--debug",
+        action="store_true",
+        default=default,
+        help=f"show debug logs and stack traces on stderr; also {DEBUG_ENV}=1",
+    )
+    options.add_argument(
+        "--no-color",
+        action="store_true",
+        default=default,
+        help="never color output; also NO_COLOR, TERM=dumb, or a non-terminal",
+    )
+    options.add_argument(
+        "--no-input",
+        action="store_true",
+        default=default,
+        help="never prompt; exit 2 when input is needed",
+    )
+    options.add_argument(
+        "--version",
+        action="version",
+        version=f"{PROG} {_package_version()}",
+        help="show the version and exit",
+    )
 
 
 def fun_args(subparsers, default_limit):
@@ -24,21 +99,23 @@ def fun_args(subparsers, default_limit):
             "queue results, choose quality, and download the queue."
         ),
         help="interactively search Qobuz and queue downloads",
-        epilog=(
-            "Examples:\n"
-            f"  {RUN_COMMAND} fun\n"
-            f"  {RUN_COMMAND} fun --limit 10\n\n"
-            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'.\n"
-            "Interactive selection accepts comma-separated numbers and ranges, "
-            "for example: 1,3-5."
+        epilog=epilog(
+            (f"{RUN_COMMAND} fun", f"{RUN_COMMAND} fun --limit 10"),
+            DOWNLOAD_EXIT_CODES,
+            notes=(
+                INSTALLED_NOTE,
+                "Interactive selection accepts comma-separated numbers and ranges, "
+                "for example: 1,3-5.",
+                "Prompts and menus use stderr; finalized paths go to stdout.",
+                "fun needs a terminal: with --no-input or piped stdin it exits 2.",
+            ),
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     interactive.add_argument(
         "-l",
         "--limit",
         metavar="COUNT",
-        type=int,
+        type=positive_int,
         default=default_limit,
         help="maximum search results to show per query (default: 20)",
     )
@@ -53,14 +130,18 @@ def lucky_args(subparsers):
             "type. Useful for scripted best-match downloads."
         ),
         help="search Qobuz and download the first matching results",
-        epilog=(
-            "Examples:\n"
-            f'  {RUN_COMMAND} lucky "playboi carti die lit"\n'
-            f'  {RUN_COMMAND} lucky --type track --number 3 "artist song"\n'
-            f'  {RUN_COMMAND} lucky --type playlist --number 1 "jazz classics"\n\n'
-            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'."
+        epilog=epilog(
+            (
+                f'{RUN_COMMAND} lucky "playboi carti die lit"',
+                f'{RUN_COMMAND} lucky --type track --limit 3 "artist song"',
+                f'{RUN_COMMAND} lucky --type playlist --limit 1 "jazz classics"',
+            ),
+            DOWNLOAD_EXIT_CODES,
+            notes=(
+                INSTALLED_NOTE,
+                "A query with no results exits 1; a query under 3 characters exits 2.",
+            ),
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     lucky.add_argument(
         "-t",
@@ -71,12 +152,20 @@ def lucky_args(subparsers):
         help="result type to search: artist, album, track, playlist (default: album)",
     )
     lucky.add_argument(
-        "-n",
-        "--number",
+        "-l",
+        "--limit",
         metavar="COUNT",
-        type=int,
+        type=positive_int,
         default=1,
         help="number of search results to download (default: 1)",
+    )
+    lucky.add_argument(
+        "-n",
+        "--number",
+        dest="limit",
+        type=positive_int,
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     lucky.add_argument("QUERY", nargs="+", help="search query words")
     return lucky
@@ -90,19 +179,28 @@ def dl_args(subparsers):
             "Last.fm playlist URLs; or URLs listed in a local text file."
         ),
         help="download Qobuz/Last.fm URLs or URLs from a text file",
-        epilog=(
-            "Accepted SOURCE values:\n"
-            "  - Qobuz album/track/artist/label/playlist URLs\n"
-            "  - Last.fm playlist URLs\n"
-            "  - local text files containing one URL per line; lines starting "
-            "with # are ignored\n\n"
-            "Examples:\n"
-            f"  {RUN_COMMAND} dl https://play.qobuz.com/album/qxjbxh1dc3xyb\n"
-            f"  {RUN_COMMAND} dl urls.txt --no-cover\n"
-            f"  {RUN_COMMAND} dl https://www.last.fm/user/example/playlists/123 --quality 6\n\n"
-            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'."
+        epilog=epilog(
+            (
+                f"{RUN_COMMAND} dl https://play.qobuz.com/album/qxjbxh1dc3xyb",
+                f"{RUN_COMMAND} dl urls.txt --no-cover",
+                f"{RUN_COMMAND} dl https://www.last.fm/user/example/playlists/123 "
+                "--quality 6",
+            ),
+            DOWNLOAD_EXIT_CODES,
+            notes=(
+                "Accepted SOURCE values:",
+                "  - https Qobuz album/track/artist/label/playlist URLs on "
+                "play, open, or www.qobuz.com",
+                "  - https Last.fm playlist URLs",
+                "  - local text files containing one URL per line; lines starting "
+                "with # are ignored",
+                "Every source is checked before login; an invalid one exits 2 and "
+                "names its file and line.",
+                "Each finalized audio path is printed on stdout.",
+                "",
+                INSTALLED_NOTE,
+            ),
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     download.add_argument(
         "SOURCE",
@@ -111,6 +209,27 @@ def dl_args(subparsers):
         help="one or more URLs, or a local text file of URLs",
     )
     return download
+
+
+def help_args(subparsers):
+    help_command = subparsers.add_parser(
+        "help",
+        description="Show help for qobuz-dl or one of its commands.",
+        help="show help for a command",
+        epilog=epilog(
+            (f"{RUN_COMMAND} help", f"{RUN_COMMAND} help dl"),
+            (ExitCode.OK, ExitCode.USAGE),
+            notes=("'help COMMAND' prints the same text as 'COMMAND --help'.",),
+        ),
+    )
+    help_command.add_argument(
+        "topic",
+        metavar="COMMAND",
+        nargs="?",
+        choices=COMMANDS,
+        help="command to describe: fun, dl, lucky, or help",
+    )
+    return help_command
 
 
 def add_common_arg(custom_parser, default_folder, default_quality):
@@ -130,42 +249,58 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         default=default_quality,
         help=f"audio quality: {QUALITY_HELP} (default: {default_quality})",
     )
+    # Each switch has a --no- form and defaults to None, which keeps the
+    # saved config value; either form overrides the config for this run.
     custom_parser.add_argument(
         "--albums-only",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="for artist/label downloads, skip singles, EPs, and Various Artists releases",
     )
     custom_parser.add_argument(
-        "--no-m3u",
-        action="store_true",
-        help="do not create .m3u playlist files when downloading playlists",
+        "--m3u",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="create .m3u playlist files when downloading playlists (default: on)",
     )
     custom_parser.add_argument(
-        "--no-fallback",
-        action="store_true",
-        help="disable quality fallback; skip releases unavailable at the requested quality",
+        "--fallback",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "fall back to a lower quality when the requested one is unavailable; "
+            "--no-fallback skips those tracks (default: on)"
+        ),
     )
     custom_parser.add_argument(
         "-e",
         "--embed-art",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="embed cover art into audio files",
     )
     custom_parser.add_argument(
         "--og-cover",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="download cover art at original quality when available (larger file)",
     )
     custom_parser.add_argument(
-        "--no-cover", action="store_true", help="do not download cover.jpg"
+        "--cover",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="download cover.jpg (default: on)",
     )
     custom_parser.add_argument(
-        "--no-db",
-        action="store_true",
-        help="disable duplicate tracking for this run; do not read or update the local database",
+        "--db",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "use the local download database; --no-db disables duplicate "
+            "tracking for this run and neither reads nor updates it (default: on)"
+        ),
     )
     custom_parser.add_argument(
-        "-ff",
         "--folder-format",
         metavar="PATTERN",
         help=(
@@ -174,7 +309,6 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         ),
     )
     custom_parser.add_argument(
-        "-tf",
         "--track-format",
         metavar="PATTERN",
         help=(
@@ -185,7 +319,8 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     custom_parser.add_argument(
         "-s",
         "--smart-discography",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help=(
             "for artist discographies, filter likely spam/extras and prefer practical "
             "remaster/quality choices"
@@ -196,34 +331,35 @@ def add_common_arg(custom_parser, default_folder, default_quality):
 def qobuz_dl_args(
     default_quality=6, default_limit=20, default_folder="Qobuz Downloads"
 ):
-    parser = argparse.ArgumentParser(
-        prog="qobuz-dl",
+    parser = Parser(
+        prog=PROG,
         description=(
             "Download and organize Qobuz music from direct URLs, text files, "
             "interactive search, or best-match search."
         ),
-        epilog=(
-            "Examples:\n"
-            f"  {RUN_COMMAND} dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7\n"
-            f"  {RUN_COMMAND} dl urls.txt --directory Music --no-cover\n"
-            f"  {RUN_COMMAND} fun --limit 10\n"
-            f'  {RUN_COMMAND} lucky --type track --number 3 "artist song"\n\n'
-            f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'.\n"
-            f"Use '{RUN_COMMAND} <command> --help' for command-specific options.\n"
-            "Docs: https://github.com/pascalandy/qobuz-dl"
+        epilog=epilog(
+            (
+                f"{RUN_COMMAND} dl https://play.qobuz.com/album/qxjbxh1dc3xyb "
+                "--quality 7",
+                f"{RUN_COMMAND} dl urls.txt --directory Music --no-cover",
+                f"{RUN_COMMAND} fun --limit 10",
+                f'{RUN_COMMAND} lucky --type track --limit 3 "artist song"',
+                f"{RUN_COMMAND} --reset",
+            ),
+            TOP_LEVEL_EXIT_CODES,
+            notes=(
+                INSTALLED_NOTE,
+                f"Use '{RUN_COMMAND} help <command>' for command-specific options.",
+                "For first-time setup, run --reset.",
+                "Docs: https://github.com/pascalandy/qobuz-dl",
+            ),
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {_package_version()}",
-        help="show version and exit",
-    )
-    parser.add_argument(
+    actions = parser.add_argument_group("actions")
+    actions.add_argument(
         "-r", "--reset", action="store_true", help="create or reset the config file"
     )
-    parser.add_argument(
+    actions.add_argument(
         "-p",
         "--purge",
         action="store_true",
@@ -232,17 +368,17 @@ def qobuz_dl_args(
             "download again"
         ),
     )
-    parser.add_argument(
-        "-sc",
+    actions.add_argument(
         "--show-config",
         action="store_true",
         help="show config path, database path, and redacted config values",
     )
+    add_global_options(parser, suppress_defaults=False)
 
     subparsers = parser.add_subparsers(
         title="commands",
         description=(
-            f"choose one command; use {RUN_COMMAND} <command> --help for details"
+            f"choose one command; use {RUN_COMMAND} help <command> for details"
         ),
         dest="command",
     )
@@ -250,7 +386,10 @@ def qobuz_dl_args(
     interactive = fun_args(subparsers, default_limit)
     download = dl_args(subparsers)
     lucky = lucky_args(subparsers)
+    help_command = help_args(subparsers)
     for subparser in (interactive, download, lucky):
         add_common_arg(subparser, default_folder, default_quality)
+    for subparser in (interactive, download, lucky, help_command):
+        add_global_options(subparser, suppress_defaults=True)
 
     return parser

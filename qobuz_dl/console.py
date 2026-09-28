@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import logging
 import os
 import re
@@ -95,6 +96,7 @@ class OptionScan:
     parser: argparse.ArgumentParser
     subcommand: str | None = None
     found: set[str] = field(default_factory=set)
+    unknown_command: str | None = None
 
 
 def subcommand_parsers(parser) -> dict[str, argparse.ArgumentParser]:
@@ -167,8 +169,8 @@ def scan_options(
             current = subcommands[argument]
             scan.parser = current
         elif scan.subcommand is None and subcommands:
-            # An unknown command name: argparse will reject it, and nothing
-            # after it can select a subcommand.
+            # An unknown command name: nothing after it can select a subcommand.
+            scan.unknown_command = argument
             subcommands = {}
     return scan
 
@@ -188,6 +190,8 @@ class Parser(argparse.ArgumentParser):
 
     def usage_error(self, message: str) -> ExitCode:
         """Print the usage-error format to stderr and return the usage code."""
+        # A rejected argument, such as a URL, can carry a credential.
+        message = redact(message)
         self.print_usage(sys.stderr)
         sys.stderr.write(
             f"{self.prog}: error: {message}\nrun '{self.command} --help' for usage\n"
@@ -203,7 +207,17 @@ class Parser(argparse.ArgumentParser):
         if scan.found:
             scan.parser.print_help()
             self.exit(ExitCode.OK)
+        if scan.unknown_command is not None:
+            self.error(self._unknown_command_message(scan.unknown_command))
         return super().parse_args(argv, namespace)
+
+    def _unknown_command_message(self, name: str) -> str:
+        choices = list(subcommand_parsers(self))
+        message = f"unknown command {name!r}"
+        close = difflib.get_close_matches(name, choices, n=1)
+        if close:
+            return f"{message}; did you mean {close[0]!r}?"
+        return f"{message}; choose from {', '.join(choices)}"
 
 
 _DURATION = re.compile(r"(?P<value>\d+(?:\.\d+)?)(?P<unit>ms|s|m|h)?")
@@ -282,3 +296,74 @@ def format_command(argv: Sequence[str]) -> str:
     if os.name == "nt":
         return subprocess.list2cmdline(argv)
     return shlex.join(argv)
+
+
+# Credentials that can surface in URLs, request parameters, or exception text.
+_SECRET_NAMES = r"email|password|pwd|user_auth_token|request_sig"
+# A name counts after a non-word character or an encoded one, as in %3Fpassword.
+_SECRET_START = r"(?:(?<![a-z0-9_])|(?<=%[0-9a-f]{2}))"
+_SECRET_PARAMETER = re.compile(
+    rf"(?i){_SECRET_START}({_SECRET_NAMES})(=|%3D)((?:(?!%26)[^&\s'\"<>])+)"
+)
+_SECRET_FIELD = re.compile(
+    rf"(?i)([\"']?\b(?:{_SECRET_NAMES})\b[\"']?\s*:\s*[\"'])([^\"']*)([\"'])"
+)
+REDACTED = "<redacted>"
+
+
+def redact(text: str) -> str:
+    """Mask credentials in query strings, encoded URLs, and quoted fields."""
+    text = _SECRET_PARAMETER.sub(rf"\1\2{REDACTED}", text)
+    return _SECRET_FIELD.sub(rf"\1{REDACTED}\3", text)
+
+
+class ConsoleFormatter(logging.Formatter):
+    """Format log records, including tracebacks, redacted and colored or not."""
+
+    def __init__(self, color: bool):
+        super().__init__("%(message)s")
+        self.color = color
+
+    def format(self, record):
+        return render(redact(super().format(record)), self.color)
+
+
+@contextmanager
+def stderr_logging(logger: logging.Logger, level: int, color: bool):
+    """Send ``logger`` records to stderr for the duration, then restore it."""
+    saved = (logger.handlers[:], logger.level, logger.propagate)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(ConsoleFormatter(color))
+    logger.handlers[:] = [handler]
+    logger.setLevel(level)
+    logger.propagate = False
+    try:
+        yield handler
+    finally:
+        logger.handlers[:], level, logger.propagate = saved
+        logger.setLevel(level)
+
+
+class _Prompts:
+    color = False
+
+
+def configure_prompts(*, color: bool) -> None:
+    """Choose whether prompts and menus keep their ANSI color."""
+    _Prompts.color = color
+
+
+def say(text: str) -> None:
+    """Write one line of interactive output, such as a menu entry, to stderr."""
+    sys.stderr.write(render(text, _Prompts.color) + "\n")
+    sys.stderr.flush()
+
+
+def prompt(text: str) -> str:
+    """Write ``text`` to stderr, then read one line of input.
+
+    ``input()`` gets no prompt of its own, so stdout keeps only results.
+    """
+    sys.stderr.write(render(text, _Prompts.color))
+    sys.stderr.flush()
+    return input()

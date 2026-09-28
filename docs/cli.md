@@ -5,7 +5,7 @@ Use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl` as the 
 ## Usage
 
 ```text
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [--version] [-r] [-p] [-sc] {fun,dl,lucky} ...
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [-r | -p | --show-config] [-v] [--debug] [--no-color] [--no-input] [--version] {fun,dl,lucky,help} ...
 ```
 
 The CLI can download from direct URLs, local text files, interactive search, or best-match search.
@@ -18,11 +18,17 @@ For the plaintext prompt, stored password digest, and current login transport, s
 
 | Option | Description |
 |---|---|
-| `-h`, `--help` | Show help and exit. Help is available without creating config. |
+| `-h`, `--help` | Show help and exit. Help wins over every other argument and is available without creating config. |
 | `--version` | Show the installed package version and exit. |
-| `-r`, `--reset` | Create or reset the config file. |
-| `-p`, `--purge` | Delete the downloaded-IDs database. Deleting it exits with status `0` and reports `The database was deleted.` Finding it already absent exits with status `0` and reports `The database is already absent.` A deletion failure exits nonzero, reports the database path, and advises checking its permissions. Purge does not create config or initialize the Qobuz client. Previously tracked releases may download again. |
-| `-sc`, `--show-config` | Show config path, database path, and redacted config values. |
+| `-r`, `--reset` | Create or reset the config file. It prompts, so it needs a terminal. |
+| `-p`, `--purge` | Delete the downloaded-IDs database. It exits `0` whether the database was deleted or already absent, and reports which with `--verbose`. A deletion failure exits `1`, reports the database path, and advises checking its permissions. Purge does not create config or initialize the Qobuz client. Previously tracked releases may download again. |
+| `--show-config` | Show config path, database path, and redacted config values. |
+| `-v`, `--verbose` | Show progress on stderr. |
+| `--debug` | Show debug logs and stack traces on stderr; `QOBUZ_DL_DEBUG=1` does the same. |
+| `--no-color` | Never color output. Color is also off for a non-terminal, with `NO_COLOR`, or with `TERM=dumb`. |
+| `--no-input` | Never prompt. A command that needs input exits `2` instead. |
+
+`--reset`, `--purge`, `--show-config`, and a command are mutually exclusive; combining them exits `2`. The last five options work before or after a command name, as in `qobuz-dl -v dl URL` or `qobuz-dl dl URL -v`. Long options must be spelled out; abbreviations exit `2`.
 
 ## Commands
 
@@ -31,6 +37,9 @@ For the plaintext prompt, stored password digest, and current login transport, s
 | `fun` | Interactively search Qobuz, select albums/tracks/artists/playlists, queue results, choose quality, and download. |
 | `dl` | Download Qobuz URLs, Last.fm playlist URLs, or URLs from a local text file. |
 | `lucky` | Search Qobuz and download the first matching result or the first N matching results. |
+| `help` | Show help for qobuz-dl or a command; `help dl` prints the same text as `dl --help`. |
+
+A bare `qobuz-dl` exits `2` with usage and a first-run hint; run `qobuz-dl --reset` for first-time setup. An unknown command exits `2` and suggests the closest one.
 
 Run command-level help for detailed options:
 
@@ -40,7 +49,7 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --h
 
 ## Results and exit codes
 
-`dl`, `lucky`, and `fun` print each finalized audio path on stdout, one per line, as soon as the file is final. A reused verified artifact counts as finalized. A path appears once per run even when several requests resolve to it. Progress and errors go to stderr.
+`dl`, `lucky`, and `fun` print each finalized audio path on stdout, one per line, as soon as the file is final. A reused verified artifact counts as finalized. A path appears once per run even when several requests resolve to it. Prompts, menus, warnings, and errors go to stderr. A successful run prints nothing on stderr unless you pass `--verbose` or `--debug`, and neither option changes stdout or the exit code.
 
 | Exit | Meaning |
 |---|---|
@@ -49,7 +58,14 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --h
 | `2` | An invalid source, text file, or search query; nothing ran and no login happened |
 | `75` | Every failure was temporary: a timeout, a dropped connection, HTTP 5xx or `429`, or exhausted rate-limit retries. A rerun is safe because verified artifacts are reused |
 
-A permanent failure outranks a temporary one: a run with both exits `1`.
+| `130` | Interrupted with Ctrl-C (SIGINT); files finalized before the interrupt are kept and their paths were already printed |
+| `143` | Terminated with SIGTERM, with the same guarantees |
+
+An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`.
+
+A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict`, then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise.
+
+Login failures exit `1`, or `75` when the login or web-bundle request failed for a temporary reason. Errors name what failed and, when there is one, the command to run next. Stack traces appear only with `--debug`, and every message masks email, password, token, and request-signature values. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
 
 ## API rate-limit retries
 
@@ -105,16 +121,18 @@ These options are shared by `fun`, `dl`, and `lucky`.
 |---|---|
 | `-d`, `--directory PATH` | Download directory. |
 | `-q`, `--quality QUALITY` | Audio quality: `5` = MP3 320, `6` = FLAC lossless, `7` = 24-bit <=96kHz, `27` = 24-bit >96kHz. |
-| `--albums-only` | For artist/label downloads, skip singles, EPs, and Various Artists releases. |
-| `--no-m3u` | Do not create `.m3u` playlist files when downloading playlists. |
-| `--no-fallback` | Disable quality fallback; skip each track that Qobuz marks as a quality downgrade. |
-| `-e`, `--embed-art` | Embed cover art into audio files. |
-| `--og-cover` | Download cover art at original quality when available. |
-| `--no-cover` | Do not download `cover.jpg`. |
-| `--no-db` | Disable persistent history for this run. Do not read or update the local database. Verified evidence created earlier in the process can satisfy a later occurrence. For direct track and album requests, an unexplained pre-existing path still conflicts. |
-| `-ff`, `--folder-format PATTERN` | Folder naming pattern. |
-| `-tf`, `--track-format PATTERN` | Track naming pattern. |
-| `-s`, `--smart-discography` | For artist discographies, filter likely spam/extras and prefer practical remaster/quality choices. |
+| `--albums-only`, `--no-albums-only` | For artist/label downloads, skip singles, EPs, and Various Artists releases. |
+| `--m3u`, `--no-m3u` | Create, or do not create, `.m3u` playlist files when downloading playlists. |
+| `--fallback`, `--no-fallback` | Allow quality fallback, or skip each track that Qobuz marks as a quality downgrade. |
+| `-e`, `--embed-art`, `--no-embed-art` | Embed cover art into audio files. |
+| `--og-cover`, `--no-og-cover` | Download cover art at original quality when available. |
+| `--cover`, `--no-cover` | Download, or skip, `cover.jpg`. |
+| `--db`, `--no-db` | `--no-db` disables persistent history for this run: it neither reads nor updates the local database. Verified evidence created earlier in the process can satisfy a later occurrence. For direct track and album requests, an unexplained pre-existing path still conflicts. |
+| `--folder-format PATTERN` | Folder naming pattern. |
+| `--track-format PATTERN` | Track naming pattern. |
+| `-s`, `--smart-discography`, `--no-smart-discography` | For artist discographies, filter likely spam/extras and prefer practical remaster/quality choices. |
+
+Each switch without a value has a `--no-` form. Without either form, the saved config value applies; either form overrides it for one run.
 
 ## Format pattern keys
 
@@ -151,14 +169,14 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun --limit 10
 ```
 
-Interactive selection accepts comma-separated numbers and ranges, for example `1,3-5`.
+Interactive selection accepts comma-separated numbers and ranges, for example `1,3-5`. `fun` needs a terminal: with `--no-input` or piped stdin it exits `2`.
 
 ## `lucky` examples
 
 ```sh
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky "playboi carti die lit"
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type track --number 3 "artist song"
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type playlist --number 1 "jazz classics"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type track --limit 3 "artist song"
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type playlist --limit 1 "jazz classics"
 ```
 
-`--type` accepts `artist`, `album`, `track`, or `playlist`.
+`--type` accepts `artist`, `album`, `track`, or `playlist`. `-l/--limit` must be a positive integer; `--number` remains a hidden alias for one release.

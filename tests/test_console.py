@@ -280,3 +280,28 @@ def test_sigterm_raises_terminated_and_restores_the_previous_handler():
             time.sleep(5)  # the handler raises before the sleep ends
 
     assert signal.getsignal(signal.SIGTERM) is previous
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "https://x/login?email=a%40b.c&password=abc123&app_id=1",
+            "https://x/login?email=<redacted>&password=<redacted>&app_id=1",
+        ),
+        (
+            "next=https%3A%2F%2Fx%3Frequest_sig%3Dsig%26a%3D1",
+            "next=https%3A%2F%2Fx%3Frequest_sig%3D<redacted>%26a%3D1",
+        ),
+        ("user_auth_token=tok pwd=p", "user_auth_token=<redacted> pwd=<redacted>"),
+        (
+            '{"password": "p", "email": "e"}',
+            '{"password": "<redacted>", "email": "<redacted>"}',
+        ),
+        ("PASSWORD=Upper", "PASSWORD=<redacted>"),
+        ("app_id=1&track_id=2", "app_id=1&track_id=2"),
+        ("newpassword=kept", "newpassword=kept"),
+    ],
+)
+def test_redact_masks_credentials_in_every_encoding(text, expected):
+    assert console.redact(text) == expected

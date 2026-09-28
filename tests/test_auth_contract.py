@@ -125,7 +125,7 @@ def test_cli_setup_persists_one_utf8_md5_and_forwards_it_unchanged(
         def get_secrets(self):
             return {"fixture": "synthetic-api-secret"}
 
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *args: next(answers))
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: CLI_PLAINTEXT)
     monkeypatch.setattr(cli, "Bundle", FakeBundle)
     requests = _install_fake_http(monkeypatch)

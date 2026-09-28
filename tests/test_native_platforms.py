@@ -11,7 +11,7 @@ from qobuz_dl import downloader
 from qobuz_dl.downloader import Download, DownloadResult
 
 APPDATA_DIAGNOSTIC = (
-    "APPDATA is not set. Set APPDATA to your Windows application-data "
+    "qobuz-dl: APPDATA is not set. Set APPDATA to your Windows application-data "
     "directory and retry."
 )
 ENVIRONMENT_SECRET = "native-environment-secret"
@@ -42,7 +42,7 @@ cli._reset_config = unexpected
 cli.Bundle = unexpected
 cli.QobuzDL = unexpected
 sys.argv = ["qobuz-dl", *sys.argv[1:]]
-qobuz_dl.main()
+sys.exit(qobuz_dl.main())
 """
 
 
@@ -58,10 +58,12 @@ def _run_native_windows_cli(tmp_path, argv, appdata):
     else:
         environment["APPDATA"] = appdata
 
+    # A pipe, not NUL: Windows reports the NUL device as a terminal.
     result = subprocess.run(
         [sys.executable, "-B", "-I", "-c", NATIVE_WINDOWS_CHILD, *argv],
         cwd=sandbox,
         env=environment,
+        input="",
         text=True,
         capture_output=True,
         check=False,
@@ -109,12 +111,9 @@ def test_native_windows_metadata_routes_ignore_missing_appdata(
 @pytest.mark.parametrize(
     "argv",
     [
-        pytest.param([], id="no-args"),
-        pytest.param(["--reset"], id="reset"),
         pytest.param(["--purge"], id="purge"),
         pytest.param(["--show-config"], id="show-config"),
         pytest.param(["dl", "https://play.qobuz.com/album/example"], id="dl"),
-        pytest.param(["fun"], id="fun"),
         pytest.param(["lucky", "example"], id="lucky"),
     ],
 )
@@ -130,6 +129,27 @@ def test_native_windows_continuing_routes_report_missing_appdata_safely(
         result.stderr,
         side_effects,
     ) == (1, "", f"{APPDATA_DIAGNOSTIC}\n", [])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows")
+@pytest.mark.parametrize("appdata", [None, ""], ids=["missing", "empty"])
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        pytest.param([], "choose a command", id="no-args"),
+        pytest.param(["--reset"], "run it in a terminal", id="reset"),
+        pytest.param(["fun"], "fun needs an interactive terminal", id="fun"),
+    ],
+)
+def test_native_windows_usage_errors_precede_config_path_resolution(
+    tmp_path, appdata, argv, message
+):
+    result, side_effects = _run_native_windows_cli(tmp_path, argv, appdata)
+
+    _assert_no_diagnostic_leak(result, tmp_path)
+    assert (result.returncode, result.stdout, side_effects) == (2, "", [])
+    assert message in result.stderr
+    assert APPDATA_DIAGNOSTIC not in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires native Windows")

@@ -18,6 +18,8 @@ Qobuz playlists and matched Last.fm playlist rows send every source occurrence t
 
 Focused proof lives in [`test_download_results.py`](../tests/test_download_results.py), [`test_artifact_history.py`](../tests/test_artifact_history.py), [`test_destination_history.py`](../tests/test_destination_history.py), [`test_playlist_m3u.py`](../tests/test_playlist_m3u.py), [`test_run_results.py`](../tests/test_run_results.py), and [`test_http.py`](../tests/test_http.py).
 
+[`cli.main`](../qobuz_dl/cli.py) configures logging only while it runs: warnings by default, progress with `--verbose`, and debug records with `--debug`. One formatter redacts credentials and strips color when color is off. Every usage error, including an invalid source, a conflicting action, a missing config without a terminal, and a bare invocation, exits `2` before config, login, or writes. Prompts and menus write to stderr. SIGINT and SIGTERM exit `130` and `143` after keeping finished files. `import qobuz_dl` imports the CLI only when `main()` is called.
+
 [`console.py`](../qobuz_dl/console.py) owns the command-line conventions shared by every entry point: exit codes, the usage-error format, help precedence over other arguments, SIGINT and SIGTERM exits, color decisions, secret input, and printable commands. [`scripts/check.py`](../scripts/check.py), [`scripts/verify_install.py`](../scripts/verify_install.py), and the [live verifier](../qobuz_dl/live_verification.py) use it. Focused proof lives in [`test_console.py`](../tests/test_console.py), [`test_check_script.py`](../tests/test_check_script.py), [`test_install_verification.py`](../tests/test_install_verification.py), and [`test_live_qobuz_verification.py`](../tests/test_live_qobuz_verification.py).
 
 ## Historical master snapshot
