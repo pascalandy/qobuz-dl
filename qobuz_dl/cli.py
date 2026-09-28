@@ -294,7 +294,18 @@ MIN_QUERY_LENGTH = 3
 
 
 def _print_path(path):
-    print(path, flush=True)
+    """Print one finalized path; a stdout that cannot encode it gets escapes."""
+    line = f"{path}\n"
+    try:
+        sys.stdout.write(line)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        sys.stdout.write(line.encode(encoding, "backslashreplace").decode(encoding))
+        logging.warning(
+            "stdout cannot encode a finalized path, so it was printed with "
+            "escapes; set PYTHONUTF8=1 to print it exactly"
+        )
+    sys.stdout.flush()
 
 
 def _download_search_results(qobuz, urls, query):
