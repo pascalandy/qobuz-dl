@@ -47,6 +47,7 @@ CLI_PROBES: tuple[Command, ...] = (
     ("qobuz-dl", "dl", "--help"),
     ("qobuz-dl", "fun", "--help"),
     ("qobuz-dl", "lucky", "--help"),
+    ("qobuz-dl", "help", "dl"),
     ("qdl", "--help"),
     ("qdl", "--version"),
 )

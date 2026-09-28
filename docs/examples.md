@@ -111,13 +111,13 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky playboi
 Download the first five artist results:
 
 ```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky joy division -n 5 --type artist
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky joy division --limit 5 --type artist
 ```
 
 Download the first three track results in 320 kbps quality:
 
 ```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky eric dolphy remastered --type track -n 3 -q 5
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky eric dolphy remastered --type track --limit 3 -q 5
 ```
 
 Download the first track result without cover art:
@@ -131,6 +131,22 @@ Run this command for all lucky-mode options:
 ```sh
 uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --help
 ```
+
+## Scripting
+
+Preview where an album would go without writing anything:
+
+```sh
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --dry-run
+```
+
+Download sources piped on stdin, and read the result as one JSON object:
+
+```sh
+cat urls.txt | uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl - --json > result.json
+```
+
+Each finalized path is printed on stdout, so a plain run can feed another tool. The exit status is `0` on success, `1` for a lasting failure, and `75` when a rerun can succeed. See [Results and exit codes](cli.md#results-and-exit-codes).
 
 ## Reset and duplicate tracking
 

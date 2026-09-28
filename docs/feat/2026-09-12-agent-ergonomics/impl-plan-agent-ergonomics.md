@@ -2,6 +2,8 @@
 
 Status: proposed follow-up plan. This documentation change implements none of the proposed commands. The [design](design-agent-ergonomics.md) owns their meaning. The [architecture](../../architecture.md) owns current behavior.
 
+The CLI contract from [issue #90](https://github.com/pascalandy/qobuz-dl/issues/90) has since implemented `--json`, `--dry-run`, `--config`, and the exit codes `0`, `1`, `2`, `75`, `130`, and `143`. Slices below that assume exit `3` or a plan file must follow the [contract differences](design-agent-ergonomics.md#superseded-by-the-cli-contract).
+
 ## Evidence and live-work boundary
 
 The source baseline is `master` at `1ef6f5b2cdd741b5bb816bffdf2fad786c56dbff`. GitHub was inspected with `gh` on 2026-09-12. At the frozen observation, `2026-09-12T13:29:33Z`, 26 open PRs formed one linear stack from [#54](https://github.com/pascalandy/qobuz-dl/pull/54) to [#83](https://github.com/pascalandy/qobuz-dl/pull/83). Each was clean and mergeable. The frontier #54 had passing CI and review checks. This is historical evidence, not a current merge verdict.

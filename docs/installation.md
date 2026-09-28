@@ -11,15 +11,15 @@ Use `uv` for user-facing, install, and local project commands. Do not use `pip` 
 
 ## Run the fork without installing the app
 
-Use the full Git source so `uvx` selects this fork instead of a package with the same name from a public package index:
+Use the full Git source so `uvx` selects this fork instead of a package with the same name from a public package index. Create the config first:
 
 ```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --reset
 ```
 
 Git must be available on `PATH` because `uv` fetches the source repository. The repository URL follows the current default branch. A later run can therefore resolve to a newer commit.
 
-The first run creates persistent qobuz-dl state under your user config directory. On Linux and macOS, the config is `$XDG_CONFIG_HOME/qobuz-dl/config.ini` when `XDG_CONFIG_HOME` is set, else `~/.config/qobuz-dl/config.ini`. On Windows, it is `%APPDATA%\qobuz-dl\config.ini`. The downloaded-IDs database is `qobuz_dl.db` beside the config. `--config PATH` or `QOBUZ_DL_CONFIG` selects another file; see [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live).
+`--reset` prompts for your account, download folder, and quality; add `--email EMAIL --password-file PATH` to set up without prompts. A download command in a terminal also starts this setup when no config exists yet, while a bare `qobuz-dl` only prints usage and this hint. The config holds persistent qobuz-dl state under your user config directory. On Linux and macOS, the config is `$XDG_CONFIG_HOME/qobuz-dl/config.ini` when `XDG_CONFIG_HOME` is set, else `~/.config/qobuz-dl/config.ini`. On Windows, it is `%APPDATA%\qobuz-dl\config.ini`. The downloaded-IDs database is `qobuz_dl.db` beside the config. `--config PATH` or `QOBUZ_DL_CONFIG` selects another file; see [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live).
 
 The config and database remain after the temporary `uvx` environment exits. Later one-shot runs and persistent installs reuse them. See [Account and authentication](use-cases.md#where-authconfig-and-the-database-live) for the stored fields, security notes, and portability steps.
 
@@ -35,7 +35,7 @@ Install persistently only if you want a permanent `qobuz-dl` command on your `PA
 
 ```sh
 uv tool install git+https://github.com/pascalandy/qobuz-dl.git
-qobuz-dl
+qobuz-dl --reset
 ```
 
 On Windows, run `qobuz-dl.exe` after the same install command.

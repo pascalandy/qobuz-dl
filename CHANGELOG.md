@@ -38,9 +38,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `scripts/verify_install.py` gains `-v/--verbose`, `--debug` (or `VERIFY_INSTALL_DEBUG=1`), and `--timeout DURATION`
 - The live verifier gains `--email`, `--password-file`, `--track-id`, `--query`, `--quality`, `-o/--output PATH|-`, and `-v/--verbose`; each input except the password falls back to its existing environment variable, and `QOBUZ_DL_LIVE_PASSWORD_FILE` names a password file
 
+### Removed
+
+- The `-sc`, `-ff`, and `-tf` short options; use `--show-config`, `--folder-format`, and `--track-format`
+- `lucky -n COUNT`; `-n` is now `--dry-run`, and `-l/--limit` sets the count
+- The live verifier's `QOBUZ_DL_LIVE_PASSWORD` variable; pass the password through `--password-file PATH|-`
+- The flag tables and usage lines copied into `README.md` and `docs/cli.md`; `qobuz-dl --help` and `qobuz-dl help COMMAND` document every option once
+
 ### Changed
 
 - Package maturity is now Beta while the unchanged access model continues to use app parameters derived from Qobuz's public web bundle, as documented in [Qobuz access and project status](docs/qobuz-access.md)
+- `README.md` quick start begins with `qobuz-dl --reset`; `docs/cli.md` keeps behavior only: streams, exit codes, `--json`, `--dry-run`, source rules, retries, and naming. The agent-ergonomics design records what the CLI contract supersedes
+- `just ci` also probes `qobuz-dl help dl`
 - Every helper script's `--help` lists examples and exit codes, rejects abbreviated long options, and prints usage errors as usage, the error, and `run '<command> --help' for usage`
 - A failed artist, label, or playlist lookup no longer ends the run with a traceback; it is reported and the next source runs
 

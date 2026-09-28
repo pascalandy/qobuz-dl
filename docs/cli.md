@@ -2,75 +2,53 @@
 
 Use `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl` as the default no-install workflow. If you installed the optional persistent tool with `uv tool install git+https://github.com/pascalandy/qobuz-dl.git`, you may replace `uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl` with `qobuz-dl`. From a local checkout, keep using `uv run qobuz-dl ...`.
 
-## Usage
+## Options live in `--help`
 
-```text
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [-r | -p | --show-config] [-v] [--debug] [--no-color] [--no-input] [--version] {fun,dl,lucky,help} ...
+Every option, its default, examples, and the exit codes are documented once, in the parser:
+
+```sh
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl help dl
 ```
 
-The CLI can download from direct URLs, local text files, interactive search, or best-match search.
+`qobuz-dl help COMMAND` prints the same text as `qobuz-dl COMMAND --help`. This page records behavior that help text cannot hold.
 
 On Windows, `--help`, `--version`, and `<command> --help` work when `APPDATA` is missing or empty. Commands that continue into config or database work require a nonempty `APPDATA` value. See [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live) for paths and the missing-`APPDATA` diagnostic.
 
 For the plaintext prompt, stored password digest, and current login transport, see [Account and authentication](use-cases.md#1-account-and-authentication).
 
-## Global options
+## Commands, actions, and options
 
-| Option | Description |
-|---|---|
-| `-h`, `--help` | Show help and exit. Help wins over every other argument and is available without creating config. |
-| `--version` | Show the installed package version and exit. |
-| `-r`, `--reset` | Create or reset the config file. It prompts, so it needs a terminal. |
-| `-p`, `--purge` | Delete the downloaded-IDs database. It exits `0` whether the database was deleted or already absent, and reports which with `--verbose`. A deletion failure exits `1`, reports the database path, and advises checking its permissions. Purge does not create config or initialize the Qobuz client. Previously tracked releases may download again. |
-| `--show-config` | Show config path, database path, and redacted config values. |
-| `-v`, `--verbose` | Show progress on stderr. |
-| `--debug` | Show debug logs and stack traces on stderr; `QOBUZ_DL_DEBUG=1` does the same. |
-| `--no-color` | Never color output. Color is also off for a non-terminal, with `NO_COLOR`, or with `TERM=dumb`. |
-| `--no-input` | Never prompt. A command that needs input exits `2` instead. |
-| `--json` | Print one JSON object on stdout instead of paths or text. Implies `--no-input`. See [Machine-readable output](#machine-readable-output). |
-| `-n`, `--dry-run` | Log in and look up metadata, then print where each track would go without writing anything. See [Dry run](#dry-run). |
-| `-c`, `--config PATH` | Use this config file and the database beside it; `QOBUZ_DL_CONFIG` does the same. See [config lookup](use-cases.md#where-authconfig-and-the-database-live). |
-| `--timeout DURATION` | Time limit for each network request, such as `30`, `45s`, or `2m`; the default is 30 seconds. It applies to API, web-bundle, media, and Last.fm requests. |
-| `--email EMAIL`, `--password-file PATH` | With `--reset`, create the config without prompts, using the default folder and quality; `--password-file -` reads the password from stdin. A retry hint never repeats the email; it names `--email` instead. |
+The commands are `dl`, `lucky`, `fun`, and `help`. The actions `--reset`, `--purge`, and `--show-config` run without a command. Actions and a command are mutually exclusive; combining them exits `2`. A bare `qobuz-dl` exits `2` with usage and a first-run hint: run `qobuz-dl --reset` for first-time setup. An unknown command exits `2` and suggests the closest one.
 
-`--reset`, `--purge`, `--show-config`, and a command are mutually exclusive; combining them exits `2`. `-v` through `--timeout` work before or after a command name, as in `qobuz-dl -v dl URL` or `qobuz-dl dl URL -v`. Long options must be spelled out; abbreviations exit `2`.
+- `-h` and `--help` win over every other argument, so `qobuz-dl dl -q 99 -h` prints help and exits `0`. After `--`, `-h` is an ordinary argument
+- Global options such as `-v`, `--json`, `--dry-run`, `--config`, and `--timeout` work before or after the command name
+- Short options cluster: `-vn` equals `-v -n`. `--opt=value` equals `--opt value`. Long options must be spelled out; an abbreviation exits `2`
+- Every switch without a value has a `--no-` form, such as `--cover` and `--no-cover`. Without either form, the saved config value applies; either form overrides it for one run
+- `-n` means `--dry-run`. For `lucky`, use `-l/--limit` for the result count: `lucky -n 3` exits `2` and says so. `--number` remains a hidden alias of `--limit` for one release
 
-## Commands
+## Streams
 
-| Command | Description |
-|---|---|
-| `fun` | Interactively search Qobuz, select albums/tracks/artists/playlists, queue results, choose quality, and download. |
-| `dl` | Download Qobuz URLs, Last.fm playlist URLs, or URLs from a local text file. |
-| `lucky` | Search Qobuz and download the first matching result or the first N matching results. |
-| `help` | Show help for qobuz-dl or a command; `help dl` prints the same text as `dl --help`. |
+stdout carries only results: finalized audio paths, `--show-config` output, or the single `--json` object. Prompts, menus, warnings, and errors go to stderr. A successful run prints nothing on stderr unless you pass `--verbose` for progress or `--debug` for debug records and stack traces; `QOBUZ_DL_DEBUG=1` equals `--debug`. Neither option changes stdout or the exit code.
 
-A bare `qobuz-dl` exits `2` with usage and a first-run hint; run `qobuz-dl --reset` for first-time setup. An unknown command exits `2` and suggests the closest one.
-
-Run command-level help for detailed options:
-
-```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --help
-```
+Color is off when stderr is not a terminal, with `NO_COLOR`, with `TERM=dumb`, or with `--no-color`. `--no-input`, `--json`, or stdin that is not a terminal turns any prompt into exit `2` with the flag or command that avoids it. Every message masks email, password, token, and request-signature values.
 
 ## Results and exit codes
 
-`dl`, `lucky`, and `fun` print each finalized audio path on stdout, one per line, as soon as the file is final. A reused verified artifact counts as finalized. A path appears once per run even when several requests resolve to it. Prompts, menus, warnings, and errors go to stderr. A successful run prints nothing on stderr unless you pass `--verbose` or `--debug`, and neither option changes stdout or the exit code.
+`dl`, `lucky`, and `fun` print each finalized audio path on stdout, one per line, as soon as the file is final. A reused verified artifact counts as finalized. A path appears once per run even when several requests resolve to it.
 
 | Exit | Meaning |
 |---|---|
 | `0` | Every requested item is finalized or skipped by your own filter, such as `--albums-only` or an empty release |
-| `1` | At least one item failed for a lasting reason, such as a quality refusal under `--no-fallback`, a demo, a path conflict, no search match, or a permanent HTTP error |
-| `2` | An invalid source, text file, or search query; nothing ran and no login happened |
+| `1` | At least one item failed for a lasting reason, such as a quality refusal under `--no-fallback`, a demo, a path conflict, no search match, or a permanent HTTP error; login and config failures also exit `1` |
+| `2` | A usage error: an invalid source, text file, option, or search query, a missing config without a terminal, or a command that needs input it cannot get. Nothing ran and no login happened |
 | `75` | Every failure was temporary: a timeout, a dropped connection, HTTP 5xx or `429`, or exhausted rate-limit retries. A rerun is safe because verified artifacts are reused |
-
 | `130` | Interrupted with Ctrl-C (SIGINT); files finalized before the interrupt are kept and their paths were already printed |
 | `143` | Terminated with SIGTERM, with the same guarantees |
 
 An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`.
 
-A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict` (`would not be` in a dry run), then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise.
-
-Login failures exit `1`, or `75` when the login or web-bundle request failed for a temporary reason. Errors name what failed and, when there is one, the command to run next. Stack traces appear only with `--debug`, and every message masks email, password, token, and request-signature values. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
+A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict` (`would not be` in a dry run), then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise. A hint never repeats an `--email` value; it names the flag instead. Login and web-bundle failures exit `1`, or `75` when the request failed for a temporary reason. An error names what failed and, when there is one, the command to run next, such as `retry: qobuz-dl dl URL`. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
 
 ## Machine-readable output
 
@@ -79,7 +57,7 @@ With `--json`, stdout holds exactly one JSON object and nothing else, whatever t
 | Key | Value |
 |---|---|
 | `schema_version` | `1` |
-| `operation` | `dl`, `lucky`, `show-config`, `purge`, or `null` for a usage error |
+| `operation` | `dl`, `lucky`, `show-config`, `purge`, `reset`, or `null` for a usage error |
 | `status` | `ok`, `failed` (exit `1` or `75`), `interrupted` (exit `130` or `143`), or `usage_error` (exit `2`) |
 | `data` | The operation's result, or `null` |
 | `problems` | A list of objects with `code`, `severity`, `message`, `source`, `retryable`, and `hint`; messages are redacted |
@@ -102,7 +80,17 @@ An interrupted run prints the partial object with `status: "interrupted"`. A tem
 
 A dry run writes nothing: no folder, audio, cover, booklet, M3U, config, or history. It never creates, prompts for, or repairs config, so a missing config exits `2`. It does not read download history. `exists` reports only whether something is at the path now. The candidate path is not a promise: transfers, media verification, safe publication, history, and earlier items in the same run decide what a real run finally does, including reuse or a path conflict.
 
-`--purge --dry-run` prints the database path and deletes nothing. `--dry-run` with `--reset` or `fun` exits `2`. `-n` used to be `lucky`'s result count: `lucky -n 3` now exits `2` and suggests `--limit`.
+`--purge --dry-run` prints the database path and deletes nothing. `--dry-run` with `--reset` or `fun` exits `2`.
+
+## Setup, config, and history
+
+`--reset` prompts for the account, folder, and quality in a terminal. With `--email EMAIL --password-file PATH`, or `--password-file -` for stdin, it needs no terminal and uses the default folder and quality. `--config PATH` or `QOBUZ_DL_CONFIG` selects the config file and the database beside it; a missing explicit config exits `2` rather than falling back, even for `--purge`. See [Where auth/config and the database live](use-cases.md#where-authconfig-and-the-database-live) for lookup order and permissions.
+
+`--purge` deletes the downloaded-IDs database. It exits `0` whether the database was deleted or already absent, reports which with `--verbose`, and neither creates config nor initializes the Qobuz client. A deletion failure exits `1`, reports the database path, and advises checking its permissions. Previously tracked releases may download again.
+
+`--no-db` disables persistent history for one run: it neither reads nor updates the local database. Verified evidence created earlier in the process can satisfy a later occurrence. For direct track and album requests, an unexplained pre-existing path still conflicts.
+
+`--timeout DURATION` bounds each network request, including API, web-bundle, media, and Last.fm requests; the default is 30 seconds. It is not a whole-run deadline.
 
 ## API rate-limit retries
 
@@ -130,48 +118,11 @@ Cover art, booklets, and other extras remain single-attempt downloads. Non-429 H
 
 ## `dl` sources
 
-`uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl SOURCE...` accepts:
+qobuz-dl validates every source before it reads config or logs in. A Qobuz URL must use `https` on `play.qobuz.com`, `open.qobuz.com`, or `www.qobuz.com`, with an optional locale such as `/us-en`, then `album`, `artist`, `track`, `playlist`, or `label`, an optional slug, and the ID. A Last.fm URL must use `https` on `last.fm` or `www.last.fm`, with an optional locale, then `/user/<name>/playlists/<id>`. Query strings and fragments are ignored.
 
-- Qobuz album URLs
-- Qobuz track URLs
-- Qobuz artist URLs
-- Qobuz label URLs
-- Qobuz playlist URLs
-- Last.fm playlist URLs
-- local text files containing one URL per line; lines starting with `#` are ignored
+Anything else must be an existing UTF-8 text file with one source per line; blank lines and lines starting with `#` are skipped. A text file may list other text files; including the same file twice keeps both occurrences, but a file that includes itself, directly or through others, is an error. An invalid source exits `2` and names it, with `file:line` when it came from a text file.
 
-`SOURCE` may be `-` once, to read sources from stdin, one per line, like a text file; errors name `<stdin>:LINE`. Because stdin then carries sources, a missing config exits `2` instead of starting setup.
-
-qobuz-dl validates every source before it reads config or logs in. A Qobuz URL must use `https` on `play.qobuz.com`, `open.qobuz.com`, or `www.qobuz.com`, with an optional locale such as `/us-en`, then `album`, `artist`, `track`, `playlist`, or `label`, an optional slug, and the ID. A Last.fm URL must use `https` on `last.fm` or `www.last.fm`, with an optional locale, then `/user/<name>/playlists/<id>`. Query strings and fragments are ignored. Anything else must be an existing UTF-8 text file. A text file may list other text files; including the same file twice keeps both occurrences, but a file that includes itself, directly or through others, is an error. An invalid source exits `2` and names it, with `file:line` when it came from a text file.
-
-Examples:
-
-```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --quality 7
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl urls.txt --directory Music --no-cover
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://www.last.fm/user/example/playlists/123 --quality 6
-```
-
-## Common download options
-
-These options are shared by `fun`, `dl`, and `lucky`.
-
-| Option | Description |
-|---|---|
-| `-d`, `--directory PATH` | Download directory. |
-| `-q`, `--quality QUALITY` | Audio quality: `5` = MP3 320, `6` = FLAC lossless, `7` = 24-bit <=96kHz, `27` = 24-bit >96kHz. |
-| `--albums-only`, `--no-albums-only` | For artist/label downloads, skip singles, EPs, and Various Artists releases. |
-| `--m3u`, `--no-m3u` | Create, or do not create, `.m3u` playlist files when downloading playlists. |
-| `--fallback`, `--no-fallback` | Allow quality fallback, or skip each track that Qobuz marks as a quality downgrade. |
-| `-e`, `--embed-art`, `--no-embed-art` | Embed cover art into audio files. |
-| `--og-cover`, `--no-og-cover` | Download cover art at original quality when available. |
-| `--cover`, `--no-cover` | Download, or skip, `cover.jpg`. |
-| `--db`, `--no-db` | `--no-db` disables persistent history for this run: it neither reads nor updates the local database. Verified evidence created earlier in the process can satisfy a later occurrence. For direct track and album requests, an unexplained pre-existing path still conflicts. |
-| `--folder-format PATTERN` | Folder naming pattern. |
-| `--track-format PATTERN` | Track naming pattern. |
-| `-s`, `--smart-discography`, `--no-smart-discography` | For artist discographies, filter likely spam/extras and prefer practical remaster/quality choices. |
-
-Each switch without a value has a `--no-` form. Without either form, the saved config value applies; either form overrides it for one run.
+`SOURCE` may be `-` once, to read sources from stdin like a text file; errors name `<stdin>:LINE`. Because stdin then carries sources, a missing config exits `2` instead of starting setup.
 
 ## Format pattern keys
 
@@ -195,27 +146,14 @@ For MP3 quality (`--quality 5`), the default folder name ends with `[MP3]` for b
 
 If cleanup leaves an empty name or a Windows-reserved first stem, qobuz-dl uses `track-<digest>` plus the original `.flac` or `.mp3` extension. Reserved first stems include `CON`, `PRN`, `AUX`, `NUL`, `COM1` through `COM9`, `LPT1` through `LPT9`, and their recognized superscript variants, with or without another extension. If the complete name is too long, qobuz-dl keeps a whole-character prefix and adds `~<digest>` before the extension. The digest comes from the unmodified formatted name and acts as a deterministic discriminator for repaired and truncated names.
 
-The complete filename, including its extension, stays within the destination filesystem's component-byte limit. qobuz-dl reads that limit from the existing destination directory, including a `Disc N` directory. It uses 255 bytes only when the platform cannot provide a limit. If the required fallback cannot fit, the download fails before writing audio data.
+The complete filename, including its extension, stays within the destination filesystem's component-byte limit. qobuz-dl reads that limit from the destination directory, or from its nearest existing ancestor during a dry run, including a `Disc N` directory. It uses 255 bytes only when the platform cannot provide a limit. If the required fallback cannot fit, the download fails before writing audio data.
 
 qobuz-dl chooses the final path before checking for an existing file. The same path is used for tagging and is reported by [`DownloadResult.finalized_paths`](module-usage.md#download-results).
 
 This behavior applies only to final audio filename components. It does not repair generated folders or enforce a full-path limit. It also does not prevent collisions caused by general lossy cleanup, an ordinary name that matches a generated repaired name, identical output from a custom format, case folding, Unicode normalization, digest collisions, or concurrent processes that publish the same path. The reserved-name rules are policy checks, not proof on native Windows or macOS. Native platform verification remains tracked in [issue #43](https://github.com/pascalandy/qobuz-dl/issues/43).
 
-## `fun` examples
+## Interactive and lucky searches
 
-```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl fun --limit 10
-```
+`fun` accepts comma-separated numbers and ranges, for example `1,3-5`. It needs a terminal: with `--no-input`, `--json`, `--dry-run`, or piped stdin it exits `2`.
 
-Interactive selection accepts comma-separated numbers and ranges, for example `1,3-5`. `fun` needs a terminal: with `--no-input` or piped stdin it exits `2`.
-
-## `lucky` examples
-
-```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky "playboi carti die lit"
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type track --limit 3 "artist song"
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl lucky --type playlist --limit 1 "jazz classics"
-```
-
-`--type` accepts `artist`, `album`, `track`, or `playlist`. `-l/--limit` must be a positive integer; `--number` remains a hidden alias for one release.
+`lucky` downloads the first `--limit` results of `--type` `artist`, `album`, `track`, or `playlist`. A query with no results exits `1`; a query under three characters exits `2`. See [Examples](examples.md) for both commands.

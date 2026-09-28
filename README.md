@@ -26,17 +26,18 @@ It is made for people who care about managing their own files: pull a new hi-res
 
 ## Quick start
 
-You'll need Git, `uv`, and an **active Qobuz subscription**. Run this fork without installing the app:
+You'll need Git, `uv`, and an **active Qobuz subscription**. Create your config once, then download without installing the app:
 
 ```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --reset
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb
 ```
 
 For a persistent CLI, optionally install the tool and run `qobuz-dl` directly:
 
 ```sh
 uv tool install git+https://github.com/pascalandy/qobuz-dl.git
-qobuz-dl
+qobuz-dl --reset
 ```
 
 See [Installation](docs/installation.md) for source selection, reproducible revisions, first-run setup, reinstall instructions, and the install verifier.
@@ -82,24 +83,14 @@ See [Use cases](docs/use-cases.md) for library-building workflows, and [Examples
 
 ## Usage
 
-```text
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl [-h] [-r | -p | --show-config] [-v] [--debug] [--no-color] [--no-input] [--version] {fun,dl,lucky,help} ...
-```
-
-Commands:
-
-* `fun` — interactively search Qobuz and queue downloads
-* `dl` — download Qobuz/Last.fm URLs or URLs from a text file
-* `lucky` — search Qobuz and download the first matching results
-* `help` — show help for a command; `help dl` matches `dl --help`
-
-Run command-level help for detailed options:
+The commands are `dl`, `lucky`, `fun`, and `help`. Every option, default, example, and exit code lives in the built-in help:
 
 ```sh
-uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl --help
+uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl help dl
 ```
 
-See the [CLI reference](docs/cli.md) for global options and command descriptions.
+See the [CLI reference](docs/cli.md) for output streams, exit codes, `--json`, and `--dry-run`.
 
 ## Documentation
 
