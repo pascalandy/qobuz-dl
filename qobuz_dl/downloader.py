@@ -65,9 +65,22 @@ class DownloadResult:
     retryable: bool = False
 
 
+@dataclass(frozen=True)
+class PlannedDestination:
+    """Where a real run would publish one track, observed without writing.
+
+    ``exists`` reports only whether something is at the path now; the real
+    run still decides between reuse, replacement, and conflict.
+    """
+
+    path: str
+    exists: bool
+
+
 # Receives (kind, item_id, result) for each outcome as it is created: "track"
 # for one track, "album" for a release that failed or was skipped as a whole.
-OutcomeCallback = Callable[[str, str, DownloadResult], None]
+# A preview emits a PlannedDestination instead of a finalized result.
+OutcomeCallback = Callable[[str, str, "DownloadResult | PlannedDestination"], None]
 
 
 def _request_failure(error: BaseException) -> DownloadResult:
@@ -315,11 +328,24 @@ class _DestinationTransaction:
             raise _TransactionFailure("publish_error") from error
 
 
+def _nearest_existing_directory(path: str) -> str:
+    """Return ``path`` or its closest ancestor that exists, for a preview."""
+    current = os.path.abspath(path)
+    while not os.path.exists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return current
+
+
 def _destination_name_max(directory: str) -> int:
     pathconf = getattr(os, "pathconf", None)
     if pathconf is None:
         return DEFAULT_NAME_MAX
 
+    if not os.path.exists(directory):
+        directory = _nearest_existing_directory(directory)
     try:
         name_max = pathconf(directory, "PC_NAME_MAX")
     except ValueError:
@@ -550,7 +576,7 @@ class Download:
             logger.info(f"{GREEN}Completed")
         return result
 
-    def _prepare_release_download(self, meta, album_title, first_track_url):
+    def _release_destination(self, meta, album_title, first_track_url):
         file_format, _quality_met, bit_depth, sampling_rate = self._get_format(
             first_track_url
         )
@@ -562,11 +588,15 @@ class Download:
         album_attr = self._get_album_attr(
             meta, album_title, file_format, bit_depth, sampling_rate
         )
-        preparation = self._prepare_destination(album_attr, file_format)
+        return self._destination(album_attr, file_format)
+
+    def _prepare_release_download(self, meta, album_title, first_track_url):
+        preparation = self._release_destination(meta, album_title, first_track_url)
+        os.makedirs(preparation.directory, exist_ok=True)
         self._download_cover(meta["image"]["large"], preparation.directory)
         return preparation
 
-    def _prepare_track_download(self, meta, track_url_dict, track_title):
+    def _track_destination(self, meta, track_url_dict, track_title):
         file_format, quality_met, bit_depth, sampling_rate = self._get_format(
             track_url_dict
         )
@@ -575,7 +605,13 @@ class Download:
             return None
 
         track_attr = self._get_track_attr(meta, track_title, bit_depth, sampling_rate)
-        preparation = self._prepare_destination(track_attr, file_format)
+        return self._destination(track_attr, file_format)
+
+    def _prepare_track_download(self, meta, track_url_dict, track_title):
+        preparation = self._track_destination(meta, track_url_dict, track_title)
+        if preparation is None:
+            return None
+        os.makedirs(preparation.directory, exist_ok=True)
         self._download_cover(meta["album"]["image"]["large"], preparation.directory)
         return preparation
 
@@ -587,13 +623,13 @@ class Download:
         )
         return False
 
-    def _prepare_destination(self, folder_attr, file_format):
+    def _destination(self, folder_attr, file_format):
+        """Compute the release directory and track pattern; write nothing."""
         folder_format, track_format = _clean_format_str(
             self.folder_format, self.track_format, file_format
         )
         sanitized_title = sanitize_filepath(folder_format.format(**folder_attr))
         directory = os.path.join(self.path, sanitized_title)
-        os.makedirs(directory, exist_ok=True)
         return _DownloadPreparation(
             directory=directory,
             is_mp3=file_format == "MP3",
@@ -715,26 +751,13 @@ class Download:
         is_track,
         multiple=None,
     ):
-        root_dir = preparation.directory
-
+        root_dir = self._track_directory(preparation, multiple)
         if multiple:
-            root_dir = os.path.join(root_dir, f"Disc {multiple}")
             os.makedirs(root_dir, exist_ok=True)
 
         track_title = track_metadata.get("title")
-        expected_media = (
-            self._expected_media(track_url_dict) if self.verified_destinations else None
-        )
-        is_mp3 = (
-            expected_media.codec == "mp3"
-            if expected_media is not None
-            else preparation.is_mp3
-        )
-        final_file = self._track_final_path(
-            root_dir,
-            track_metadata,
-            is_mp3,
-            preparation.track_format,
+        expected_media, is_mp3, final_file = self._track_file(
+            root_dir, preparation, track_url_dict, track_metadata
         )
 
         if self.verified_destinations:
@@ -827,6 +850,138 @@ class Download:
                 logger.debug(
                     "Could not remove temporary download %s: %s", filename, error
                 )
+
+    @staticmethod
+    def _track_directory(preparation, multiple):
+        if multiple:
+            return os.path.join(preparation.directory, f"Disc {multiple}")
+        return preparation.directory
+
+    def _track_file(self, root_dir, preparation, track_url_dict, track_metadata):
+        """Return the expected media, MP3 choice, and final path; write nothing."""
+        expected_media = (
+            self._expected_media(track_url_dict) if self.verified_destinations else None
+        )
+        is_mp3 = (
+            expected_media.codec == "mp3"
+            if expected_media is not None
+            else preparation.is_mp3
+        )
+        final_file = self._track_final_path(
+            root_dir,
+            track_metadata,
+            is_mp3,
+            preparation.track_format,
+        )
+        return expected_media, is_mp3, final_file
+
+    def preview_release(self):
+        """Emit where a real run would put each track of the release.
+
+        The preview uses the same metadata and file-URL lookups as a real run,
+        but it creates no folder, downloads no cover, booklet, or audio, and
+        reads no history. It returns nothing; outcomes reach ``on_outcome``.
+        """
+        try:
+            meta = self.client.get_album_meta(self.item_id)
+        except (http.HttpError, ConnectionError) as error:
+            logger.error(f"{RED}Error getting release: {error}. Skipping...")
+            self._emit_album(_request_failure(error))
+            return
+        if not meta.get("streamable"):
+            self._emit_album(DownloadResult("failed", "not_streamable"))
+            return
+        if self.albums_only and (
+            meta.get("release_type") != "album"
+            or meta.get("artist", {}).get("name") == "Various Artists"
+        ):
+            self._emit_album(DownloadResult("ignored", "type_filter"))
+            return
+        tracks = meta["tracks"]["items"]
+        if not tracks:
+            self._emit_album(DownloadResult("ignored", "empty_release"))
+            return
+
+        first_track_url = None
+        try:
+            if self.verified_destinations or not self._is_mp3():
+                first_track_url = self.client.get_track_url(
+                    tracks[0]["id"], fmt_id=self.quality
+                )
+            preparation = self._release_destination(
+                meta, _get_title(meta), first_track_url
+            )
+        except (http.HttpError, ConnectionError) as error:
+            logger.error(f"{RED}Error getting release: {error}. Skipping...")
+            self._emit_album(_request_failure(error))
+            return
+
+        is_multiple = len({track["media_number"] for track in tracks}) > 1
+        for index, track in enumerate(tracks):
+            try:
+                parsed_url = (
+                    first_track_url
+                    if index == 0 and first_track_url is not None
+                    else self.client.get_track_url(track["id"], fmt_id=self.quality)
+                )
+            except (http.HttpError, ConnectionError) as error:
+                logger.error(f"{RED}Error getting release: {error}. Skipping...")
+                self._emit("track", track["id"], _request_failure(error))
+                return
+            if "sample" in parsed_url:
+                self._emit("track", track["id"], DownloadResult("ignored", "demo"))
+                continue
+            _format, quality_met, _depth, _rate = self._get_format(parsed_url)
+            if not self._quality_allows_download(_get_title(track), quality_met):
+                self._emit(
+                    "track", track["id"], DownloadResult("ignored", "quality_filter")
+                )
+                continue
+            self._preview_track_destination(
+                preparation,
+                parsed_url,
+                track,
+                track["media_number"] if is_multiple else None,
+            )
+
+    def preview_track(self):
+        """Emit where a real run would put this track; write nothing."""
+        try:
+            parsed_url = self.client.get_track_url(self.item_id, self.quality)
+            if "sample" in parsed_url:
+                self._emit("track", self.item_id, DownloadResult("ignored", "demo"))
+                return
+            meta = self.client.get_track_meta(self.item_id)
+            preparation = self._track_destination(meta, parsed_url, _get_title(meta))
+        except (http.HttpError, ConnectionError) as error:
+            logger.error(f"{RED}Error getting release: {error}. Skipping...")
+            self._emit("track", self.item_id, _request_failure(error))
+            return
+        if preparation is None:
+            self._emit(
+                "track", self.item_id, DownloadResult("ignored", "quality_filter")
+            )
+            return
+        self._preview_track_destination(preparation, parsed_url, meta, None)
+
+    def _preview_track_destination(
+        self, preparation, track_url_dict, track_metadata, multiple
+    ):
+        track_id = track_metadata.get("id", self.item_id)
+        root_dir = self._track_directory(preparation, multiple)
+        expected_media, _is_mp3, final_file = self._track_file(
+            root_dir, preparation, track_url_dict, track_metadata
+        )
+        if not track_url_dict.get("url"):
+            self._emit("track", track_id, DownloadResult("failed", "missing_url"))
+        elif self.verified_destinations and expected_media is None:
+            self._emit("track", track_id, DownloadResult("failed", "media_error"))
+        else:
+            self._emit(
+                "track",
+                track_id,
+                PlannedDestination(final_file, os.path.lexists(final_file)),
+            )
 
     def _download_verified_track(
         self,

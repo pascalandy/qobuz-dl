@@ -8,10 +8,10 @@ import tempfile
 import traceback
 from collections import Counter
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 
-from qobuz_dl import http
+from qobuz_dl import envelope, http
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, RED, YELLOW
 from qobuz_dl.commands import (
@@ -22,6 +22,8 @@ from qobuz_dl.commands import (
     qobuz_dl_args,
 )
 from qobuz_dl.console import (
+    DIAGNOSTIC_FLAGS,
+    HELP_FLAGS,
     ExitCode,
     color_enabled,
     configure_prompts,
@@ -31,9 +33,12 @@ from qobuz_dl.console import (
     prompt,
     redact,
     render,
+    scan_options,
+    set_usage_error_hook,
     sigterm_raises,
     stderr_logging,
     subcommand_parsers,
+    without_flags,
 )
 from qobuz_dl.core import (
     QobuzDL,
@@ -181,11 +186,14 @@ def _classify_startup(arguments):
 
 
 class _Failure(Exception):
-    """Ends the run: ``qobuz-dl: message``, then ``hint`` when given."""
+    """Ends the run with ``qobuz-dl: message``; a temporary one suggests a retry.
 
-    def __init__(self, message, *, hint=None, code=ExitCode.FAILURE):
+    ``problem`` is the machine-readable code that ``--json`` reports.
+    """
+
+    def __init__(self, message, *, problem, code=ExitCode.FAILURE):
         super().__init__(message)
-        self.hint = hint
+        self.problem = problem
         self.code = code
 
 
@@ -265,7 +273,7 @@ def _load_config_values(config_file):
     return values
 
 
-def _redacted_config_text(config_file):
+def _redacted_config(config_file):
     try:
         config = _read_config(config_file)
         for section in [config.default_section, *config.sections()]:
@@ -273,13 +281,39 @@ def _redacted_config_text(config_file):
             for key in SENSITIVE_CONFIG_KEYS:
                 if key in values:
                     values[key] = "<redacted>"
-
-        buffer = StringIO()
-        config.write(buffer)
-        return buffer.getvalue()
+        return config
     except _ConfigValidationError:
         raise
     except (OSError, ValueError, TypeError, configparser.Error):
+        raise _ConfigValidationError(
+            "The configuration file could not be displayed safely."
+        ) from None
+
+
+def _redacted_config_text(config_file):
+    config = _redacted_config(config_file)
+    try:
+        buffer = StringIO()
+        config.write(buffer)
+        return buffer.getvalue()
+    except (ValueError, TypeError, configparser.Error):
+        raise _ConfigValidationError(
+            "The configuration file could not be displayed safely."
+        ) from None
+
+
+def _redacted_config_values(config_file):
+    config = _redacted_config(config_file)
+    try:
+        values = dict(config[config.default_section])
+        for section in config.sections():
+            values[section] = {
+                key: value
+                for key, value in config[section].items()
+                if key not in config.defaults()
+            }
+        return values
+    except (ValueError, TypeError, configparser.Error):
         raise _ConfigValidationError(
             "The configuration file could not be displayed safely."
         ) from None
@@ -339,6 +373,29 @@ def _quality_fallback_enabled(cli_fallback, config_no_fallback):
 MIN_QUERY_LENGTH = 3
 
 
+@dataclass
+class _Session:
+    """What one invocation asked for, and what it produced so far."""
+
+    argv: list
+    json: bool = False
+    dry_run: bool = False
+    operation: str | None = None
+    run: RunResult | None = None
+    data: dict | None = None
+
+    # The argument list without options that only change diagnostics, so a
+    # printed or JSON hint is the same at every verbosity.
+    portable_argv: list = field(default_factory=list)
+
+    @property
+    def retry_command(self):
+        return format_command((PROG, *self.portable_argv))
+
+    def command_with(self, option):
+        return format_command((PROG, option, *self.portable_argv))
+
+
 def _print_path(path):
     """Print one finalized path; a stdout that cannot encode it gets escapes."""
     line = f"{path}\n"
@@ -354,7 +411,7 @@ def _print_path(path):
     sys.stdout.flush()
 
 
-def _download_search_results(qobuz, urls, query):
+def _download_search_results(qobuz, urls, query, *, preview=False):
     if not urls:
         qobuz.run_result.add_problem(
             RunProblem("no_match", f'no results for "{query}"', query)
@@ -371,22 +428,29 @@ def _download_search_results(qobuz, urls, query):
             )
         else:
             sources.append(source)
-    qobuz.download_sources(sources)
+    if preview:
+        qobuz.preview_sources(sources)
+    else:
+        qobuz.download_sources(sources)
 
 
-def _handle_commands(qobuz, arguments, sources=()):
+def _handle_commands(qobuz, arguments, sources=(), run=None):
     """Run the command and return the exit code its outcomes call for."""
-    run = RunResult(on_path=_print_path)
+    run = RunResult(on_path=_print_path) if run is None else run
     qobuz.run_result = run
     query = " ".join(getattr(arguments, "QUERY", None) or ())
+    preview = getattr(arguments, "dry_run", False)
     try:
         if arguments.command == "dl":
-            qobuz.download_sources(sources)
+            if preview:
+                qobuz.preview_sources(sources)
+            else:
+                qobuz.download_sources(sources)
         elif arguments.command == "lucky":
             qobuz.lucky_type = arguments.type
             qobuz.lucky_limit = arguments.limit
             _download_search_results(
-                qobuz, qobuz.lucky_mode(query, download=False), query
+                qobuz, qobuz.lucky_mode(query, download=False), query, preview=preview
             )
         else:
             qobuz.interactive_limit = arguments.limit
@@ -422,9 +486,45 @@ def _validate_operands(parser, arguments):
     return ()
 
 
+def _old_count_flag(lucky, token, following):
+    """Whether ``token`` uses -n with a count, alone or in a short cluster."""
+    if not token.startswith("-") or token.startswith("--") or len(token) < 2:
+        return False
+    letters = token[1:]
+    for position, letter in enumerate(letters):
+        action = lucky._option_string_actions.get(f"-{letter}")
+        if action is None or action.nargs != 0:
+            return False
+        if letter == "n":
+            rest = letters[position + 1 :]
+            return rest.isdigit() if rest else following.isdigit()
+    return False
+
+
+def _reject_old_number_flag(parser, argv):
+    """``lucky -n 3`` once meant three results; -n is now --dry-run."""
+    lucky = subcommand_parsers(parser)["lucky"]
+    tokens = argv[: argv.index("--")] if "--" in argv else argv
+    for index, token in enumerate(tokens):
+        following = tokens[index + 1] if index + 1 < len(tokens) else ""
+        if _old_count_flag(lucky, token, following):
+            lucky.error("-n now means --dry-run; use --limit N")
+
+
+def _operation(arguments):
+    if arguments.reset:
+        return "reset"
+    if arguments.purge:
+        return "purge"
+    if arguments.show_config:
+        return "show-config"
+    return arguments.command
+
+
 def _interactive(arguments):
     stdin = sys.stdin
-    return not arguments.no_input and bool(stdin and stdin.isatty())
+    wants_input = not (arguments.no_input or arguments.json)
+    return wants_input and bool(stdin and stdin.isatty())
 
 
 def _check_usage(parser, arguments, interactive):
@@ -446,6 +546,8 @@ def _check_usage(parser, arguments, interactive):
             "choose a command, such as 'qobuz-dl dl URL'; "
             "for first-time setup, run 'qobuz-dl --reset'"
         )
+    if arguments.dry_run and (arguments.reset or arguments.command == "fun"):
+        parser.error(f"--dry-run cannot be combined with {actions[0]}")
     if arguments.reset and not interactive:
         parser.error("--reset prompts for your account; run it in a terminal")
     if arguments.command == "fun" and not interactive:
@@ -462,7 +564,7 @@ def _check_usage(parser, arguments, interactive):
     return _validate_operands(parser, arguments)
 
 
-def _login(qobuz, config_values, retry):
+def _login(qobuz, config_values):
     try:
         qobuz.initialize_client(
             config_values["email"],
@@ -476,18 +578,47 @@ def _login(qobuz, config_values, retry):
         InvalidAppIdError,
         InvalidAppSecretError,
     ) as error:
-        raise _Failure(f"login failed: {error}") from None
+        raise _Failure(f"login failed: {error}", problem="login_failed") from None
     except ApiRateLimitError as error:
-        raise _Failure(str(error), hint=retry, code=ExitCode.TEMPORARY) from None
+        raise _Failure(
+            str(error), problem="rate_limited", code=ExitCode.TEMPORARY
+        ) from None
     except http.HttpError as error:
-        if http.is_retryable(error):
-            raise _Failure(
-                f"login failed: {error}", hint=retry, code=ExitCode.TEMPORARY
-            ) from None
-        raise _Failure(f"login failed: {error}") from None
+        code = ExitCode.TEMPORARY if http.is_retryable(error) else ExitCode.FAILURE
+        raise _Failure(
+            f"login failed: {error}", problem="login_failed", code=code
+        ) from None
 
 
-def _failure_lines(run):
+def _purge(session, database_file):
+    exists = os.path.lexists(database_file)
+    if session.dry_run:
+        session.data = {
+            "database_path": database_file,
+            "deleted": False,
+            "exists": exists,
+            "dry_run": True,
+        }
+        if not session.json:
+            print(database_file)
+        return ExitCode.OK
+    try:
+        os.remove(database_file)
+    except FileNotFoundError:
+        logger.info(f"{GREEN}The database is already absent.")
+        session.data = {"database_path": database_file, "deleted": False}
+        return ExitCode.OK
+    except OSError:
+        raise _Failure(
+            f"Unable to delete database at {database_file}. Check its permissions.",
+            problem="purge_failed",
+        ) from None
+    logger.info(f"{GREEN}The database was deleted.")
+    session.data = {"database_path": database_file, "deleted": True}
+    return ExitCode.OK
+
+
+def _failure_lines(run, *, dry_run=False):
     """Describe the unsatisfied items and problems of a run, one line each."""
     unsatisfied = [
         item for item in run.items if item.classification in ("permanent", "temporary")
@@ -499,56 +630,62 @@ def _failure_lines(run):
             reason if count == 1 else f"{reason} ({count})"
             for reason, count in counts.items()
         )
-        lines.append(
-            f"{len(unsatisfied)} of {len(run.items)} items could not be "
-            f"downloaded: {reasons}"
-        )
+        verb = "would not be downloaded" if dry_run else "could not be downloaded"
+        lines.append(f"{len(unsatisfied)} of {len(run.items)} items {verb}: {reasons}")
     lines.extend(problem.message for problem in run.problems)
     return lines
 
 
-def _report_run(color, run, code, argv, arguments):
+def _report_run(color, session, code, arguments):
     """Say what failed in a run that exits 1 or 75, then what to run next."""
-    if code not in (ExitCode.FAILURE, ExitCode.TEMPORARY):
+    if session.run is None or code not in (ExitCode.FAILURE, ExitCode.TEMPORARY):
         return
     if code == ExitCode.TEMPORARY:
-        hint = f"retry: {format_command((PROG, *argv))}"
+        hint = f"retry: {session.retry_command}"
     elif arguments.verbose or arguments.debug:
         hint = None
     else:
-        hint = f"see why: {format_command((PROG, '--verbose', *argv))}"
-    lines = [f"{PROG}: {line}" for line in _failure_lines(run)]
+        hint = f"see why: {session.command_with('--verbose')}"
+    lines = [
+        f"{PROG}: {line}"
+        for line in _failure_lines(session.run, dry_run=session.dry_run)
+    ]
     if hint:
         lines.append(hint)
     sys.stderr.write(render(redact("\n".join(lines)), color) + "\n")
     sys.stderr.flush()
 
 
-def _run(parser, arguments, argv, color=False):
+def _run(parser, arguments, session):
     interactive = _interactive(arguments)
     sources = _check_usage(parser, arguments, interactive)
-    retry = f"retry: {format_command((PROG, *argv))}"
     try:
         config_file, database_file = _resolve_config_paths()
     except _ConfigPathError:
         raise _Failure(
             "APPDATA is not set. Set APPDATA to your Windows application-data "
-            "directory and retry."
+            "directory and retry.",
+            problem="appdata_missing",
         ) from None
     startup = _classify_startup(arguments)
 
     config_values = None
-    redacted_config = None
     try:
         if arguments.reset:
             _reset_config(config_file)
             return ExitCode.OK
         if startup.needs_config:
-            _ensure_config_exists(config_file, interactive=interactive)
+            if not arguments.dry_run:
+                _ensure_config_exists(config_file, interactive=interactive)
+            elif not os.path.isfile(config_file):
+                # A dry run never creates, prompts for, or repairs config.
+                raise _MissingConfig
             if startup.needs_auth or arguments.show_config:
                 config_values = _load_config_values(config_file)
-        if arguments.show_config:
-            redacted_config = _redacted_config_text(config_file)
+        if arguments.show_config and session.json:
+            settings = _redacted_config_values(config_file)
+        elif arguments.show_config:
+            settings = _redacted_config_text(config_file)
     except _MissingConfig:
         parser.error(
             f"no config file at {config_file}; create it in a terminal with "
@@ -557,50 +694,49 @@ def _run(parser, arguments, argv, color=False):
     except _ConfigStorageError:
         raise _Failure(
             "Unable to access configuration securely. "
-            "Check its directory permissions and available disk space."
+            "Check its directory permissions and available disk space.",
+            problem="config_storage",
         ) from None
     except BundleError as error:
         raise _Failure(
             "Unable to create configuration from the Qobuz web bundle: "
-            f"{error}. Configuration was not saved."
+            f"{error}. Configuration was not saved.",
+            problem="bundle_invalid",
         ) from None
     except http.HttpError as error:
         raise _Failure(
             f"Unable to read the Qobuz web bundle: {error}. "
             "Configuration was not saved.",
-            hint=retry if http.is_retryable(error) else None,
+            problem="bundle_unavailable",
             code=(ExitCode.TEMPORARY if http.is_retryable(error) else ExitCode.FAILURE),
         ) from None
     except _ConfigValidationError as error:
         raise _Failure(
             f"Your config file is corrupted: {error}! "
             f"Run '{RESET_COMMAND}' to fix this "
-            "(or 'qobuz-dl -r' if installed)."
+            "(or 'qobuz-dl -r' if installed).",
+            problem="config_corrupt",
         ) from None
 
     if arguments.show_config:
-        print(f"Configuration: {config_file}\nDatabase: {database_file}\n---")
-        print(redacted_config)
+        session.data = {
+            "config_path": config_file,
+            "database_path": database_file,
+            "settings": settings,
+        }
+        if not session.json:
+            print(f"Configuration: {config_file}\nDatabase: {database_file}\n---")
+            print(settings)
         return ExitCode.OK
 
     if arguments.purge:
-        try:
-            os.remove(database_file)
-        except FileNotFoundError:
-            logger.info(f"{GREEN}The database is already absent.")
-            return ExitCode.OK
-        except OSError:
-            raise _Failure(
-                f"Unable to delete database at {database_file}. Check its permissions."
-            ) from None
-        logger.info(f"{GREEN}The database was deleted.")
-        return ExitCode.OK
+        return _purge(session, database_file)
 
     arguments = qobuz_dl_args(
         config_values["default_quality"],
         config_values["default_limit"],
         config_values["default_folder"],
-    ).parse_args(argv)
+    ).parse_args(session.argv)
 
     embed_art = _choose(arguments.embed_art, config_values["embed_art"])
     no_cover = not _choose(arguments.cover, not config_values["no_cover"])
@@ -609,6 +745,7 @@ def _run(parser, arguments, argv, color=False):
     except ValueError as error:
         parser.error(str(error))
 
+    use_database = _choose(arguments.db, not config_values["no_database"])
     qobuz = QobuzDL(
         arguments.directory,
         arguments.quality,
@@ -621,19 +758,17 @@ def _run(parser, arguments, argv, color=False):
         ),
         cover_og_quality=_choose(arguments.og_cover, config_values["og_cover"]),
         no_cover=no_cover,
-        downloads_db=database_file
-        if _choose(arguments.db, not config_values["no_database"])
-        else None,
+        # A dry run reads no history, so it never opens the database.
+        downloads_db=database_file if use_database and not arguments.dry_run else None,
         folder_format=arguments.folder_format or config_values["folder_format"],
         track_format=arguments.track_format or config_values["track_format"],
         smart_discography=_choose(
             arguments.smart_discography, config_values["smart_discography"]
         ),
     )
-    _login(qobuz, config_values, retry)
-    code = _handle_commands(qobuz, arguments, sources)
-    _report_run(color, qobuz.run_result, code, argv, arguments)
-    return code
+    _login(qobuz, config_values)
+    session.run = RunResult(on_path=None if session.json else _print_path)
+    return _handle_commands(qobuz, arguments, sources, session.run)
 
 
 def _report(color, message, hint=None):
@@ -644,10 +779,34 @@ def _report(color, message, hint=None):
     sys.stderr.flush()
 
 
+def _write_json(session, code, problems=()):
+    data = session.data
+    problems = list(problems)
+    if session.run is not None:
+        data = envelope.run_data(session.run, dry_run=session.dry_run)
+        problems = [
+            *envelope.run_problems(session.run, session.retry_command),
+            *problems,
+        ]
+    envelope.write(
+        envelope.document(
+            session.operation, envelope.STATUS_BY_EXIT[code], data, problems
+        )
+    )
+
+
 def main(argv=None):
     """Run qobuz-dl and return its exit code."""
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = qobuz_dl_args()
+    scan = scan_options(parser, argv, HELP_FLAGS | {"--json"})
+    if "--json" in scan.found:
+        set_usage_error_hook(
+            parser,
+            lambda message, hint: envelope.write(envelope.usage_error(message, hint)),
+        )
+    if scan.subcommand == "lucky" and not scan.found & HELP_FLAGS:
+        _reject_old_number_flag(parser, argv)
     arguments = parser.parse_args(argv)
     if arguments.command == "help":
         topic = arguments.topic
@@ -655,6 +814,13 @@ def main(argv=None):
         target.print_help()
         return ExitCode.OK
 
+    session = _Session(
+        argv,
+        json=arguments.json,
+        dry_run=arguments.dry_run,
+        operation=_operation(arguments),
+        portable_argv=without_flags(parser, argv, DIAGNOSTIC_FLAGS),
+    )
     debug = arguments.debug or env_flag(DEBUG_ENV)
     if debug:
         level = logging.DEBUG
@@ -665,28 +831,53 @@ def main(argv=None):
     color = not arguments.no_color and color_enabled(sys.stderr)
     configure_prompts(color=color)
     with stderr_logging(logging.getLogger(PACKAGE_LOGGER), level, color):
+        problems = []
         try:
             with sigterm_raises():
-                return _run(parser, arguments, argv, color)
+                code = _run(parser, arguments, session)
+            _report_run(color, session, code, arguments)
         except KeyboardInterrupt as interruption:
-            _report(color, "interrupted; finished files were kept")
-            return interruption_exit_code(interruption)
+            message = "interrupted; finished files were kept"
+            _report(color, message)
+            code = interruption_exit_code(interruption)
+            problems.append(envelope.problem("interrupted", message))
         except _Failure as failure:
-            _report(color, str(failure), failure.hint)
-            return failure.code
+            code = failure.code
+            retry = session.retry_command if code == ExitCode.TEMPORARY else None
+            _report(color, str(failure), f"retry: {retry}" if retry else None)
+            problems.append(
+                envelope.problem(
+                    failure.problem,
+                    str(failure),
+                    retryable=retry is not None,
+                    hint=retry,
+                )
+            )
         except EOFError:
-            _report(color, "input ended before the prompt was answered")
-            return ExitCode.USAGE
+            message = "input ended before the prompt was answered"
+            _report(color, message)
+            code = ExitCode.USAGE
+            problems.append(envelope.problem("input_ended", message))
         except Exception as error:
             if debug:
                 trace = "".join(traceback.format_exception(error))
                 sys.stderr.write(render(redact(trace), color))
+            rerun = session.command_with("--debug")
             _report(
                 color,
                 f"unexpected error: {error}",
-                "rerun with a stack trace: " + format_command((PROG, "--debug", *argv)),
+                f"rerun with a stack trace: {rerun}",
             )
-            return ExitCode.FAILURE
+            code = ExitCode.FAILURE
+            problems.append(
+                envelope.problem("unexpected_error", str(error), hint=rerun)
+            )
+        if session.json:
+            try:
+                _write_json(session, code, problems)
+            except OSError as error:
+                _report(color, f"could not write the JSON result: {error}")
+        return code
 
 
 if __name__ == "__main__":

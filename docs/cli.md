@@ -27,8 +27,10 @@ For the plaintext prompt, stored password digest, and current login transport, s
 | `--debug` | Show debug logs and stack traces on stderr; `QOBUZ_DL_DEBUG=1` does the same. |
 | `--no-color` | Never color output. Color is also off for a non-terminal, with `NO_COLOR`, or with `TERM=dumb`. |
 | `--no-input` | Never prompt. A command that needs input exits `2` instead. |
+| `--json` | Print one JSON object on stdout instead of paths or text. Implies `--no-input`. See [Machine-readable output](#machine-readable-output). |
+| `-n`, `--dry-run` | Log in and look up metadata, then print where each track would go without writing anything. See [Dry run](#dry-run). |
 
-`--reset`, `--purge`, `--show-config`, and a command are mutually exclusive; combining them exits `2`. The last five options work before or after a command name, as in `qobuz-dl -v dl URL` or `qobuz-dl dl URL -v`. Long options must be spelled out; abbreviations exit `2`.
+`--reset`, `--purge`, `--show-config`, and a command are mutually exclusive; combining them exits `2`. The last seven options work before or after a command name, as in `qobuz-dl -v dl URL` or `qobuz-dl dl URL -v`. Long options must be spelled out; abbreviations exit `2`.
 
 ## Commands
 
@@ -63,9 +65,40 @@ uvx --from git+https://github.com/pascalandy/qobuz-dl.git qobuz-dl <command> --h
 
 An interrupt outranks every other code, and a permanent failure outranks a temporary one: a run with both exits `1`.
 
-A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict`, then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise.
+A run that exits `1` or `75` ends its stderr with one line per failure reason and problem, such as `qobuz-dl: 1 of 3 items could not be downloaded: path_conflict` (`would not be` in a dry run), then the next command: `retry: ...` for a temporary failure, or `see why: qobuz-dl --verbose ...` otherwise.
 
 Login failures exit `1`, or `75` when the login or web-bundle request failed for a temporary reason. Errors name what failed and, when there is one, the command to run next. Stack traces appear only with `--debug`, and every message masks email, password, token, and request-signature values. On Windows, an external `TerminateProcess` cannot be caught, so a process stopped that way exits without the `143` guarantees.
+
+## Machine-readable output
+
+With `--json`, stdout holds exactly one JSON object and nothing else, whatever the outcome. stderr keeps its usual diagnostics. The object always has these keys:
+
+| Key | Value |
+|---|---|
+| `schema_version` | `1` |
+| `operation` | `dl`, `lucky`, `show-config`, `purge`, or `null` for a usage error |
+| `status` | `ok`, `failed` (exit `1` or `75`), `interrupted` (exit `130` or `143`), or `usage_error` (exit `2`) |
+| `data` | The operation's result, or `null` |
+| `problems` | A list of objects with `code`, `severity`, `message`, `source`, `retryable`, and `hint`; messages are redacted |
+
+| Invocation | Result |
+|---|---|
+| `dl`, `lucky` | `data.items` lists each track or album outcome with `source`, `kind`, `item_id`, `state`, `reason`, `retryable`, `paths`, `evidence`, and `exists`; `data.totals` counts them. `evidence` is `published`, `verified`, or `filename_only`: an `existing_file` result proves only that a file with the expected name exists |
+| `--show-config` | `data` holds `config_path`, `database_path`, and the redacted `settings` |
+| `--purge` | `data` holds `database_path` and whether it was `deleted` |
+| `fun`, `--reset`, or no command | A usage-error object with exit `2`, before any prompt, login, or write |
+| Any usage error | `operation` is `null` and `status` is `usage_error` |
+| `-h`, `--help`, `--version` | Human text wins; no JSON |
+
+An interrupted run prints the partial object with `status: "interrupted"`. A temporary problem carries the command to retry in `hint`. `--json` after `--` is a source, not an option. The object escapes non-ASCII text, so any stdout encoding can carry it; masks credentials in `source` fields; and builds `hint` commands without `-v`, `--debug`, or `--no-color`, so it is identical at every verbosity.
+
+## Dry run
+
+`-n`/`--dry-run` logs in, then makes the same read-only requests as a real run: metadata, search, and track file URLs, plus the Last.fm page. It prints each candidate destination in the same format as a real run: one path per line, or `--json` items with `state: "planned"`. An item that a real run would skip or fail for a reason visible in those responses, such as a demo or a quality refusal, is reported the same way.
+
+A dry run writes nothing: no folder, audio, cover, booklet, M3U, config, or history. It never creates, prompts for, or repairs config, so a missing config exits `2`. It does not read download history. `exists` reports only whether something is at the path now. The candidate path is not a promise: transfers, media verification, safe publication, history, and earlier items in the same run decide what a real run finally does, including reuse or a path conflict.
+
+`--purge --dry-run` prints the database path and deletes nothing. `--dry-run` with `--reset` or `fun` exits `2`. `-n` used to be `lucky`'s result count: `lucky -n 3` now exits `2` and suggests `--limit`.
 
 ## API rate-limit retries
 
