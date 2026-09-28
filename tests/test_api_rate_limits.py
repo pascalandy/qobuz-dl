@@ -549,7 +549,7 @@ def test_cli_initialization_exits_with_sanitized_rate_limit_message(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["qobuz-dl", "dl", "https://play.qobuz.com/album/album-1"],
+        ["qobuz-dl", "dl", "https://play.qobuz.com/album/album1"],
     )
     monkeypatch.setattr(
         cli,

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from qobuz_dl import db, downloader
-from qobuz_dl.core import QobuzDL
+from qobuz_dl.core import QobuzDL, RunResult
 from qobuz_dl.db import DownloadHistory, MediaProperties, VerifiedArtifact
 from qobuz_dl.downloader import Download, DownloadResult
 
@@ -997,6 +997,8 @@ def test_interrupted_commit_cleanup_does_not_roll_back_publication(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(downloader.shutil, "rmtree", interrupt_cleanup)
+    reported = []
+    qobuz.run_result = RunResult(on_path=reported.append)
 
     with pytest.raises(KeyboardInterrupt):
         qobuz.download_from_id("track-1", album=False)
@@ -1006,6 +1008,17 @@ def test_interrupted_commit_cleanup_does_not_roll_back_publication(
     assert recorded is not None
     assert recorded.media.bit_depth == 24
     assert _files_equal_to(final_path.parent, old_bytes)
+    # The published file reached the run before the interrupted cleanup.
+    assert reported == [str(final_path)]
+    assert [
+        (item.kind, item.item_id, item.result) for item in qobuz.run_result.items
+    ] == [
+        (
+            "track",
+            "track-1",
+            DownloadResult("finalized", "downloaded", (str(final_path),)),
+        )
+    ]
 
 
 def test_mp3_effective_media_requires_format_mime_and_320kbps(tmp_path):

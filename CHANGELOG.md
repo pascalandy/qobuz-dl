@@ -11,9 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `scripts/check.py` (`just ci`) is silent on success except for one stdout line in `sha256sum` format, `<sha256>  dist/<wheel>`, which replaces `verified wheel sha256: <sha256>`. A failing gate exits `1` whatever its own status, and stderr shows its captured output followed by a rerun command. `--help` now prints help instead of running the gates. Each gate runs in its own process group, so an interrupt also stops the tools a gate started
 - `scripts/verify_install.py` exits `2` instead of `1` for an invalid revision or extra argument, and `75` instead of `1` when a command times out or the floating source moves during verification. The `+ command` echo on stderr appears only with `--verbose`
 - The live verifier (`just live-qobuz`) reads the password through `--password-file PATH|-` and rejects a lone `QOBUZ_DL_LIVE_PASSWORD` with exit `2`. It prints the report path on stdout, keeps stderr empty on success, and exits `130` or `143` instead of `1` for SIGINT or SIGTERM, including during cleanup and report writing
+- `qobuz-dl dl`, `lucky`, and `fun` print each finalized audio path on stdout, once per run, and exit with the run's outcome: `1` when any item failed for a lasting reason (previously `0`), `75` when every failure was temporary, such as a timeout, HTTP 5xx or `429`, or exhausted rate-limit retries, and `0` otherwise
+- Sources are validated before config, login, or downloads: anything but an `https` Qobuz URL on `play`, `open`, or `www.qobuz.com`, an `https` Last.fm playlist URL, or a readable text file exits `2` and names the file and line. The lenient parser previously skipped such sources and exited `0`. A text file that includes itself exits `2`. A `lucky` query under three characters exits `2`
 
 ### Added
 
+- `DownloadResult.retryable`, `RunResult`, `QobuzDL.download_sources`, `core.expand_sources`, and `http.is_retryable`; `http.HttpTransportError` and `http.HttpTruncatedError` mark temporary transport failures, and `HttpTruncatedError` is still a `ConnectionError`
 - `qobuz_dl.console` holds the command-line conventions shared by every entry point: exit codes, the usage-error format, help precedence, signal exits, color decisions, and secret input
 - `scripts/check.py` gains `-v/--verbose` and `--debug` (or `CHECK_DEBUG=1`); GitHub Actions runs it with `--verbose`
 - `scripts/verify_install.py` gains `-v/--verbose`, `--debug` (or `VERIFY_INSTALL_DEBUG=1`), and `--timeout DURATION`
@@ -23,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Package maturity is now Beta while the unchanged access model continues to use app parameters derived from Qobuz's public web bundle, as documented in [Qobuz access and project status](docs/qobuz-access.md)
 - Every helper script's `--help` lists examples and exit codes, rejects abbreviated long options, and prints usage errors as usage, the error, and `run '<command> --help' for usage`
+- A failed artist, label, or playlist lookup no longer ends the run with a traceback; it is reported and the next source runs
 
 ## [1.0.0] - 2026-06-12
 

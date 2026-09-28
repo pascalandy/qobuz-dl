@@ -1,3 +1,4 @@
+import io
 import os
 import subprocess
 import sys
@@ -7,9 +8,13 @@ from pathlib import Path
 import pytest
 
 import qobuz_dl.cli as cli
+from qobuz_dl import http
 from qobuz_dl.cli import _quality_fallback_enabled, _redacted_config_text
 from qobuz_dl.color import GREEN, RESET
 from qobuz_dl.commands import QUALITY_CHOICES, qobuz_dl_args
+from qobuz_dl.core import RunItem
+from qobuz_dl.downloader import DownloadResult
+from qobuz_dl.exceptions import ApiRateLimitError
 
 
 def _write_valid_config(config_file):
@@ -532,8 +537,8 @@ def test_download_first_run_creates_config_once_then_initializes_client(
         def initialize_client(self, email, password, app_id, secrets):
             initialized.append((email, password, app_id, secrets))
 
-        def download_list_of_urls(self, urls):
-            downloaded.append(list(urls))
+        def download_sources(self, sources):
+            downloaded.append([source.url for source in sources])
 
     def fake_reset(target):
         reset_calls.append(target)
@@ -545,7 +550,7 @@ def test_download_first_run_creates_config_once_then_initializes_client(
         [
             "qobuz-dl",
             "dl",
-            "https://play.qobuz.com/album/album-1",
+            "https://play.qobuz.com/album/album1",
         ],
     )
     _stub_config_paths(monkeypatch, config_file, database_file)
@@ -575,7 +580,7 @@ def test_download_first_run_creates_config_once_then_initializes_client(
         "123456",
         ["secret-one", "secret-two"],
     )
-    assert downloaded == [["https://play.qobuz.com/album/album-1"]]
+    assert downloaded == [["https://play.qobuz.com/album/album1"]]
 
 
 def test_download_corrupted_config_reports_recovery_without_client(
@@ -596,7 +601,7 @@ def test_download_corrupted_config_reports_recovery_without_client(
         [
             "qobuz-dl",
             "dl",
-            "https://play.qobuz.com/album/album-1",
+            "https://play.qobuz.com/album/album1",
         ],
     )
     _stub_config_paths(monkeypatch, config_file)
@@ -639,7 +644,7 @@ def test_invalid_config_boolean_is_safe_and_stops_before_runtime(
         capsys,
         caplog,
         config_file,
-        ["dl", "https://play.qobuz.com/album/album-1"],
+        ["dl", "https://play.qobuz.com/album/album1"],
     )
 
     assert f"'{key}' must be a Boolean" in diagnostic
@@ -660,7 +665,7 @@ def test_invalid_config_quality_is_safe_and_stops_before_runtime(
         capsys,
         caplog,
         config_file,
-        ["dl", "https://play.qobuz.com/album/album-1"],
+        ["dl", "https://play.qobuz.com/album/album1"],
     )
 
     assert "'default_quality' must be one of 5, 6, 7, 27" in diagnostic
@@ -684,15 +689,15 @@ def test_invalid_config_limit_is_safe_and_stops_before_runtime(
     [
         (
             "password = hashed-password\nSECRET_SENTINEL",
-            ["dl", "https://play.qobuz.com/album/album-1"],
+            ["dl", "https://play.qobuz.com/album/album1"],
         ),
         (
             "password = %(SECRET_SENTINEL)s",
-            ["dl", "https://play.qobuz.com/album/album-1"],
+            ["dl", "https://play.qobuz.com/album/album1"],
         ),
         (
             "password = hashed-password\npassword = SECRET_SENTINEL",
-            ["dl", "https://play.qobuz.com/album/album-1"],
+            ["dl", "https://play.qobuz.com/album/album1"],
         ),
         ("password = hashed-password\nSECRET_SENTINEL", ["--show-config"]),
     ],
@@ -773,13 +778,13 @@ def test_valid_config_quality_reaches_client(monkeypatch, tmp_path, quality):
         def initialize_client(self, *args):
             pass
 
-        def download_list_of_urls(self, urls):
+        def download_sources(self, sources):
             pass
 
     _configure_cli_main(
         monkeypatch,
         config_file,
-        ["dl", "https://play.qobuz.com/album/album-1"],
+        ["dl", "https://play.qobuz.com/album/album1"],
         FakeQobuzDL,
     )
 
@@ -830,13 +835,13 @@ def test_configparser_boolean_vocabulary_is_accepted(
         def initialize_client(self, *args):
             pass
 
-        def download_list_of_urls(self, urls):
+        def download_sources(self, sources):
             pass
 
     _configure_cli_main(
         monkeypatch,
         config_file,
-        ["dl", "https://play.qobuz.com/album/album-1"],
+        ["dl", "https://play.qobuz.com/album/album1"],
         FakeQobuzDL,
     )
 
@@ -892,7 +897,7 @@ def test_zero_and_negative_config_limits_are_preserved(monkeypatch, tmp_path, li
         def initialize_client(self, *args):
             pass
 
-        def interactive(self):
+        def interactive(self, download=True):
             observed_limits.append(self.interactive_limit)
 
     _configure_cli_main(monkeypatch, config_file, ["fun"], FakeQobuzDL)
@@ -917,7 +922,7 @@ def test_explicit_cli_values_override_valid_config_defaults(monkeypatch, tmp_pat
         def initialize_client(self, *args):
             pass
 
-        def download_list_of_urls(self, urls):
+        def download_sources(self, sources):
             pass
 
     _configure_cli_main(
@@ -925,7 +930,7 @@ def test_explicit_cli_values_override_valid_config_defaults(monkeypatch, tmp_pat
         config_file,
         [
             "dl",
-            "https://play.qobuz.com/album/album-1",
+            "https://play.qobuz.com/album/album1",
             "--directory",
             "CLI Music",
             "--quality",
@@ -958,8 +963,8 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
         def initialize_client(self, email, password, app_id, secrets):
             initialized.append((email, password, app_id, secrets))
 
-        def download_list_of_urls(self, urls):
-            downloaded.append(list(urls))
+        def download_sources(self, sources):
+            downloaded.append([source.url for source in sources])
 
     monkeypatch.setattr(
         sys,
@@ -967,7 +972,7 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
         [
             "qobuz-dl",
             "dl",
-            "https://play.qobuz.com/album/album-1",
+            "https://play.qobuz.com/album/album1",
             "--no-db",
         ],
     )
@@ -983,7 +988,7 @@ def test_no_db_flag_wires_duplicate_tracking_off_without_blocking_download(
         "123456",
         ["secret-one", "secret-two"],
     )
-    assert downloaded == [["https://play.qobuz.com/album/album-1"]]
+    assert downloaded == [["https://play.qobuz.com/album/album1"]]
 
 
 @pytest.mark.parametrize(
@@ -1154,7 +1159,7 @@ def test_command_dispatch_preserves_unrelated_hidden_temporaries(tmp_path, outco
     class FakeQobuz:
         directory = tmp_path
 
-        def download_list_of_urls(self, sources):
+        def download_sources(self, sources):
             assert sources == ["source"]
             if outcome == "runtime-error":
                 raise runtime_error
@@ -1165,10 +1170,274 @@ def test_command_dispatch_preserves_unrelated_hidden_temporaries(tmp_path, outco
 
     if outcome == "runtime-error":
         with pytest.raises(RuntimeError) as exc_info:
-            cli._handle_commands(FakeQobuz(), arguments)
+            cli._handle_commands(FakeQobuz(), arguments, ["source"])
         assert exc_info.value is runtime_error
     else:
-        cli._handle_commands(FakeQobuz(), arguments)
+        cli._handle_commands(FakeQobuz(), arguments, ["source"])
 
     assert root_sentinel.read_bytes() == b"root sentinel bytes"
     assert nested_sentinel.read_bytes() == b"nested sentinel bytes"
+
+
+def _scripted_runtime(outcomes, observed=None):
+    """A QobuzDL stand-in that feeds scripted outcomes to the CLI's run."""
+
+    class ScriptedQobuzDL:
+        def __init__(self, directory, *args, **kwargs):
+            self.directory = directory
+
+        def initialize_client(self, *args):
+            pass
+
+        def download_sources(self, sources):
+            if observed is not None:
+                observed.append(list(sources))
+            for entry in outcomes:
+                if isinstance(entry, BaseException):
+                    raise entry
+                if isinstance(entry, RunItem):
+                    self.run_result.add_item(entry)
+                else:
+                    self.run_result.add_problem(entry)
+            return self.run_result
+
+        def lucky_mode(self, query, download=True):
+            assert download is False
+            return observed.pop() if observed else []
+
+        def interactive(self, download=True):
+            assert download is False
+            return ["https://play.qobuz.com/track/7", "https://play.qobuz.com/album/a8"]
+
+    return ScriptedQobuzDL
+
+
+def _finalized(path, reason="downloaded"):
+    return RunItem(
+        "https://play.qobuz.com/album/a1",
+        "track",
+        "1",
+        DownloadResult("finalized", reason, (path,)),
+    )
+
+
+def test_download_prints_finalized_paths_on_stdout_and_exits_0(
+    monkeypatch, tmp_path, capsys
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    outcomes = [
+        _finalized("Music/Album/01. One.flac"),
+        _finalized("Music/Album/02. Two.flac", "verified_artifact"),
+        _finalized("Music/Album/01. One.flac", "verified_artifact"),
+        RunItem("s", "album", "a2", DownloadResult("ignored", "type_filter")),
+    ]
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/a1"],
+        _scripted_runtime(outcomes),
+    )
+
+    assert cli.main() == 0
+
+    assert capsys.readouterr().out == (
+        "Music/Album/01. One.flac\nMusic/Album/02. Two.flac\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "code"),
+    [
+        (
+            [
+                _finalized("a.flac"),
+                RunItem("s", "track", "2", DownloadResult("failed", "path_conflict")),
+            ],
+            1,
+        ),
+        (
+            [
+                _finalized("a.flac"),
+                RunItem(
+                    "s",
+                    "track",
+                    "2",
+                    DownloadResult("failed", "request_error", retryable=True),
+                ),
+            ],
+            75,
+        ),
+        (
+            [
+                RunItem("s", "track", "2", DownloadResult("failed", "missing_url")),
+                ApiRateLimitError("Qobuz API rate limit retries exhausted."),
+            ],
+            1,
+        ),
+        ([ApiRateLimitError("Qobuz API rate limit retries exhausted.")], 75),
+        ([http.HttpTransportError("timed out")], 75),
+        ([http.HttpStatusError(404)], 1),
+    ],
+    ids=[
+        "permanent-failure",
+        "only-temporary",
+        "rate-limit-after-permanent",
+        "rate-limit-alone",
+        "transport-error",
+        "permanent-status",
+    ],
+)
+def test_download_exit_code_follows_the_run_outcomes(
+    monkeypatch, tmp_path, capsys, outcomes, code
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/a1"],
+        _scripted_runtime(outcomes),
+    )
+
+    assert cli.main() == code
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "https://evil.invalid/track/123",
+        "https://play.qobuz.com.evil.invalid/album/abc123",
+        "http://play.qobuz.com/album/abc123",
+        "not-a-file.txt",
+    ],
+)
+def test_invalid_sources_exit_2_before_config_or_client(monkeypatch, capsys, source):
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "dl", source])
+    monkeypatch.setattr(
+        cli,
+        "_resolve_config_paths",
+        lambda: pytest.fail("an invalid source must stop before config"),
+    )
+    monkeypatch.setattr(cli, "QobuzDL", _UnexpectedRuntime)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    error = capsys.readouterr().err
+    assert error.startswith("usage: qobuz-dl dl ")
+    assert "qobuz-dl dl: error: not a supported Qobuz or Last.fm URL" in error
+    assert repr(source) in error
+
+
+def test_text_file_errors_name_the_file_and_line(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    Path("urls.txt").write_text(
+        "https://play.qobuz.com/album/abc1\nurls.txt\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "dl", "urls.txt"])
+    monkeypatch.setattr(
+        cli,
+        "_resolve_config_paths",
+        lambda: pytest.fail("an invalid file must stop before config"),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    assert "qobuz-dl dl: error: urls.txt:2: 'urls.txt' includes itself\n" in (
+        capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize("query", [["ab"], ["x"], ["  "]])
+def test_short_lucky_query_exits_2_before_config(monkeypatch, capsys, query):
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "lucky", *query])
+    monkeypatch.setattr(
+        cli,
+        "_resolve_config_paths",
+        lambda: pytest.fail("a short query must stop before config"),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    assert (
+        "qobuz-dl lucky: error: the search query needs at least 3 characters"
+        in capsys.readouterr().err
+    )
+
+
+def test_lucky_without_results_exits_1(monkeypatch, tmp_path):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _configure_cli_main(
+        monkeypatch, config_file, ["lucky", "no such record"], _scripted_runtime([])
+    )
+
+    assert cli.main() == 1
+
+
+def test_lucky_downloads_its_results_through_validated_sources(monkeypatch, tmp_path):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    observed = [["https://play.qobuz.com/album/r1", "https://play.qobuz.com/album/r2"]]
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["lucky", "artist", "record"],
+        _scripted_runtime([_finalized("a.flac")], observed),
+    )
+
+    assert cli.main() == 0
+
+    assert [[source.item_id for source in sources] for sources in observed] == [
+        ["r1", "r2"]
+    ]
+
+
+def test_fun_downloads_the_interactive_queue_through_the_result_path(
+    monkeypatch, tmp_path, capsys
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    observed = []
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["fun"],
+        _scripted_runtime([_finalized("fun.flac")], observed),
+    )
+
+    assert cli.main() == 0
+
+    assert [(s.url_type, s.item_id) for s in observed[0]] == [
+        ("track", "7"),
+        ("album", "a8"),
+    ]
+    assert capsys.readouterr().out == "fun.flac\n"
+
+
+def test_path_that_stdout_cannot_encode_is_escaped_not_fatal(
+    monkeypatch, tmp_path, caplog
+):
+    config_file = tmp_path / "config" / "config.ini"
+    _write_valid_config(config_file)
+    _configure_cli_main(
+        monkeypatch,
+        config_file,
+        ["dl", "https://play.qobuz.com/album/a1"],
+        _scripted_runtime([_finalized("Música/01. Canción.flac")]),
+    )
+    raw = io.BytesIO()
+    ascii_stdout = io.TextIOWrapper(raw, encoding="ascii", newline="\n")
+    monkeypatch.setattr(sys, "stdout", ascii_stdout)
+
+    assert cli.main() == 0
+
+    ascii_stdout.flush()
+    assert raw.getvalue() == b"M\\xfasica/01. Canci\\xf3n.flac\n"
+    assert "set PYTHONUTF8=1" in caplog.text

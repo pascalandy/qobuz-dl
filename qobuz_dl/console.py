@@ -97,7 +97,8 @@ class OptionScan:
     found: set[str] = field(default_factory=set)
 
 
-def _subcommand_choices(parser) -> dict[str, argparse.ArgumentParser]:
+def subcommand_parsers(parser) -> dict[str, argparse.ArgumentParser]:
+    """Map each subcommand name to its parser."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
             return dict(action.choices)
@@ -136,7 +137,7 @@ def scan_options(
     """
     scan = OptionScan(parser)
     current = parser
-    subcommands = _subcommand_choices(parser)
+    subcommands = subcommand_parsers(parser)
     skip_value = False
     for argument in argv:
         if skip_value:

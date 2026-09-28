@@ -139,7 +139,7 @@ def test_raw_cli_cover_conflict_stops_before_first_run_bootstrap(monkeypatch, ca
         [
             "qobuz-dl",
             "dl",
-            "https://play.qobuz.com/album/album-1",
+            "https://play.qobuz.com/album/album1",
             "--embed-art",
             "--no-cover",
         ],
@@ -179,7 +179,7 @@ def test_merged_cli_and_config_cover_conflict_stops_before_client(
         embed_art=configured_embed,
         no_cover=configured_no_cover,
     )
-    argv = ["qobuz-dl", "dl", "https://play.qobuz.com/album/album-1"]
+    argv = ["qobuz-dl", "dl", "https://play.qobuz.com/album/album1"]
     if flag:
         argv.append(flag)
     monkeypatch.setattr(sys, "argv", argv)

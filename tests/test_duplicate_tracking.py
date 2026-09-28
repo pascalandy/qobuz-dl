@@ -27,6 +27,7 @@ def _record_downloads(monkeypatch, calls, failures=None):
             *,
             download_history,
             verified_destinations,
+            on_outcome=None,
         ):
             self.item_id = item_id
             self.path = path

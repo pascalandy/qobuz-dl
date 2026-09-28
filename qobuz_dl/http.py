@@ -1,5 +1,8 @@
+import http.client
 import json
 import re
+import socket
+import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,6 +12,8 @@ from typing import Mapping, Protocol, TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from qobuz_dl.exceptions import ApiRateLimitError
 
 DEFAULT_TIMEOUT = 30
 
@@ -33,11 +38,56 @@ class HttpStatusError(HttpError):
 
 
 class HttpRequestError(HttpError):
-    pass
+    """A request that failed before an HTTP status was available."""
+
+
+class HttpTransportError(HttpRequestError):
+    """A request failed for a reason that a later attempt can clear.
+
+    Only evidence of a temporary transport problem qualifies: a timeout; a
+    refused, reset, or aborted connection; a temporary DNS failure; or a
+    truncated transfer. Certificate and TLS failures, unknown hosts, malformed
+    URLs, and local file errors stay plain ``HttpRequestError``.
+    """
+
+
+class HttpTruncatedError(HttpTransportError, ConnectionError):
+    """The server closed the transfer before sending every promised byte."""
 
 
 class HttpRateLimitError(HttpRequestError):
     pass
+
+
+def _is_transport_failure(reason) -> bool:
+    if isinstance(reason, ssl.SSLError):
+        return False
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return True
+    if isinstance(
+        reason, (ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError)
+    ):
+        return True
+    if isinstance(reason, socket.gaierror):
+        # Resolvers differ; only an explicit "try again" counts as temporary.
+        return reason.errno == getattr(socket, "EAI_AGAIN", None)
+    return False
+
+
+def _request_error(reason) -> HttpRequestError:
+    message = str(reason)
+    if _is_transport_failure(reason):
+        return HttpTransportError(message)
+    return HttpRequestError(message)
+
+
+def is_retryable(error: BaseException) -> bool:
+    """Whether ``error`` shows a temporary condition that a rerun may clear."""
+    if isinstance(error, (HttpTransportError, HttpRateLimitError, ApiRateLimitError)):
+        return True
+    return isinstance(error, HttpStatusError) and (
+        error.status_code == 429 or 500 <= error.status_code <= 599
+    )
 
 
 @dataclass
@@ -248,8 +298,13 @@ def get(
             header_items=header_items,
         )
     except URLError as exc:
-        raise HttpRequestError(str(exc.reason)) from exc
+        raise _request_error(exc.reason) from exc
     except OSError as exc:
+        raise _request_error(exc) from exc
+    except http.client.IncompleteRead as exc:
+        # The message omits the URL: an API URL can carry credentials.
+        raise HttpTruncatedError("The response was cut short") from exc
+    except http.client.HTTPException as exc:
         raise HttpRequestError(str(exc)) from exc
     except ValueError as exc:
         raise HttpRequestError(str(exc)) from exc
@@ -354,12 +409,18 @@ def stream_download(
             header_items,
         ) from exc
     except URLError as exc:
-        raise HttpRequestError(str(exc.reason)) from exc
+        raise _request_error(exc.reason) from exc
     except OSError as exc:
+        raise _request_error(exc) from exc
+    except http.client.IncompleteRead as exc:
+        raise HttpTruncatedError(
+            "File download was interrupted for " + str(target)
+        ) from exc
+    except http.client.HTTPException as exc:
         raise HttpRequestError(str(exc)) from exc
     except ValueError as exc:
         raise HttpRequestError(str(exc)) from exc
 
     if total is not None and total != downloaded:
-        raise ConnectionError("File download was interrupted for " + str(target))
+        raise HttpTruncatedError("File download was interrupted for " + str(target))
     return downloaded

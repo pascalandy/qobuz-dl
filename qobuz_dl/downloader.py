@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Tuple
 
@@ -59,6 +60,18 @@ class DownloadResult:
         "empty_release",
     ]
     finalized_paths: tuple[str, ...] = ()
+    # True only when every failure behind this result was temporary, such as
+    # a timeout or an HTTP 5xx, so the same request may succeed later.
+    retryable: bool = False
+
+
+# Receives (kind, item_id, result) for each outcome as it is created: "track"
+# for one track, "album" for a release that failed or was skipped as a whole.
+OutcomeCallback = Callable[[str, str, DownloadResult], None]
+
+
+def _request_failure(error: BaseException) -> DownloadResult:
+    return DownloadResult("failed", "request_error", retryable=http.is_retryable(error))
 
 
 @dataclass(frozen=True)
@@ -332,9 +345,14 @@ def _aggregate_download_results(results: list[DownloadResult]) -> DownloadResult
     if not results:
         return DownloadResult("ignored", "empty_release")
 
-    failed = next((result for result in results if result.state == "failed"), None)
+    failed = [result for result in results if result.state == "failed"]
     if failed:
-        return DownloadResult("failed", failed.reason, finalized_paths)
+        return DownloadResult(
+            "failed",
+            failed[0].reason,
+            finalized_paths,
+            retryable=all(result.retryable for result in failed),
+        )
 
     ignored = next((result for result in results if result.state == "ignored"), None)
     if ignored:
@@ -365,6 +383,7 @@ class Download:
         track_format=None,
         download_history: DownloadHistory | None = None,
         verified_destinations: bool = False,
+        on_outcome: OutcomeCallback | None = None,
     ):
         validate_cover_options(embed_art, no_cover)
         self.client = client
@@ -380,6 +399,15 @@ class Download:
         self.track_format = track_format or DEFAULT_TRACK
         self.download_history = download_history
         self.verified_destinations = verified_destinations
+        self.on_outcome = on_outcome
+
+    def _emit(self, kind, item_id, result: DownloadResult) -> DownloadResult:
+        if self.on_outcome is not None:
+            self.on_outcome(kind, str(item_id), result)
+        return result
+
+    def _emit_album(self, result: DownloadResult) -> DownloadResult:
+        return self._emit("album", self.item_id, result)
 
     def download_id_by_type(self, track=True):
         if track:
@@ -391,22 +419,22 @@ class Download:
             meta = self.client.get_album_meta(self.item_id)
         except (http.HttpError, ConnectionError) as error:
             logger.error(f"{RED}Error getting release: {error}. Skipping...")
-            return DownloadResult("failed", "request_error")
+            return self._emit_album(_request_failure(error))
 
         if not meta.get("streamable"):
             logger.error(f"{RED}This release is not streamable. Skipping...")
-            return DownloadResult("failed", "not_streamable")
+            return self._emit_album(DownloadResult("failed", "not_streamable"))
 
         if self.albums_only and (
             meta.get("release_type") != "album"
             or meta.get("artist", {}).get("name") == "Various Artists"
         ):
             logger.info(f"{OFF}Ignoring Single/EP/VA: {meta.get('title', 'n/a')}")
-            return DownloadResult("ignored", "type_filter")
+            return self._emit_album(DownloadResult("ignored", "type_filter"))
 
         tracks = meta["tracks"]["items"]
         if not tracks:
-            return DownloadResult("ignored", "empty_release")
+            return self._emit_album(DownloadResult("ignored", "empty_release"))
 
         album_title = _get_title(meta)
 
@@ -421,7 +449,7 @@ class Download:
             )
         except (http.HttpError, ConnectionError) as error:
             logger.error(f"{RED}Error getting release: {error}. Skipping...")
-            return DownloadResult("failed", "request_error")
+            return self._emit_album(_request_failure(error))
 
         if "goodies" in meta:
             try:
@@ -442,13 +470,23 @@ class Download:
                 )
                 if "sample" in parsed_url:
                     logger.info(f"{OFF}Demo. Skipping")
-                    results.append(DownloadResult("ignored", "demo"))
+                    results.append(
+                        self._emit(
+                            "track", track["id"], DownloadResult("ignored", "demo")
+                        )
+                    )
                     continue
                 _file_format, quality_met, bit_depth, sampling_rate = self._get_format(
                     parsed_url
                 )
                 if not self._quality_allows_download(_get_title(track), quality_met):
-                    results.append(DownloadResult("ignored", "quality_filter"))
+                    results.append(
+                        self._emit(
+                            "track",
+                            track["id"],
+                            DownloadResult("ignored", "quality_filter"),
+                        )
+                    )
                     continue
                 if parsed_url.get("url"):
                     quality = (
@@ -467,7 +505,9 @@ class Download:
                 )
             except (http.HttpError, ConnectionError) as error:
                 logger.error(f"{RED}Error getting release: {error}. Skipping...")
-                results.append(DownloadResult("failed", "request_error"))
+                results.append(
+                    self._emit("track", track["id"], _request_failure(error))
+                )
                 break
             results.append(result)
 
@@ -481,7 +521,9 @@ class Download:
             parsed_url = self.client.get_track_url(self.item_id, self.quality)
             if "sample" in parsed_url:
                 logger.info(f"{OFF}Demo. Skipping")
-                return DownloadResult("ignored", "demo")
+                return self._emit(
+                    "track", self.item_id, DownloadResult("ignored", "demo")
+                )
 
             meta = self.client.get_track_meta(self.item_id)
             track_title = _get_title(meta)
@@ -489,7 +531,9 @@ class Download:
             logger.info(f"\n{YELLOW}Downloading: {artist} - {track_title}")
             preparation = self._prepare_track_download(meta, parsed_url, track_title)
             if not preparation:
-                return DownloadResult("ignored", "quality_filter")
+                return self._emit(
+                    "track", self.item_id, DownloadResult("ignored", "quality_filter")
+                )
             result = self._download_prepared_track(
                 preparation,
                 parsed_url,
@@ -500,7 +544,7 @@ class Download:
             )
         except (http.HttpError, ConnectionError) as error:
             logger.error(f"{RED}Error getting release: {error}. Skipping...")
-            return DownloadResult("failed", "request_error")
+            return self._emit("track", self.item_id, _request_failure(error))
 
         if result.state == "finalized":
             logger.info(f"{GREEN}Completed")
@@ -705,14 +749,21 @@ class Download:
                 is_mp3=is_mp3,
             )
 
+        track_id = track_metadata.get("id")
         if os.path.isfile(final_file):
             logger.info(f"{OFF}{track_title} was already downloaded")
-            return DownloadResult("finalized", "existing_file", (final_file,))
+            return self._emit(
+                "track",
+                track_id,
+                DownloadResult("finalized", "existing_file", (final_file,)),
+            )
 
         url = track_url_dict.get("url")
         if not url:
             logger.info(f"{OFF}Track not available for download")
-            return DownloadResult("failed", "missing_url")
+            return self._emit(
+                "track", track_id, DownloadResult("failed", "missing_url")
+            )
 
         filename = os.path.join(root_dir, f".qdl-{uuid.uuid4().hex}.tmp")
         descriptor = os.open(
@@ -742,18 +793,28 @@ class Download:
             except Exception as e:
                 logger.error(f"{RED}Error tagging the file: {e}", exc_info=True)
                 finalized_paths = (final_file,) if os.path.isfile(final_file) else ()
-                return DownloadResult("failed", "tagging_error", finalized_paths)
+                return self._emit(
+                    "track",
+                    track_id,
+                    DownloadResult("failed", "tagging_error", finalized_paths),
+                )
 
             if not os.path.isfile(final_file):
                 logger.error(f"{RED}Error tagging the file: no final file produced")
-                return DownloadResult("failed", "tagging_error")
+                return self._emit(
+                    "track", track_id, DownloadResult("failed", "tagging_error")
+                )
             if self.download_history is not None:
                 self.download_history.record_finalized(
                     track_id=track_metadata["id"],
                     path=final_file,
                     requested_quality=int(self.quality),
                 )
-            return DownloadResult("finalized", "downloaded", (final_file,))
+            return self._emit(
+                "track",
+                track_id,
+                DownloadResult("finalized", "downloaded", (final_file,)),
+            )
         finally:
             try:
                 os.remove(filename)
@@ -776,32 +837,45 @@ class Download:
         expected_media,
         is_mp3,
     ):
+        track_id = track_metadata["id"]
         url = track_url_dict.get("url")
         if not url:
             logger.info(f"{OFF}Track not available for download")
-            return DownloadResult("failed", "missing_url")
+            return self._emit(
+                "track", track_id, DownloadResult("failed", "missing_url")
+            )
 
         if expected_media is None:
             logger.error(f"{RED}Media response did not identify a supported format")
-            return DownloadResult("failed", "media_error")
+            return self._emit(
+                "track", track_id, DownloadResult("failed", "media_error")
+            )
 
         decision = self._destination_decision(
-            track_id=track_metadata["id"],
+            track_id=track_id,
             final_file=final_file,
             expected_media=expected_media,
         )
         if isinstance(decision, Reuse):
             logger.info(f"{OFF}{track_metadata.get('title')} was already downloaded")
-            return DownloadResult("finalized", "verified_artifact", (final_file,))
+            return self._emit(
+                "track",
+                track_id,
+                DownloadResult("finalized", "verified_artifact", (final_file,)),
+            )
         if isinstance(decision, Conflict):
             logger.error(f"{RED}Destination path is already occupied: {final_file}")
-            return DownloadResult("failed", "path_conflict")
+            return self._emit(
+                "track", track_id, DownloadResult("failed", "path_conflict")
+            )
 
         try:
             transaction = _DestinationTransaction.create(final_file)
         except OSError as error:
             logger.error(f"{RED}Could not create private download directory: {error}")
-            return DownloadResult("failed", "publish_error")
+            return self._emit(
+                "track", track_id, DownloadResult("failed", "publish_error")
+            )
         try:
             download_with_progress(
                 url,
@@ -844,7 +918,7 @@ class Download:
 
         except _TransactionFailure as error:
             transaction.abort()
-            return DownloadResult("failed", error.reason)
+            return self._emit("track", track_id, DownloadResult("failed", error.reason))
         except BaseException:
             transaction.abort()
             raise
@@ -857,10 +931,16 @@ class Download:
                 raise
             if recorded != final_artifact:
                 transaction.retain_recovery()
-                return DownloadResult("failed", "publish_error")
+                return self._emit(
+                    "track", track_id, DownloadResult("failed", "publish_error")
+                )
 
+        # Report the published file before cleanup, which an interrupt can stop.
+        result = self._emit(
+            "track", track_id, DownloadResult("finalized", "downloaded", (final_file,))
+        )
         transaction.commit()
-        return DownloadResult("finalized", "downloaded", (final_file,))
+        return result
 
     def _is_mp3(self):
         return int(self.quality) == 5
