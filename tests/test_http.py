@@ -348,3 +348,21 @@ def test_chunked_incomplete_read_is_a_truncated_transfer(tmp_path, monkeypatch):
 )
 def test_retryability_of_status_and_rate_limit_errors(error, retryable):
     assert http.is_retryable(error) is retryable
+
+
+def test_truncated_metadata_response_is_retryable_and_hides_the_url(monkeypatch):
+    class CutShort(FakeResponse):
+        def read(self, size=-1):
+            raise IncompleteRead(b'{"user":', 40)
+
+    monkeypatch.setattr(http, "urlopen", lambda request, timeout: CutShort())
+
+    with pytest.raises(http.HttpTruncatedError) as error:
+        http.get(
+            "https://www.qobuz.com/api.json/0.2/user/login",
+            params={"email": "a@b.c", "password": "SECRET_SENTINEL"},
+        )
+
+    assert http.is_retryable(error.value) is True
+    assert "SECRET_SENTINEL" not in str(error.value)
+    assert "qobuz.com" not in str(error.value)

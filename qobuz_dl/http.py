@@ -301,6 +301,9 @@ def get(
         raise _request_error(exc.reason) from exc
     except OSError as exc:
         raise _request_error(exc) from exc
+    except http.client.IncompleteRead as exc:
+        # The message omits the URL: an API URL can carry credentials.
+        raise HttpTruncatedError("The response was cut short") from exc
     except http.client.HTTPException as exc:
         raise HttpRequestError(str(exc)) from exc
     except ValueError as exc:
