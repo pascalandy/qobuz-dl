@@ -1,9 +1,32 @@
 import io
+import os
 import subprocess
 import sys
 import time
 
 import pytest
+
+# Variables from the developer's shell that would change what a test observes
+# or, for config lookup, point a test at the real user config and database.
+_HOST_VARIABLES = (
+    "NO_COLOR",
+    "TERM",
+    "QOBUZ_DL_DEBUG",
+    "QOBUZ_DL_CONFIG",
+    "XDG_CONFIG_HOME",
+    "CHECK_DEBUG",
+    "VERIFY_INSTALL_DEBUG",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(monkeypatch):
+    """Clear host variables; child processes inherit the cleaned environment."""
+    for name in _HOST_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    for name in list(os.environ):
+        if name.startswith("QOBUZ_DL_LIVE"):
+            monkeypatch.delenv(name)
 
 
 class _Terminal(io.StringIO):

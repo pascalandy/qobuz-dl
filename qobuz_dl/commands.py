@@ -1,7 +1,14 @@
 import argparse
 from importlib import metadata
 
-from qobuz_dl.console import EXIT_CODE_MEANINGS, ExitCode, Parser, epilog
+from qobuz_dl.console import (
+    EXIT_CODE_MEANINGS,
+    ExitCode,
+    Parser,
+    epilog,
+    parse_duration,
+)
+from qobuz_dl.http import DEFAULT_TIMEOUT
 
 QUALITY_HELP = "5=MP3 320, 6=FLAC lossless, 7=24-bit <=96kHz, 27=24-bit >96kHz"
 QUALITY_CHOICES = (5, 6, 7, 27)
@@ -11,6 +18,7 @@ RUN_COMMAND = f"uvx --from {FORK_SOURCE} qobuz-dl"
 RESET_COMMAND = f"{RUN_COMMAND} -r"
 PROG = "qobuz-dl"
 DEBUG_ENV = "QOBUZ_DL_DEBUG"
+CONFIG_ENV = "QOBUZ_DL_CONFIG"
 INSTALLED_NOTE = f"Installed users may replace '{RUN_COMMAND}' with 'qobuz-dl'."
 DRY_RUN_NOTE = (
     "--dry-run prints candidate paths, and --json marks them 'planned' with an\n"
@@ -104,6 +112,23 @@ def add_global_options(parser, *, suppress_defaults):
         help=(
             "log in and look up metadata, then print where each track would go, "
             "writing nothing"
+        ),
+    )
+    options.add_argument(
+        "-c",
+        "--config",
+        metavar="PATH",
+        default=default if suppress_defaults else None,
+        help=(f"use this config file, and the database beside it; also {CONFIG_ENV}"),
+    )
+    options.add_argument(
+        "--timeout",
+        metavar="DURATION",
+        type=parse_duration,
+        default=default if suppress_defaults else DEFAULT_TIMEOUT,
+        help=(
+            "time limit for each network request, such as 30, 45s, or 2m "
+            f"(default: {DEFAULT_TIMEOUT}s)"
         ),
     )
     options.add_argument(
@@ -371,14 +396,18 @@ def qobuz_dl_args(
                 f"{RUN_COMMAND} dl urls.txt --directory Music --no-cover",
                 f"{RUN_COMMAND} fun --limit 10",
                 f'{RUN_COMMAND} lucky --type track --limit 3 "artist song"',
-                f"{RUN_COMMAND} --reset",
+                f"{RUN_COMMAND} --reset --email me@example.com --password-file -",
             ),
             TOP_LEVEL_EXIT_CODES,
             notes=(
                 INSTALLED_NOTE,
                 f"Use '{RUN_COMMAND} help <command>' for command-specific options.",
-                "For first-time setup, run --reset.",
-                "--json prints one object for dl, lucky, --show-config, and --purge.",
+                "For first-time setup, run --reset; with --email and --password-file",
+                "it needs no terminal and uses the default folder and quality.",
+                f"Config lookup: --config, then {CONFIG_ENV}, then",
+                "$XDG_CONFIG_HOME/qobuz-dl/config.ini, ~/.config/qobuz-dl/config.ini,",
+                "or %APPDATA%\\qobuz-dl\\config.ini; the database sits beside the config.",
+                "--json prints one object for dl, lucky, --show-config, --purge, and --reset.",
                 "Docs: https://github.com/pascalandy/qobuz-dl",
             ),
         ),
@@ -400,6 +429,13 @@ def qobuz_dl_args(
         "--show-config",
         action="store_true",
         help="show config path, database path, and redacted config values",
+    )
+    setup = parser.add_argument_group("setup without prompts (with --reset)")
+    setup.add_argument("--email", metavar="EMAIL", help="Qobuz account email")
+    setup.add_argument(
+        "--password-file",
+        metavar="PATH",
+        help="file whose first line is the password, or - to read stdin",
     )
     add_global_options(parser, suppress_defaults=False)
 

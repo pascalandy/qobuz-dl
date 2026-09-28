@@ -325,3 +325,13 @@ def test_without_flags_drops_only_diagnostic_options(argv, expected):
     parser = qobuz_dl_args()
 
     assert console.without_flags(parser, argv, console.DIAGNOSTIC_FLAGS) == expected
+
+
+def test_redact_masks_email_option_values_but_not_prose():
+    assert console.redact("qobuz-dl --reset --email me@example.com") == (
+        "qobuz-dl --reset --email <redacted>"
+    )
+    assert console.redact("--email=me@example.com") == "--email=<redacted>"
+    assert console.redact("needs --email and --password-file") == (
+        "needs --email and --password-file"
+    )

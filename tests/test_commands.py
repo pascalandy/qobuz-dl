@@ -411,7 +411,7 @@ def test_reset_exits_before_client_initialization(
         def __init__(self, *args, **kwargs):
             pytest.fail("reset must not initialize the Qobuz client")
 
-    def fake_reset(target):
+    def fake_reset(target, **options):
         reset_calls.append(target)
         return "reset-complete"
 
@@ -434,7 +434,7 @@ def test_first_run_reset_only_resets_once(monkeypatch, tmp_path, terminal_stdin)
         def __init__(self, *args, **kwargs):
             pytest.fail("reset must not initialize the Qobuz client")
 
-    def fake_reset(target):
+    def fake_reset(target, **options):
         reset_calls.append(target)
         return "reset-complete"
 
@@ -537,7 +537,7 @@ def test_download_first_run_creates_config_once_then_initializes_client(
         def download_sources(self, sources):
             downloaded.append([source.url for source in sources])
 
-    def fake_reset(target):
+    def fake_reset(target, **options):
         reset_calls.append(target)
         _write_valid_config(Path(target))
 
@@ -1060,7 +1060,11 @@ def test_real_console_script_purge_is_idempotent_success_without_config(tmp_path
         environment = {**os.environ, "APPDATA": str(config_root)}
     else:
         config_root = tmp_path / ".config"
-        environment = {**os.environ, "HOME": str(tmp_path)}
+        environment = {
+            **os.environ,
+            "HOME": str(tmp_path),
+            "XDG_CONFIG_HOME": str(config_root),
+        }
 
     config_path = config_root / "qobuz-dl"
     config_file = config_path / "config.ini"

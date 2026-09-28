@@ -21,12 +21,6 @@ LASTFM = "https://www.last.fm/user/example/playlists/9"
 URL = ALBUM
 
 
-@pytest.fixture(autouse=True)
-def plain_environment(monkeypatch):
-    for name in ("NO_COLOR", "TERM", "QOBUZ_DL_DEBUG"):
-        monkeypatch.delenv(name, raising=False)
-
-
 def _write_config(path, **overrides):
     values = {
         "email": "user@example.com",
@@ -273,7 +267,7 @@ def test_purge_json_reports_path_and_deletion(monkeypatch, tmp_path, capsys, exi
     [
         (["--json"], "choose a command"),
         (["fun", "--json"], "fun needs an interactive terminal"),
-        (["--reset", "--json"], "run it in a terminal"),
+        (["--reset", "--json"], "--reset without a terminal needs --email and"),
         (["dl", "https://evil.invalid/track/1", "--json"], "not a supported Qobuz"),
         (["--json", "dll", URL], "unknown command 'dll'"),
         (["--json", "--purge", "--show-config"], "cannot be combined"),

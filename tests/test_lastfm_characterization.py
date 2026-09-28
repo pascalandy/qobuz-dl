@@ -121,7 +121,7 @@ def test_lastfm_playlist_parsing_sanitizes_title_downloads_found_tracks_and_obey
 
     playlist_path = str(tmp_path / "My Lastfm Playlist")
     assert requested_urls == [
-        ("https://www.last.fm/user/example/library/playlists/1", 10)
+        ("https://www.last.fm/user/example/library/playlists/1", 30)
     ]
     assert queries == [
         ("Alpha Artist First Song", "track", 1, True),

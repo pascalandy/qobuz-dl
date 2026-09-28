@@ -371,6 +371,8 @@ _SECRET_START = r"(?:(?<![a-z0-9_])|(?<=%[0-9a-f]{2}))"
 _SECRET_PARAMETER = re.compile(
     rf"(?i){_SECRET_START}({_SECRET_NAMES})(=|%3D)((?:(?!%26)[^&\s'\"<>])+)"
 )
+# An account option on a command line, as in an echoed command.
+_SECRET_OPTION = re.compile(r"(--email)(=|\s+)([^\s@]+@\S+)")
 _SECRET_FIELD = re.compile(
     rf"(?i)([\"']?\b(?:{_SECRET_NAMES})\b[\"']?\s*:\s*[\"'])([^\"']*)([\"'])"
 )
@@ -380,6 +382,7 @@ REDACTED = "<redacted>"
 def redact(text: str) -> str:
     """Mask credentials in query strings, encoded URLs, and quoted fields."""
     text = _SECRET_PARAMETER.sub(rf"\1\2{REDACTED}", text)
+    text = _SECRET_OPTION.sub(rf"\1\2{REDACTED}", text)
     return _SECRET_FIELD.sub(rf"\1{REDACTED}\3", text)
 
 
