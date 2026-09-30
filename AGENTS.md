@@ -54,7 +54,7 @@ Doc map: [`docs/INDEX.md`](docs/INDEX.md)
 - `README.md` = concise front door
 - Detailed docs under `docs/`
 - Update docs when behavior/tooling/packaging/dep policy changes
-- Use `pa-doc-update` when docs impacted by impl change
+- Use `andy-mode ; docs` when docs impacted by impl change
 
 ## Start checklist
 
