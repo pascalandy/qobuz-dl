@@ -37,6 +37,7 @@ Source in the named checkout owns current behavior. Feature documents label futu
 - [Qobuz API direction](feat/2026-05-26-qobuz-api-direction/vision-qobuz-api-direction.md) keeps read-only source expansion within the downloader mission
 - [Bandwidth limit vision](feat/2026-06-22-bandwidth-limit-vision/vision-bandwidth-limit.md) — direction check for optional download pacing and central rate-limit/backoff handling.
 - [Download history satisfaction policy](feat/2026-09-12-download-history-policy/plan-download-history-satisfaction.md) defines when history may satisfy a request and records the follow-up implementation slices.
+- [`top` plan](feat/2026-11-18-top-artist-playback/plan-top-artist-playback.md) proposes a command that plays an artist's popular tracks on a Qobuz Connect streamer, with the gates to pass before any build; proposed behavior only
 
 ## Historical design
 
