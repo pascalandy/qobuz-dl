@@ -108,10 +108,10 @@ Enquête du 2026-11-19 sur la piste B de l'issue #101, par deux agents indépend
 - [P] Autres ports ouverts sur le N100 : 80 (Apache, points d'entrée `/php/`), 111 et 40038 (RPC), 139 et 445 (SMB), 5000 (AirPlay), 13019 (serveur Python, rôle inconnu). Ni SSH ni UPnP
 - [P] Qobuz est connecté dans Conductor comme service intégré : le N100 lit déjà Qobuz par lui-même
 
-Essai de lecture, prêt mais non lancé :
+Essai de lecture, tel que proposé dans l'issue #101, prêt mais non lancé. La preuve que le plan exige est plus large : voir les critères de sortie de `waves/W01-n100-playback-proof.md`.
 
 - [D] L'essai attend l'accord de Pascal, parce qu'il change ce qui joue dans la maison et laisse une entrée de plus dans la file
-- [S] Forme prévue : ajouter une seule piste Qobuz à la fin de la file avec `addid "qobuz://<id>"`, la démarrer avec `playid <id de file>`, puis lire `status`. Réussite : le N100 joue la piste et MPD rapporte `state: play` sur cette entrée
+- [S] Forme proposée : ajouter une seule piste Qobuz à la fin de la file avec `addid "qobuz://<id>"`, la démarrer avec `playid <id de file>`, puis lire `status`. Réussite : le N100 joue la piste et MPD rapporte `state: play` sur cette entrée
 
 L'adresse du N100 sur le réseau local est dans l'issue #101.
 

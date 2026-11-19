@@ -14,7 +14,7 @@ Prouver qu'un script sur om1 fait jouer des pistes Qobuz sur le N100, et lever l
 - [ ] Pendant qu'une autre piste joue, un script sur om1 ajoute deux pistes Qobuz et démarre la première : le PM l'entend prendre la place de ce qui jouait, et MPD rapporte `state: play` sur cette entrée
 - [ ] Une fois le script terminé, sans téléphone ni Conductor, le N100 passe seul à la deuxième piste ajoutée
 - [ ] Les pistes entendues sont celles dont les identifiants Qobuz ont été envoyés, et ce que MPD rapporte concorde avec ce que le PM entend pendant toute la séance
-- [ ] Depuis om1, une lecture authentifiée par `app_id` et `user_auth_token` réussit avec la config de la voûte ; SpotAPI rend une liste Popular ordonnée, et les réponses de Qobuz portent chaque champ que la correspondance lit. Le résultat consigne la version de SpotAPI et le secret épinglé qui ont servi
+- [ ] Depuis om1, une lecture authentifiée par `app_id` et `user_auth_token` réussit avec la config de la voûte ; SpotAPI rend une liste Popular ordonnée et non vide, avec le titre, l'artiste et la durée de chaque entrée, et les réponses de Qobuz portent chaque champ que la correspondance lit. Le résultat consigne la version de SpotAPI et le secret épinglé qui ont servi
 - [ ] Les décisions sur la règle de file et le client MPD sont dans `decisions.md`, et la page de design consigne le résultat de G1, la voie de lecture révisée et les portes retirées, avec un lien vers `plan/`
 
 ## Scope
