@@ -67,7 +67,7 @@ flowchart LR
 
 ## 6. Liste Popular de Spotify
 
-- [P] L'API officielle de Spotify est fermée pour cet usage depuis le 2026-02-11 ([guide de migration](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide))
+- [P] L'API officielle de Spotify est fermée pour cet usage : depuis le 2026-02-11, une nouvelle app en mode développement n'a plus accès aux titres populaires d'un artiste ([guide de migration](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide))
 - [S] SpotAPI lit les titres populaires sans identifiants : `Artist.query_artists` trouve l'identifiant, `get_artist` lit la page ([SpotAPI](https://spotapi.readthedocs.io/en/latest/reference/)). La voie dépend du lecteur web et reste fragile. Non essayée depuis om1 (ancienne porte G8)
 - [P] Spotify montre 10 titres au plus
 - [D] `top` retient un artiste seulement quand un seul candidat porte exactement le nom demandé, sans tenir compte de la casse ni des accents. Sinon, il liste les candidats et sort en erreur sans rien écrire
@@ -120,7 +120,7 @@ L'adresse du N100 sur le réseau local est dans l'issue #101.
 - [O] Le caractère obligatoire de la liste, maintenant que la lecture n'en dépend plus (section 14). Elle garde sa valeur pour retrouver la sélection dans Conductor
 - [D] La liste est privée et porte le nom fixe `Top · <Artiste>`
 - [D] `top` reconnaît ses listes par un marqueur dans la description, `qobuz-dl top · <identifiant Spotify de l'artiste>`, jamais par le nom seul
-- [D] Remplacement : créer la liste privée avec le marqueur, ajouter les pistes, la relire et vérifier le marqueur, qu'elle est privée et que les identifiants égalent les pistes retenues, dans l'ordre. Si l'ajout ou la vérification échoue, supprimer la liste créée et laisser les anciennes. Si la vérification passe, supprimer toute autre liste qui porte le marqueur de cet artiste, puis lister de nouveau
+- [D] Remplacement : créer la liste privée avec le marqueur, ajouter les pistes, la relire et vérifier le marqueur, qu'elle est privée et que les identifiants égalent les pistes retenues, dans l'ordre. Si l'ajout ou la vérification échoue, supprimer la liste créée, laisser les anciennes et sortir en erreur ; si cette suppression ne peut pas être confirmée, le message donne l'identifiant de la liste laissée. Si la vérification passe, supprimer toute autre liste qui porte le marqueur de cet artiste, puis lister de nouveau ; s'il en reste une, la nommer et sortir en erreur, même quand la lecture réussit
 - [D] Sans aucune correspondance, `top` n'écrit rien
 - [D] `qobuz_dl/http.py` gagne un POST. Les écritures passent en `application/x-www-form-urlencoded`, alors que le client fixe `application/json` pour toute la session (`qobuz_dl/qopy.py`)
 - [D] `playlist/deleteTracks` est évité : la capture de référence le marque comme non vérifié
@@ -154,7 +154,7 @@ L'adresse du N100 sur le réseau local est dans l'issue #101.
 ## 13. Pistes de lecture non retenues
 
 - [D] **Qobuz Connect vers le N100.** Décision du 2026-11-19 : Qobuz Connect ne peut pas piloter ce N100. [P] Dans Conductor, les services de contrôle externes ne listent que AirPlay et Spotify ; l'app Qobuz ne montre pas le N100 ; le logiciel du N100 (5.24.133) et Conductor iOS (5.12.0) sont à jour. La porte G1 de la page de design a échoué
-- [O] **A. Liste seulement.** `top` crée la liste et Pascal la lance dans Conductor. Aucune inconnue, un geste manuel à chaque écoute. C'est le repli si l'essai de lecture échoue
+- [O] **A. Liste seulement.** `top` crée la liste et Pascal la lance dans Conductor. Un geste manuel à chaque écoute. Une inconnue reste : l'écriture dans le compte (section 9, ancienne porte G7). C'est le repli le plus proche si l'essai de lecture échoue, sur décision de Pascal
 - [O] **C. Qobuz Connect vers un autre appareil.** Deux autres appareils de la maison annoncent `_qobuz-connect._tcp`. La musique ne passe alors plus par le N100 ni par son DAC
 - [O] **D. AirPlay vers le N100.** Qualité limitée à celle du CD ; om1 devient le lecteur
 - [O] **E. Spotify Connect sur le N100.** Exige un abonnement Spotify payant et sort du dépôt

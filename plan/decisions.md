@@ -2,7 +2,7 @@
 
 La décision sur les vagues initiales et leur raison sera consignée quand le PM approuvera le point de contrôle (Procédure A, étape 12). Elle prendra le prochain ID libre.
 
-## D001: Qobuz Connect sort du plan, la lecture passe par le port MPD du N100
+## D001: Qobuz Connect sort du plan, le port MPD du N100 est la voie à prouver
 - Date: 2026-11-19
 - Trigger: décision du PM (issue #101)
 - Decision: Qobuz Connect ne peut pas piloter ce N100. Le crate Rust `connect/`, les JWT Connect et les portes G1, G4, G5, G5b et G6 de la page de design ne sont plus la voie de lecture. La voie étudiée est la piste B : des commandes MPD envoyées en Python au port TCP 12019 du N100, sur le réseau local

@@ -7,7 +7,7 @@ label: wave:W05
 
 # W05: qobuz-playlist
 
-Vague conditionnelle : voir la question 3 de `01-project.md`. Si le PM juge la liste inutile, la vague passe à `dropped`. Si la séance de W01 échoue, elle devient obligatoire et remonte en deuxième place.
+Vague conditionnelle : voir la question 4 de `01-project.md`. Si le PM juge la liste inutile, la vague passe à `dropped`. Si la séance de W01 échoue, le PM décide à la revue de W01 si la liste devient le résultat du projet ; la vague garde son ID.
 
 ## Goal
 La sélection de `top` est aussi une liste privée `Top · <Artiste>` du compte Qobuz, remplacée à chaque relance.
@@ -16,6 +16,7 @@ La sélection de `top` est aussi une liste privée `Top · <Artiste>` du compte 
 - [ ] Après `qobuz top "Dire Straits"`, le compte a une seule liste qui porte le marqueur de cet artiste : elle est privée, nommée `Top · Dire Straits`, et ses pistes égalent la sélection, dans l'ordre
 - [ ] Après une deuxième exécution, le compte a encore une seule liste avec ce marqueur, et son identifiant a changé
 - [ ] Si la vérification de la nouvelle liste échoue, `top` la supprime, laisse les anciennes et sort en erreur
+- [ ] Une liste que `top` n'a pas pu supprimer, la nouvelle ou une ancienne au même marqueur, est nommée par son identifiant dans la sortie, et `top` sort en erreur même si la lecture a réussi
 - [ ] Une sélection vide n'écrit rien dans le compte
 
 ## Scope

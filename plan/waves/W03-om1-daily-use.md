@@ -19,6 +19,6 @@ Le PM tape `qobuz top "<artiste>"` dans un terminal d'om1, et la commande instal
 ## Scope
 - La recette `just install` : `uv tool install` depuis le checkout, avec l'extra `top` ([BC §11](../00-business-case.md#11-machine-et-installation))
 - La branche Linux de la fonction zsh `qobuz` des dotfiles, qui passe le fichier temporaire de la voûte avec `--config`. Ce travail est dans le dépôt `pascalandy/dotfiles` : voir la question 10 de `01-project.md`
-- L'adresse du N100 : d'où `top` la lit sur om1. À fixer quand la vague passe à `planned`
+- L'adresse du N100, fournie à la commande installée de la façon que W02 a fixée
 - Les documents que `top` rend périmés : `docs/dependencies.md`, `docs/packaging.md`, `docs/architecture.md`, `docs/cli.md` ([BC §12](../00-business-case.md#12-contraintes-du-projet))
 - Hors de la vague : macOS, et tout fichier de config permanent sur om1
